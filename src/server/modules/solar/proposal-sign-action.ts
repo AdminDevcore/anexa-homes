@@ -1,7 +1,9 @@
 "use server";
 
+import { after } from "next/server";
 import { headers } from "next/headers";
 import { acceptSolarProposal } from "./proposal-public";
+import { kickSignedProposalFiling } from "./signed-filing-kick";
 import type { ProposalCertificate } from "@/lib/proposal-signature";
 
 /**
@@ -23,7 +25,7 @@ export async function signSolarProposalAction(input: {
 }): Promise<{ ok: boolean; error?: string; certificate?: ProposalCertificate }> {
   const h = await headers();
   const ip = h.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
-  return acceptSolarProposal(input.token, {
+  const { proposalId, ...result } = await acceptSolarProposal(input.token, {
     name: input.name,
     signature: input.signature,
     signatureType: input.signatureType,
@@ -32,4 +34,10 @@ export async function signSolarProposalAction(input: {
     ip,
     userAgent: h.get("user-agent"),
   });
+
+  // The signed PDF is filed into the deal's Proposal folder as part of signing,
+  // once the customer already has their certificate — see signed-filing-kick.ts.
+  if (result.ok && proposalId) after(() => kickSignedProposalFiling(proposalId));
+
+  return result;
 }

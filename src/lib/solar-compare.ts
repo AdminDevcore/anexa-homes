@@ -105,8 +105,8 @@ export type CompareBasis = {
   onTopAdderTotalCents: number;
   /**
    * The storage on this job, at its catalogue price — the same figure on every
-   * column, for the same reason the on-top adders are. A battery does not cost
-   * more because the money is dearer.
+   * column, for the same reason the on-top adders are. Whether a column's
+   * partner takes its dealer fee on it is that partner's own switch.
    */
   batteryPriceCents?: number;
   downPaymentCents: number;
@@ -361,7 +361,7 @@ function purchaseRow(
     // what the household is actually left holding. The adders are the one
     // exclusion — separate work, and it raises the price and stays raised.
     systemPriceCents: priced.baseStickerCents,
-    batteryPriceCents: priced.batteryPriceCents,
+    batteryPriceCents: priced.batteryStickerCents,
     systemWatts: priced.systemWatts,
     creditRates: basis.credits?.rates ?? null,
     creditClaims: basis.credits?.claims ?? null,

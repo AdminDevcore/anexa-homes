@@ -6,6 +6,7 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { leadAccessible } from "@/server/rbac/lead-access";
+import { checkSignedLock } from "./signed-lock";
 import { recomputeDesignFigures } from "./recompute";
 import { DEFAULT_BATTERY_QTY } from "./settings";
 
@@ -69,6 +70,10 @@ export async function setSolarDesignEquipmentAction(input: z.infer<typeof schema
   const lead = await leadAccessible(user, leadId);
   if (!lead) return fail("Deal not found.");
   if (lead.vertical !== "solar") return fail("This is not a solar deal.");
+
+  // Panel count, inverter and battery quantity are all contract economics.
+  const lock = await checkSignedLock(user, lead.id, "the system equipment");
+  if (lock.blocked) return fail(lock.error);
 
   // Every id has to be OUR catalogue, and the right kind of thing. Passing a
   // battery id into the module slot would size the system off a kWh figure.

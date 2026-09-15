@@ -12,8 +12,8 @@ import { recordStageEntry } from "@/server/modules/pipeline/stage-history";
 import { runAutomations } from "@/server/modules/automations/engine";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { notifyProjectStatusChanged } from "@/server/modules/projects/status-events";
-import { solarStageRequirementError } from "@/server/modules/pipeline/solar-stage-requirements";
 import { stageEntryData } from "@/server/modules/pipeline/stage-entry-data";
+import { stageMoveError } from "@/server/modules/pipeline/stage-guard";
 
 /** Ensures the lead exists AND is within the user's row-level scope. */
 async function assertLeadInScope(userCompanyId: string, scope: Prisma.LeadWhereInput, leadId: string) {
@@ -115,21 +115,33 @@ export async function moveLeadStage(input: z.infer<typeof moveSchema>) {
   // Validate stage belongs to this company.
   const stage = await prisma.pipelineStage.findFirst({
     where: { id: parsed.data.stageId, pipeline: { companyId: user.companyId } },
-    select: { id: true, key: true, name: true, position: true, defaultBlocker: true, stageType: true },
+    select: {
+      id: true,
+      key: true,
+      name: true,
+      position: true,
+      isLost: true,
+      defaultBlocker: true,
+      stageType: true,
+      pipelineId: true,
+    },
   });
   if (!stage) return { ok: false as const, error: "Invalid stage." };
 
-  const lead = await prisma.lead.findUnique({
-    where: { id: parsed.data.leadId },
-    select: { vertical: true },
+  // M1 Funding is certified by the funding desk, and Contract Signed is earned
+  // by two documents — neither by a drag. See pipeline/stage-guard.ts.
+  const current = await prisma.lead.findFirst({
+    where: { id: parsed.data.leadId, companyId: user.companyId },
+    select: { vertical: true, stageId: true },
   });
-  const requirementError = await solarStageRequirementError({
+  if (!current) return { ok: false as const, error: "Lead not found or access denied." };
+  const moveError = await stageMoveError({
     companyId: user.companyId,
-    leadId: parsed.data.leadId,
-    vertical: lead?.vertical ?? "roofing",
-    stage,
+    actor: user,
+    lead: { id: parsed.data.leadId, vertical: current.vertical, stageId: current.stageId },
+    targetStageId: stage.id,
   });
-  if (requirementError) return { ok: false as const, error: requirementError };
+  if (moveError) return { ok: false as const, error: moveError };
 
   await prisma.lead.update({
     where: { id: parsed.data.leadId },
@@ -212,7 +224,10 @@ export async function cancelLeadAction(input: z.infer<typeof cancelSchema>) {
     // `project.status` so the cancellation only announces a status change when
     // one actually happened — cancelling an already-cancelled job should not
     // notify a second time.
-    select: { id: true, pipelineId: true, project: { select: { id: true, status: true } } },
+    select: {
+      id: true, pipelineId: true, vertical: true, stageId: true,
+      project: { select: { id: true, status: true } },
+    },
   });
   if (!lead?.pipelineId) return { ok: false as const, error: "This deal has no pipeline." };
 
@@ -227,6 +242,17 @@ export async function cancelLeadAction(input: z.infer<typeof cancelSchema>) {
       error: "No cancelled stage is configured. Mark one as Lost in Settings → Pipeline.",
     };
   }
+
+  // A lost stage is never past M1 Funding or Contract Signed, so this passes
+  // today. It is asked anyway, like every other move, so the day either rule
+  // changes it is answered here too — see pipeline/stage-guard.ts.
+  const moveError = await stageMoveError({
+    companyId: user.companyId,
+    actor: user,
+    lead: { id: lead.id, vertical: lead.vertical, stageId: lead.stageId },
+    targetStageId: stage.id,
+  });
+  if (moveError) return { ok: false as const, error: moveError };
 
   const { reason } = parsed.data;
   await prisma.$transaction([

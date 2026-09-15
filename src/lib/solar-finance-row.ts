@@ -38,8 +38,8 @@ export type FinanceInput = {
   onTopAdderTotalCents?: number;
   /**
    * The storage on this job, at its catalogue price, already resolved by
-   * `batteryChargeCents`. Rides on top exactly as a roof does, so it is added
-   * to the contract below and kept out of the ceiling solve above it.
+   * `batteryChargeCents`. Kept out of the ceiling solve above and added to the
+   * contract below, grossed up by the programme's dealer fee.
    */
   batteryPriceCents?: number;
   rateMillsPerKwh?: number | null;

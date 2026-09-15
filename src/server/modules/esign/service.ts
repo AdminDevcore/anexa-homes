@@ -23,6 +23,7 @@ import {
 import { buildEnvelopeSnapshot, buildSnapshotFromTemplate } from "./build-snapshot";
 import { resolveSignerForTemplate, signerCtxFromSnapshot, toSnapshotSigner } from "./signers";
 import { formatDate } from "@/lib/format";
+import { advanceToContractSignedIfReady } from "@/server/modules/pipeline/contract-signed";
 
 // ---------------------------------------------------------------------------
 // Send for signature (staff)
@@ -911,6 +912,14 @@ async function finalizePackage(packageId: string) {
   }
 
   await fireEvent({ companyId: pkg.companyId, event: "document_completed", documentId: pkg.id, leadId: pkg.leadId });
+
+  // A completed contract is one of the two documents a solar deal's Contract
+  // Signed stage waits for; the signed proposal is the other. Re-evaluated here
+  // so the deal advances the moment the second one lands, in either order.
+  // Best-effort inside — a finished envelope never fails on the pipeline.
+  if (pkg.leadId && pkg.vertical === "solar") {
+    await advanceToContractSignedIfReady({ companyId: pkg.companyId, leadId: pkg.leadId, via: "document" });
+  }
 
   // Chain the next step off a document everyone has signed. The package
   // carries its own workspace, which is what makes this safe here: finalize

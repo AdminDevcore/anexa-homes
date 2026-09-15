@@ -226,6 +226,7 @@ async function main() {
           position: i,
           isWon: s.isWon ?? false,
           countsAsSold: s.countsAsSold ?? false,
+          milestone: s.milestone ?? null,
           // Solar stages carry their own SLA model: internally-owned stages get
           // a hard deadline that escalates to the owning department role;
           // externally-blocked stages get a follow-up cadence and NO deadline,
@@ -897,6 +898,81 @@ async function main() {
     }
   }
 
+  /* ── ROW-SCOPE FIXTURES ────────────────────────────────────────────────────
+   * The E2E suite signs in as admin@ almost everywhere, and an admin's
+   * `listScope` is `{ companyId }` — no row narrowing at all. That makes every
+   * row-scope gate in the product a no-op under test, so a regression in the
+   * one class of bug this codebase is most exposed to would pass CI in silence.
+   *
+   * These two fixtures exist so the boundary can be asserted from BOTH sides,
+   * by people who are not admins:
+   *
+   *  - Every other seeded lead belongs to Tyler (rep@). Dylan (rep2@) gets one
+   *    of his own, so "a rep cannot reach another rep's deal" can be checked in
+   *    each direction rather than only outward from Tyler.
+   *
+   *  - Carlos (installer@) is named on the INSTALL VISIT of Dylan's job and is
+   *    deliberately NOT on a crew assigned to it. Being on Tuesday's install is
+   *    not being admitted to the homeowner's record: he must reach
+   *    /portal/jobs/<projectId> and 404 on /portal/leads/<leadId>. Crew
+   *    membership would grant the deal as well (installerCrewFilter), which is
+   *    exactly why this job has no crew - it is the per-visit path under test.
+   */
+  const repBLead = await prisma.lead.create({
+    data: {
+      companyId: company.id,
+      vertical: "roofing",
+      firstName: "Marisol",
+      lastName: "Vega",
+      email: "marisol.vega@example.com",
+      phone: "214-555-0188",
+      address: "1466 Kestrel Lane",
+      city: "Dallas",
+      state: "TX",
+      zip: "75214",
+      pipelineId: pipeline.id,
+      stageId: stageByKey["contract_signed"].id,
+      status: "open",
+      serviceType: "roofing",
+      // Distinct from every other seeded figure: insurance-estimate.spec.ts
+      // asserts on "$24,500" and a second lead at that number invites a
+      // false match in a list.
+      value: 31750,
+      sourceId: sources[0].id,
+      // Dylan's deal, start to finish - assigned AND created by him, so neither
+      // arm of the sales_rep branch in listScope lets anyone else in.
+      assignedRepId: users.rep2.id,
+      createdById: users.rep2.id,
+      notes: "Row-scope fixture: belongs to Dylan Foster (rep2@), nobody else.",
+    },
+  });
+
+  const repBProject = await prisma.project.create({
+    data: {
+      companyId: company.id,
+      leadId: repBLead.id,
+      projectNumber: `AH-${projNum++}`,
+      status: "not_started",
+      serviceType: "roofing",
+      address: repBLead.address,
+      city: repBLead.city,
+      state: repBLead.state,
+      zip: repBLead.zip,
+      contractValue: 31750,
+      installDate: daysFromNow(6),
+    },
+  });
+
+  await prisma.projectAssignee.create({
+    data: {
+      companyId: company.id,
+      projectId: repBProject.id,
+      userId: users.installer.id,
+      kind: "install",
+      role: "Crew Lead",
+    },
+  });
+
   // ── Knowledge Base / Training (role-gated) ────────────────────────────────
   const repTraining = await prisma.knowledgeCategory.create({
     data: {
@@ -1197,7 +1273,8 @@ async function main() {
   console.log("✅ Seed complete.");
   console.log("   Company: Anexa Homes (slug: anexa-homes)");
   console.log("   Login password for all users: Passw0rd!");
-  console.log("   Emails: owner@ admin@ manager@ rep@ pm@ installer@ office@ accounting@anexahomes.com");
+  console.log("   Emails: owner@ admin@ manager@ rep@ rep2@ canvasser@ pm@ installer@ office@ accounting@anexahomes.com");
+  console.log("   Row-scope fixtures: Marisol Vega belongs to rep2@; installer@ is on her install visit, not her crew.");
 }
 
 main()

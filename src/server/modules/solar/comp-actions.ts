@@ -57,7 +57,9 @@ export async function establishHistoricalCompAction(input: z.infer<typeof termsS
     return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid terms." };
   }
   const d = parsed.data;
-  if (!(await leadAccessible(user, d.leadId))) return { ok: false as const, error: "Deal not found." };
+  if (!(await leadAccessible(user, d.leadId))) {
+    return { ok: false as const, error: "Deal not found." };
+  }
 
   const res = await establishHistoricalComp({
     companyId: user.companyId,

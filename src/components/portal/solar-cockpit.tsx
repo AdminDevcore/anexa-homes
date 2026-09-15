@@ -218,6 +218,7 @@ export function SolarSystemMoneyPanel({
   estimate,
   payroll,
   canEdit,
+  canCertifyFunding,
 }: {
   leadId: string;
   money: SystemMoney | null;
@@ -229,6 +230,8 @@ export function SolarSystemMoneyPanel({
   /** What payroll generated for this deal. Null until it has, or if unreadable. */
   payroll: CommissionPayrollLine | null;
   canEdit: boolean;
+  /** Whether this viewer may record that the lender funded the deal. */
+  canCertifyFunding: boolean;
 }) {
   return (
     <div className="space-y-5">
@@ -372,6 +375,7 @@ export function SolarSystemMoneyPanel({
           )}
           <Block label="Rep commission">
             <RepCommission
+              canCertifyFunding={canCertifyFunding}
               leadId={leadId}
               row={commission}
               estimate={estimate}
@@ -496,8 +500,8 @@ function PriceLadder({
           hint on the row. */}
       {ladder.batteryPriceCents > 0 && (
         <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
-          The battery is billed at its catalogue price, on top of what the array itself is priced
-          per watt.
+          The battery is priced from the catalogue rather than per watt, so it does not move with the
+          rate above it.
         </p>
       )}
       {/* WHAT THE NET IS AND IS NOT. Two prices on one ladder invite exactly one
@@ -604,12 +608,14 @@ function RepCommission({
   estimate,
   payroll,
   canEdit,
+  canCertifyFunding,
 }: {
   leadId: string;
   row: CommissionLite | null;
   estimate: CommissionEstimate | null;
   payroll: CommissionPayrollLine | null;
   canEdit: boolean;
+  canCertifyFunding: boolean;
 }) {
   const [editing, setEditing] = React.useState(false);
   const est = estimate?.state === "estimate" ? estimate : null;
@@ -620,6 +626,7 @@ function RepCommission({
         leadId={leadId}
         existing={row}
         estimateCents={est?.netCents ?? null}
+        canCertifyFunding={canCertifyFunding}
         onDone={() => setEditing(false)}
       />
     );
@@ -866,12 +873,21 @@ function CommissionForm({
   leadId,
   existing,
   estimateCents,
+  canCertifyFunding,
   onDone,
 }: {
   leadId: string;
   existing: CommissionLite | null;
   /** The engine's figure, used to fill an empty box. Null when it has none. */
   estimateCents: number | null;
+  /**
+   * Whether this viewer may move the funding tick.
+   *
+   * The real control is in the server action — see `upsertSolarCommissionAction`
+   * — and this is only here so a rep is not offered a checkbox that will refuse
+   * them. Hiding it is not the enforcement.
+   */
+  canCertifyFunding: boolean;
   onDone: () => void;
 }) {
   const router = useRouter();
@@ -973,16 +989,27 @@ function CommissionForm({
           type="checkbox"
           aria-label="Funding received"
           checked={paid}
+          disabled={!canCertifyFunding}
           onChange={(e) => setPaid(e.target.checked)}
-          className="mt-0.5 size-4 shrink-0"
+          className="mt-0.5 size-4 shrink-0 disabled:opacity-50"
         />
-        <span>
+        <span className={canCertifyFunding ? undefined : "opacity-60"}>
           Funding received
           <span className="text-muted-foreground">
             {" — releases this deal to payroll, which cannot generate the rep's commission until " +
               "it is ticked. It is not the rep's payment: that is marked on the Commissions page. " +
               "Stamps today's date; unticking clears it."}
           </span>
+          {/*
+            SAID OUT LOUD RATHER THAN LEFT AS A DEAD TICK. A control that does
+            nothing and does not say why reads as a bug; this reads as a rule.
+            The server refuses it regardless — see upsertSolarCommissionAction.
+          */}
+          {!canCertifyFunding && (
+            <span className="mt-0.5 block font-medium text-muted-foreground">
+              Only an administrator or accounting can confirm funding.
+            </span>
+          )}
         </span>
       </label>
       <div className="flex gap-2">
@@ -1115,6 +1142,16 @@ export type FeedPost = {
   createdAt: string;
 };
 
+/** A change Nova made on the deal, as its audit trail records it. */
+export type NovaFeedEvent = {
+  id: string;
+  /** The person Nova acted for. */
+  actor: string;
+  text: string;
+  failed: boolean;
+  createdAt: string;
+};
+
 /**
  * One stream, like roofing's notes.
  *
@@ -1133,11 +1170,19 @@ export function SolarActivityFeed({
   leadId,
   posts,
   canPost,
+  novaEvents = [],
 }: {
   leadId: string;
   posts: FeedPost[];
   canPost: boolean;
+  /** Changes Nova made on this deal, from its audit trail. Shown in the same stream. */
+  novaEvents?: NovaFeedEvent[];
 }) {
+  const stream = [
+    ...posts.map((p) => ({ kind: "post" as const, at: p.createdAt, post: p })),
+    ...novaEvents.map((e) => ({ kind: "nova" as const, at: e.createdAt, event: e })),
+  ].sort((a, b) => b.at.localeCompare(a.at));
+
   const router = useRouter();
   const [body, setBody] = React.useState("");
   const [busy, setBusy] = React.useState(false);
@@ -1172,21 +1217,40 @@ export function SolarActivityFeed({
         </div>
       )}
 
-      {posts.length === 0 ? (
+      {stream.length === 0 ? (
         <p className="text-sm text-muted-foreground">Nothing here yet.</p>
       ) : (
         <ul className="space-y-3">
-          {posts.map((p) => (
-            <li key={p.id} className="rounded-lg border border-border p-3">
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span className="font-medium">{p.author}</span>
-                <span className="text-muted-foreground">
-                  {new Date(p.createdAt).toLocaleString()}
-                </span>
-              </div>
-              <p className="mt-1.5 whitespace-pre-wrap text-sm">{p.body}</p>
-            </li>
-          ))}
+          {stream.map((item) =>
+            item.kind === "post" ? (
+              <li key={item.post.id} className="rounded-lg border border-border p-3">
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="font-medium">{item.post.author}</span>
+                  <span className="text-muted-foreground">
+                    {new Date(item.post.createdAt).toLocaleString()}
+                  </span>
+                </div>
+                <p className="mt-1.5 whitespace-pre-wrap text-sm">{item.post.body}</p>
+              </li>
+            ) : (
+              <li
+                key={`nova-${item.event.id}`}
+                className="rounded-lg border border-dashed border-border p-3"
+                data-testid="nova-activity-item"
+              >
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="rounded-full bg-muted px-2 py-0.5 font-medium">Nova</span>
+                  <span className="text-muted-foreground">{`for ${item.event.actor}`}</span>
+                  <span className="text-muted-foreground">
+                    {new Date(item.event.createdAt).toLocaleString()}
+                  </span>
+                </div>
+                <p className={cn("mt-1.5 whitespace-pre-wrap text-sm", item.event.failed && "text-destructive")}>
+                  {item.event.text}
+                </p>
+              </li>
+            )
+          )}
         </ul>
       )}
     </div>

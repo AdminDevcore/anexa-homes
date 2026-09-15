@@ -52,10 +52,12 @@ export default async function LeadsPage({
       stage: { select: { name: true, color: true, isLost: true } },
       source: { select: { name: true } },
       assignedRep: { select: { firstName: true, lastName: true } },
+      // Solar's Rescheduled chip. A read only; roofing's list never shows it.
+      _count: { select: { appointmentReschedules: true } },
     },
   });
 
-  const rows = buildAppointmentRows(leads, fmt);
+  const rows = buildAppointmentRows(leads, fmt, dispositions);
   // The header counts what the list opens on — the live deals — so it agrees
   // with the All chip rather than with the raw query.
   const cancelled = rows.filter((r) => r.isCancelled).length;
@@ -91,6 +93,7 @@ export default async function LeadsPage({
           rows={rows}
           initialQuery={q ?? ""}
           configuredOutcomes={dispositionLabels(dispositions)}
+          vertical={vertical}
         />
 
       )}

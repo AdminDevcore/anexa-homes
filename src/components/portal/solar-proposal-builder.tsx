@@ -28,6 +28,10 @@ import { SolarEnergyPanel, type SolarEnergyView } from "@/components/portal/sola
 import { SolarStoragePanel, type SolarStorageView } from "@/components/portal/solar-storage-panel";
 import type { ProviderOption } from "@/server/modules/solar/providers";
 import type { VppDealFacts } from "@/lib/solar-provider-terms";
+import {
+  SignedContractLock,
+  type ContractLockState,
+} from "@/components/portal/solar/signed-contract-lock";
 
 export type StepId = "customer" | "energy" | "design" | "financing" | "generate";
 
@@ -128,6 +132,7 @@ export function SolarProposalBuilder({
   leadId,
   initialStep = "customer",
   canEditDeal,
+  contractLock,
   canCreateProposal,
   design,
   finance,
@@ -174,6 +179,8 @@ export function SolarProposalBuilder({
   initialStep?: StepId;
   /** Editing the design and its financing is a Lead permission... */
   canEditDeal: boolean;
+  /** Whether a signature has frozen this deal's money, and the way through. */
+  contractLock: ContractLockState;
   /** ...while generating a customer-facing proposal is its own. */
   canCreateProposal: boolean;
   /**
@@ -240,6 +247,11 @@ export function SolarProposalBuilder({
 
   return (
     <div className="space-y-5">
+      {/* WHY the steps below are read-only, where they are — and for a super
+          admin, the door through. Above the rail so it is the first thing read
+          rather than something discovered after a save fails. */}
+      <SignedContractLock leadId={leadId} lock={contractLock} />
+
       <StepRail steps={STEPS} active={step} onSelect={setStep} />
 
       {/* WHAT is being quoted, on every step that spends it. A rep pricing a

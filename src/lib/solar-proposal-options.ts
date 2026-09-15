@@ -163,8 +163,8 @@ export type AlternativesInput = {
   storage?: { batteryQty: number; stickerPricePerBatteryCents: number } | null;
   /**
    * The extra work, at CATALOGUE price. Grossed up per option by its own fee —
-   * except the lines flagged `financedOnTop`, which every option adds at their
-   * own price on top of whatever it is quoting.
+   * every line, the ones flagged `financedOnTop` included; that flag only puts
+   * them above a capped partner's $/W instead of inside it.
    */
   adders: { label: string; amountCents: number; financedOnTop?: boolean }[];
   /** The adders INSIDE each partner's price. See `PurchaseInput`. */
@@ -381,9 +381,8 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
         dealerFeePct: row.dealerFeePct,
         adderTotalCents: row.adderTotalCents,
         onTopAdderTotalCents: row.onTopAdderTotalCents,
-        // At the same price on every programme. The battery does not get more
-        // expensive because the money is dearer — it rides on top of whatever
-        // the partner's paper says, at what the catalogue sells one for.
+        // At the same catalogue price on every programme, grossed up by each
+        // column's own dealer fee when that column is priced.
         ...(input.batteryPriceCents && input.batteryPriceCents > 0
           ? { batteryPriceCents: input.batteryPriceCents }
           : {}),

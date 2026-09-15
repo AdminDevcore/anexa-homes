@@ -1,8 +1,7 @@
 import { z } from "zod";
 import { prisma } from "@/server/db/client";
 import { recordStageEntry } from "@/server/modules/pipeline/stage-history";
-import { solarStageRequirementError } from "@/server/modules/pipeline/solar-stage-requirements";
-import { stageEntryData } from "@/server/modules/pipeline/stage-entry-data";
+import { stageMoveError } from "@/server/modules/pipeline/stage-guard";
 import type { ActionContext, AutomationActionModule, StepResult } from "../types";
 
 const schema = z.object({ stageId: z.string().min(1) });
@@ -37,7 +36,7 @@ export const moveStageAction: AutomationActionModule = {
     // never move a deal.
     const stage = await prisma.pipelineStage.findFirst({
       where: { id: parsed.data.stageId, pipeline: { companyId: ctx.companyId } },
-      select: { id: true, key: true, name: true, position: true, defaultBlocker: true, stageType: true },
+      select: { id: true, name: true, position: true },
     });
     if (!stage) return fail("That stage no longer exists.");
 
@@ -50,15 +49,20 @@ export const moveStageAction: AutomationActionModule = {
       return { type: "move_stage", ok: true, detail: `Already in ${stage.name}.` };
     }
 
-    const requirementError = await solarStageRequirementError({
+    // The same rules a person moving the card is held to: a rule firing on a
+    // signature must not carry a deal over Contract Signed before the contract
+    // is on file, and a rule firing on install photos must not carry one past
+    // M1 Funding before the money is certified. A rule runs on whatever
+    // triggered it, so it carries nobody's authority — see stage-guard.ts.
+    const moveError = await stageMoveError({
       companyId: ctx.companyId,
-      leadId: lead.id,
-      vertical: lead.vertical,
-      stage,
+      actor: null,
+      lead: { id: lead.id, vertical: lead.vertical, stageId: lead.stageId },
+      targetStageId: stage.id,
     });
-    if (requirementError) return fail(requirementError);
+    if (moveError) return fail(moveError);
 
-    await prisma.lead.update({ where: { id: lead.id }, data: stageEntryData(stage) });
+    await prisma.lead.update({ where: { id: lead.id }, data: { stageId: stage.id } });
     await recordStageEntry({ leadId: lead.id, stageId: stage.id, stage, via: "automation" });
 
     await prisma.activityLog.create({

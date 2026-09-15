@@ -10,6 +10,7 @@
     { "path": "/api/cron/recenter-house-dots", "schedule": "*/30 * * * *" },
     { "path": "/api/cron/enrich-owners", "schedule": "0 8 * * *" },
     { "path": "/api/cron/geo-health", "schedule": "15 12 * * *" },
-    { "path": "/api/cron/automations", "schedule": "0 15 * * *" }
+    { "path": "/api/cron/automations", "schedule": "0 15 * * *" },
+    { "path": "/api/cron/file-signed-proposals", "schedule": "*/10 * * * *" }
   ]
 }

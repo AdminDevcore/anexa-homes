@@ -835,10 +835,11 @@ export function SolarFinancePanel({
    * What the catalogue sells ONE of them for.
    *
    * On a deal with an array this is a PRICE ON THE CONTRACT: a rate per watt is
-   * a price for an array and cannot charge for a battery, so the storage rides
-   * on top at this figure — see `batteryChargeCents`. On a storage-only deal it
-   * is nothing of the kind: there the battery is the system, and the price per
-   * battery is the box the rep types in below.
+   * a price for an array and cannot charge for a battery, so the storage is
+   * charged at this figure, grossed up by the dealer fee like an adder — see
+   * `batteryChargeCents`. On a storage-only deal it is nothing of the kind:
+   * there the battery is the system, and the price per battery is the box the
+   * rep types in below.
    */
   batteryUnitPriceCents: number;
   /** The adders this company sells, for the rep to pick from. */
@@ -1280,7 +1281,7 @@ export function SolarFinancePanel({
     systemPriceCents: arrayPrice?.baseStickerCents ?? 0,
     // Storage counts: the household signs for it, and a per-watt promise that
     // steps around it is not a promise about the figure they land on.
-    batteryPriceCents: arrayPrice?.batteryPriceCents ?? 0,
+    batteryPriceCents: arrayPrice?.batteryStickerCents ?? 0,
     systemWatts: arrayPrice?.systemWatts ?? 0,
     // The live tick-boxes, so the figure moves the moment a rep unticks a
     // bonus this job does not earn.

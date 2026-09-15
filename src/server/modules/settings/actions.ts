@@ -12,6 +12,7 @@ import { claimStatusKey, type ClaimStatusOption } from "@/lib/claim-status";
 import { prisma } from "@/server/db/client";
 
 import { writeVerticalConfig } from "@/lib/vertical-config";
+import { OUTCOME_CATEGORIES, inferCountsAs, type OutcomeCategory } from "@/lib/dispositions";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { putObject } from "@/server/storage";
@@ -37,6 +38,9 @@ const stageSchema = z.object({
   /// Where the sale is booked. Omitted by callers that predate it (the solar
   /// stage-model editor) and merged from the stored row rather than reset.
   countsAsSold: z.boolean().optional(),
+  /// The business milestone this stage stands for (solar only). Omitted by
+  /// callers that know nothing about it, and then kept rather than reset.
+  milestone: z.enum(["contract_signed"]).nullable().optional(),
   // SLA / stage-duration settings.
   targetDays: z.number().int().min(0).max(3650).optional(),
   escalationDays: z.number().int().min(0).max(3650).optional(),
@@ -118,9 +122,21 @@ export async function updatePipelineStageAction(id: string, input: z.infer<typeo
       id: true, stageType: true, ownerRole: true, followUpDays: true,
       isActionRequired: true, defaultBlocker: true, targetDays: true,
       escalationDays: true, markOverdue: true, countsAsSold: true,
+      isLost: true, milestone: true, pipelineId: true,
+      pipeline: { select: { vertical: true } },
     },
   });
   if (!stage) return fail("Stage not found.");
+
+  // Contract Signed is a rule enforced on every move (pipeline/contract-signed.ts),
+  // so which stage carries it is guarded here rather than trusted from the form.
+  const nextMilestone = parsed.data.milestone !== undefined ? parsed.data.milestone : stage.milestone;
+  if (parsed.data.milestone && stage.pipeline.vertical !== "solar") {
+    return fail("Contract Signed is a solar pipeline milestone.");
+  }
+  if (nextMilestone && (parsed.data.isLost ?? false)) {
+    return fail("The Contract Signed stage cannot also be the cancelled stage.");
+  }
 
   // Fall back to what the stage already has for anything the caller omitted.
   // Without this, the existing stages manager — which knows nothing about
@@ -138,19 +154,33 @@ export async function updatePipelineStageAction(id: string, input: z.infer<typeo
     markOverdue: parsed.data.markOverdue ?? stage.markOverdue,
   });
 
-  await prisma.pipelineStage.update({
-    where: { id },
-    data: {
-      name: parsed.data.name,
-      color: parsed.data.color,
-      isWon: parsed.data.isWon ?? false,
-      isLost: parsed.data.isLost ?? false,
-      // Kept, not reset, when the caller omitted it — the solar stage-model
-      // editor sends every field it knows about and knows nothing about this one.
-      countsAsSold: parsed.data.countsAsSold ?? stage.countsAsSold,
-      ...merged,
-    },
-  });
+  await prisma.$transaction([
+    // At most one stage per pipeline holds a milestone, so marking this one
+    // moves it here rather than failing on the unique index.
+    ...(parsed.data.milestone
+      ? [
+          prisma.pipelineStage.updateMany({
+            where: { pipelineId: stage.pipelineId, milestone: parsed.data.milestone, NOT: { id } },
+            data: { milestone: null },
+          }),
+        ]
+      : []),
+    prisma.pipelineStage.update({
+      where: { id },
+      data: {
+        name: parsed.data.name,
+        color: parsed.data.color,
+        isWon: parsed.data.isWon ?? false,
+        isLost: parsed.data.isLost ?? false,
+        // Kept, not reset, when the caller omitted it — the solar stage-model
+        // editor sends every field it knows about and knows nothing about this one.
+        countsAsSold: parsed.data.countsAsSold ?? stage.countsAsSold,
+        // Likewise kept when omitted: the general stages manager does not send it.
+        ...(parsed.data.milestone !== undefined ? { milestone: parsed.data.milestone } : {}),
+        ...merged,
+      },
+    }),
+  ]);
   revalidatePath("/portal/settings/pipeline");
   return ok();
 }
@@ -160,9 +190,13 @@ export async function deletePipelineStageAction(id: string) {
   if (!can(user, "update", "Settings")) return fail("Not allowed.");
   const stage = await prisma.pipelineStage.findFirst({
     where: { id, pipeline: { companyId: user.companyId } },
-    select: { id: true },
+    select: { id: true, milestone: true },
   });
   if (!stage) return fail("Stage not found.");
+  // Deleting the Contract Signed stage would switch the rule off silently.
+  if (stage.milestone === "contract_signed") {
+    return fail("This is the pipeline's Contract Signed stage. Mark another stage as Contract Signed before deleting it.");
+  }
 
   // Detach leads from the stage before deleting (FK is restrict).
   await prisma.$transaction([
@@ -198,6 +232,7 @@ const dispositionsSchema = z.object({
       z.object({
         group: z.string().trim().max(40).nullable().optional(),
         label: z.string().trim().min(1).max(60),
+        countsAs: z.enum(OUTCOME_CATEGORIES).optional(),
       })
     )
     .max(80),
@@ -240,24 +275,25 @@ export async function updateAppointmentDispositionsAction(input: z.infer<typeof 
   const parsed = dispositionsSchema.safeParse(input);
   if (!parsed.success) return fail("Invalid outcomes.");
 
+  // Solar sorts its Appointments list by what each outcome counts as, so a
+  // solar save stores it (inferring from the wording if a client sent none).
+  // Roofing stores its list exactly as it did before categories existed.
+  const vertical = await getActiveVertical(user);
+  const solar = vertical === "solar";
+
   // De-dupe by label (case-insensitive) while preserving order; keep group.
   const seen = new Set<string>();
-  const items: { group: string | null; label: string }[] = [];
+  const items: { group: string | null; label: string; countsAs?: OutcomeCategory }[] = [];
   for (const raw of parsed.data.items) {
     const label = raw.label.trim();
     const group = raw.group?.trim() || null;
     if (!label || seen.has(label.toLowerCase())) continue;
     seen.add(label.toLowerCase());
-    items.push({ group, label });
+    items.push(solar ? { group, label, countsAs: raw.countsAs ?? inferCountsAs(label) } : { group, label });
   }
   if (items.length === 0) return fail("Keep at least one outcome.");
 
-  await saveVerticalScopedSetting(
-    user.companyId,
-    await getActiveVertical(user),
-    "appointmentDispositions",
-    items
-  );
+  await saveVerticalScopedSetting(user.companyId, vertical, "appointmentDispositions", items);
   revalidatePath("/portal/settings/appointment-outcomes");
   return ok();
 }

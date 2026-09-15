@@ -18,6 +18,7 @@ import {
 import { systemTotals } from "@/lib/solar-arrays";
 import { offsetPct } from "@/lib/solar-money";
 import { effectiveUsageKwh } from "@/lib/solar-energy";
+import { recomputeDealMoney } from "./deal-money";
 
 /**
  * Everything the design's stored figures are derived from, in one place.
@@ -228,6 +229,21 @@ export async function recomputeDesignFigures(companyId: string, leadId: string) 
   // charge, and leaving the cached total alone is the staleness the typed
   // "Adders $" box had, one level deeper.
   await recomputeAdderTotal(companyId, leadId, { force: auto.added.length + auto.removed.length > 0 });
+
+  /**
+   * AND THE CONTRACT, which every figure above is an input to.
+   *
+   * This is the chokepoint for a design that moved — the equipment picker, the
+   * layout designer, the design save and the live re-price all end here — so it
+   * is the one place that can guarantee the cached money never trails the
+   * system it is a price for. Without it a roof redrawn from 12 kW to 16 kW
+   * left `contractPriceCents` quoting the old array, which is what a lender
+   * submission reads as the amount to underwrite.
+   *
+   * Only DERIVED columns move; nothing a person typed is rewritten. See
+   * `recomputeDealMoney`.
+   */
+  await recomputeDealMoney(companyId, leadId);
 
   return {
     moduleQty: panelCount(blocks),

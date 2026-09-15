@@ -8,6 +8,7 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
+import { leadAccessible } from "@/server/rbac/lead-access";
 import { runUnscoped } from "@/server/vertical/context";
 import { sendEmail } from "@/server/modules/notifications/delivery";
 import { emailBrandFor } from "@/server/modules/notifications/brand";
@@ -72,6 +73,10 @@ export async function updateProposalContentAction(input: z.infer<typeof contentS
 
   const proposal = await prisma.proposal.findFirst({ where: { id: parsed.data.proposalId, companyId: user.companyId }, select: { id: true, leadId: true } });
   if (!proposal) return fail("Proposal not found.");
+  // The proposal id came from the browser, so its deal has to be one this
+  // user may reach. Same sentence as a missing proposal, so the two cases
+  // stay indistinguishable from outside.
+  if (!(await leadAccessible(user, proposal.leadId))) return fail("Proposal not found.");
 
   await prisma.proposal.update({ where: { id: proposal.id }, data: { content: parsed.data.content as Prisma.InputJsonValue } });
   revalidatePath(`/portal/leads/${proposal.leadId}/presentation`);
@@ -93,6 +98,10 @@ export async function generateProposalAction(proposalId: string) {
 
   const proposal = await prisma.proposal.findFirst({ where: { id: proposalId, companyId: user.companyId }, select: { id: true, leadId: true, publicToken: true, status: true } });
   if (!proposal) return fail("Proposal not found.");
+  // The proposal id came from the browser, so its deal has to be one this
+  // user may reach. Same sentence as a missing proposal, so the two cases
+  // stay indistinguishable from outside.
+  if (!(await leadAccessible(user, proposal.leadId))) return fail("Proposal not found.");
 
   // Never walk the status backwards: once the customer has viewed or signed it,
   // re-generating refreshes the content, not the milestone.
@@ -130,6 +139,10 @@ export async function emailProposalAction(input: z.infer<typeof emailSchema>) {
     select: { id: true, leadId: true, publicToken: true, status: true, customerName: true, vertical: true },
   });
   if (!proposal) return fail("Proposal not found.");
+  // The proposal id came from the browser, so its deal has to be one this
+  // user may reach. Same sentence as a missing proposal, so the two cases
+  // stay indistinguishable from outside.
+  if (!(await leadAccessible(user, proposal.leadId))) return fail("Proposal not found.");
 
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/$/, "");
   const url = `${appUrl}/present/${proposal.publicToken}`;

@@ -2,7 +2,8 @@ import { prisma } from "@/server/db/client";
 import { getDealFinancials, getProjectPayout } from "@/server/modules/costs/queries";
 import { getScopeEstimatedCostCents } from "@/server/modules/scope/queries";
 import { computeDealCommission } from "@/lib/commission";
-import { computeReports, type ReportPeriod, type PnlSegment } from "@/lib/bookkeeping-reports";
+import { type ReportPeriod, type PnlSegment } from "@/lib/bookkeeping-reports";
+import { computeReportsFromDb, jobActivityFromDb } from "./reports-db";
 
 export type BkTxn = {
   id: string;
@@ -88,6 +89,16 @@ export type BookkeepingData = {
   reconciliations: BkReconciliation[];
   connected: boolean;
   provider: string | null;
+  /**
+   * Whether `transactions` above is the WHOLE ledger or just its newest page.
+   *
+   * The client's period picker recomputes the P&L locally so a change of period
+   * is instant. That is exact only while the page it recomputes over is the
+   * whole ledger; past the cap it would report a period that sits below the cut
+   * as $0 while the server and the PDF said otherwise. False tells the picker
+   * to ask the server instead. See `/api/bookkeeping/reports`.
+   */
+  ledgerComplete: boolean;
   summary: { moneyIn: number; moneyOut: number; net: number; uncategorized: number; outstanding: number };
   pnl: {
     income: PnlRow[];
@@ -108,12 +119,27 @@ export type BookkeepingData = {
   };
 };
 
+/**
+ * How many transactions the ledger TABLE renders. Not a reporting limit — see
+ * `reports-db.ts`, which aggregates over the whole ledger regardless.
+ */
+export const TRANSACTION_PAGE = 1000;
+
 export async function getBookkeepingData(companyId: string, period?: ReportPeriod): Promise<BookkeepingData> {
   const [txns, categories, vendors, projects, settings, recons] = await Promise.all([
     prisma.transaction.findMany({
       where: { companyId },
       orderBy: { date: "desc" },
-      take: 1000,
+      /**
+       * THE LEDGER TABLE'S PAGE, and nothing else.
+       *
+       * No total is derived from this array any more. Every figure the P&L,
+       * the balance sheet, the top cards and the per-job rollup report now
+       * comes from `reports-db.ts`, which aggregates in Postgres over the whole
+       * ledger — because applying a reporting period to the newest 1,000 rows
+       * silently reports $0 for any period that sits below the cut.
+       */
+      take: TRANSACTION_PAGE,
       include: {
         category: { select: { id: true, name: true, type: true } },
         attachments: { orderBy: { createdAt: "asc" }, select: { id: true, name: true } },
@@ -195,18 +221,17 @@ export async function getBookkeepingData(companyId: string, period?: ReportPerio
     attachments: t.attachments.map((a) => ({ id: a.id, name: a.name })),
   }));
 
-  // Cash-basis summary totals (always all-time — these drive the top cards).
-  let moneyIn = 0, moneyOut = 0, uncategorized = 0;
-  for (const t of txns) {
-    if (t.amountCents >= 0) moneyIn += t.amountCents;
-    else moneyOut += -t.amountCents;
-    if (!t.categoryId) uncategorized += 1;
-  }
-
-  // Period-aware P&L + Balance Sheet (no period = all time). Shared with the
-  // client picker and the PDF routes so all three agree.
-  const { pnl: pnlReport, balanceSheet } = computeReports(transactions, period);
+  /**
+   * Period-aware P&L, Balance Sheet and the top cards — all from Postgres.
+   *
+   * Previously summed over `txns`, the capped page above, which made every one
+   * of these figures wrong the moment a company passed 1,000 transactions. See
+   * `computeReportsFromDb`.
+   */
+  const dbReports = await computeReportsFromDb(companyId, period);
+  const { pnl: pnlReport, balanceSheet } = dbReports;
   const { income, expense, totalIncome, totalExpense, netProfit, segments } = pnlReport;
+  const { moneyIn, moneyOut, uncategorized } = dbReports;
 
   // Roll up each job's bookkeeping activity. A job appears if it has any
   // transaction, invoice, or attached file.
@@ -215,26 +240,46 @@ export async function getBookkeepingData(companyId: string, period?: ReportPerio
   const fileCountByJob = new Map<string, number>();
   for (const f of jobFiles) fileCountByJob.set(f.projectId, (fileCountByJob.get(f.projectId) ?? 0) + 1);
 
-  const jobAgg = new Map<string, { in: number; out: number; count: number; last: number }>();
-  for (const t of txns) {
-    if (!t.projectId) continue;
-    const a = jobAgg.get(t.projectId) ?? { in: 0, out: 0, count: 0, last: 0 };
-    if (t.amountCents >= 0) a.in += t.amountCents;
-    else a.out += -t.amountCents;
-    a.count += 1;
-    a.last = Math.max(a.last, t.date.getTime());
-    jobAgg.set(t.projectId, a);
-  }
+  // Grouped in Postgres for the same reason as the statement above: a job whose
+  // transactions had aged off the page reported less than it had taken.
+  const jobAgg = await jobActivityFromDb(companyId);
 
-  const projectLeadId = new Map(projects.map((p) => [p.id, p.leadId]));
   const jobIds = new Set<string>([...jobAgg.keys(), ...invCountByJob.keys(), ...fileCountByJob.keys()]);
+
+  /**
+   * Names for exactly the jobs that appear, however old.
+   *
+   * `projects` above is the newest 300, which is the right page for a picker
+   * and the wrong list for this: now that the rollup groups the whole ledger, a
+   * job older than that page would surface with money against it and render as
+   * an unlinked "Deal". Fetched by id so the list is bounded by what is
+   * actually shown rather than by an arbitrary recency window.
+   */
+  const jobProjects = jobIds.size
+    ? await prisma.project.findMany({
+        where: { companyId, id: { in: [...jobIds] } },
+        select: {
+          id: true,
+          leadId: true,
+          projectNumber: true,
+          lead: { select: { firstName: true, lastName: true } },
+        },
+      })
+    : [];
+  const jobLabel = new Map(
+    jobProjects.map((p) => [
+      p.id,
+      `${p.projectNumber}${p.lead ? ` · ${p.lead.firstName} ${p.lead.lastName}` : ""}`,
+    ])
+  );
+  const projectLeadId = new Map(jobProjects.map((p) => [p.id, p.leadId]));
   const jobs: BkJob[] = [...jobIds]
     .map((projectId) => {
       const a = jobAgg.get(projectId);
       return {
         projectId,
         leadId: projectLeadId.get(projectId) ?? null,
-        label: projMap.get(projectId) ?? "Deal",
+        label: jobLabel.get(projectId) ?? projMap.get(projectId) ?? "Deal",
         moneyInCents: a?.in ?? 0,
         moneyOutCents: a?.out ?? 0,
         netCents: (a?.in ?? 0) - (a?.out ?? 0),
@@ -270,6 +315,7 @@ export async function getBookkeepingData(companyId: string, period?: ReportPerio
     })),
     connected: !!settings?.bookkeepingApiKey,
     provider: settings?.bookkeepingProvider ?? null,
+    ledgerComplete: txns.length < TRANSACTION_PAGE,
     summary: {
       moneyIn,
       moneyOut,

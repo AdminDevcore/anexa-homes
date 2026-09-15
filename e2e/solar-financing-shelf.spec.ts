@@ -234,10 +234,20 @@ test.describe(FLAG_ON ? "solar financing shelf" : "solar financing shelf (flag o
     await expect(page.getByText(`Quoting ${name}`)).toBeVisible({ timeout: 15000 });
 
     // The terms the server is about to write are on screen BEFORE the save, so
-    // the boxes never disagree with the card above them.
-    await expect(page.getByLabel("APR %", { exact: true })).toHaveValue("6.49");
-    await expect(page.getByLabel("Term (months)", { exact: true })).toHaveValue("180");
-    await expect(page.getByLabel("Dealer fee %", { exact: true })).toHaveValue("22");
+    // what gets quoted can never disagree with the card above it.
+    //
+    // They are STATED, not editable. This used to type into an APR / term /
+    // dealer-fee form, which 4e94a8d ("Nobody was ever going to type in that
+    // approval") deleted along with the rest of the "Approved loan terms" card
+    // on 2026-08-26 — across every solar deal on the system not one of those
+    // boxes had ever been filled in. The terms belong to the lender's rate sheet,
+    // and a rep retyping them is exactly the hand-quoting escape that the
+    // "there is no hand-quoting escape" test below exists to forbid. Asserting
+    // the boxes were the older, weaker check — it proved the values were
+    // present, not that they were the sheet's.
+    await expect(page.getByText(/6\.49% APR · 180 months · 22% dealer fee/)).toBeVisible({
+      timeout: 15000,
+    });
 
     await page.getByRole("button", { name: "Save financing" }).click();
     await expect(page.getByText("Financing saved")).toBeVisible({ timeout: 15000 });

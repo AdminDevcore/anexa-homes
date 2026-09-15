@@ -7,11 +7,15 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
+import { leadAccessible, projectAccessible } from "@/server/rbac/lead-access";
+import type { AccessUser } from "@/server/rbac/guards";
 import { putObject } from "@/server/storage";
 import { getMembership } from "@/server/modules/chat/queries";
 import { companyExportLabel } from "@/lib/company-exports";
 import { isContractorInvoice } from "@/lib/contractor-invoice";
 import { foldersFor } from "@/lib/deal-folders";
+import { CONTRACT_FOLDER_KEY, CONTRACT_MIME_TYPE, SIGNED_LENDER_CONTRACT } from "@/lib/contract-signed";
+import { advanceToContractSignedIfReady } from "@/server/modules/pipeline/contract-signed";
 import { photoGroupFor } from "@/lib/photo-groups";
 import { checklistJustCompleted } from "@/server/modules/automations/checklist";
 import { runAutomations } from "@/server/modules/automations/engine";
@@ -20,6 +24,27 @@ import { isActiveVertical } from "@/lib/vertical";
 import sharp from "sharp";
 
 const MAX_BYTES = 30 * 1024 * 1024; // 30MB (phone photos); compressed after upload
+
+/**
+ * A file attached to a deal is authorised BY that deal.
+ *
+ * The download route already works this way (see app/portal/files/[id]/route.ts);
+ * moving and deleting were the two doors that did not, so a rep with File perms
+ * could re-file or destroy a photo on somebody else's job by id alone.
+ *
+ * A file hanging off neither a lead nor a project — a chat attachment, an
+ * onboarding document, a company asset — has no deal to ask about, and the
+ * uploader/admin rules at each call site stay its boundary.
+ */
+async function fileParentAccessible(
+  user: AccessUser,
+  file: { leadId: string | null; projectId: string | null }
+): Promise<boolean> {
+  if (file.leadId) return !!(await leadAccessible(user, file.leadId));
+  if (file.projectId) return !!(await projectAccessible(user, file.projectId));
+  return true;
+}
+
 const CALL_MAX_BYTES = 100 * 1024 * 1024; // 100MB — call recordings (audio, uncompressed)
 
 // Dedicated call-recording slots on a deal (QC Call). Kept in sync with
@@ -312,6 +337,11 @@ export async function uploadFileAction(formData: FormData) {
     },
   });
 
+  // Uploading into Contract is NOT evidence of a contract. A file counts only
+  // once somebody allowed to edit files marks it as the lender's signed
+  // contract, and that is where the deal is re-evaluated — see
+  // setSignedLenderContractAction and server/modules/pipeline/contract-signed.ts.
+
   // The shot that closes the last required slot is the one people want work
   // hung off — "photos are all in, compile them and move the job on". Asked
   // per upload rather than on a schedule so it happens while the crew is still
@@ -364,6 +394,9 @@ export async function moveFileAction(id: string, category: string) {
     },
   });
   if (!file) return { ok: false as const, error: "File not found." };
+  // Same sentence as a missing file: whether it exists on another rep's deal
+  // is not something an id-guesser should learn.
+  if (!(await fileParentAccessible(user, file))) return { ok: false as const, error: "File not found." };
   if (!can(user, "update", "File") && file.uploadedById !== user.userId) {
     return { ok: false as const, error: "You can only move your own uploads." };
   }
@@ -393,8 +426,80 @@ export async function moveFileAction(id: string, category: string) {
   }
 
   await prisma.fileAsset.update({ where: { id }, data: { category } });
+  // A PDF already MARKED as the lender's signed contract counts again once it is
+  // refiled into Contract; anything else refiled there is re-read and ignored.
+  if (file.leadId && file.lead?.vertical === "solar" && category === CONTRACT_FOLDER_KEY) {
+    await advanceToContractSignedIfReady({ companyId: user.companyId, leadId: file.leadId, via: "document" });
+  }
   if (file.projectId) revalidatePath(`/portal/projects/${file.projectId}`);
   if (file.leadId) revalidatePath(`/portal/leads/${file.leadId}`);
+  return { ok: true as const };
+}
+
+/**
+ * Mark a PDF in a solar deal's Contract folder as the LENDER'S SIGNED CONTRACT,
+ * or take the mark off.
+ *
+ * The one way an uploaded file becomes evidence for Contract Signed. Being
+ * filed into Contract proves nothing (a utility bill can be filed there), so a
+ * person says what the document is, and the mark records who and when.
+ *
+ * WHO: `File:update` — super admin, admin and manager. A sales rep holds only
+ * `File:create`/`read`, so the rep whose deal it is cannot certify the paperwork
+ * that moves it — the same line the funding gate draws for M1.
+ *
+ * Marking re-evaluates the deal, so it advances the moment the second document
+ * is real. Unmarking never moves a deal back, exactly as deleting a contract
+ * does not: Contract Signed records that the sale happened.
+ */
+export async function setSignedLenderContractAction(input: { fileId: string; signed: boolean }) {
+  const user = await requireUser();
+  if (!can(user, "update", "File")) {
+    return { ok: false as const, error: "Only an administrator or manager can mark the signed contract." };
+  }
+  const fileId = typeof input?.fileId === "string" ? input.fileId : "";
+  if (!fileId || typeof input?.signed !== "boolean") {
+    return { ok: false as const, error: "Invalid input." };
+  }
+  const file = await prisma.fileAsset.findFirst({
+    where: { id: fileId, companyId: user.companyId },
+    select: {
+      id: true,
+      uploadedById: true,
+      category: true,
+      mimeType: true,
+      projectId: true,
+      leadId: true,
+      lead: { select: { vertical: true } },
+    },
+  });
+  if (!file) return { ok: false as const, error: "File not found." };
+  // Same sentence as a missing file, as moveFileAction does.
+  if (!(await fileParentAccessible(user, file))) return { ok: false as const, error: "File not found." };
+  if (!file.leadId || file.lead?.vertical !== "solar") {
+    return { ok: false as const, error: "Only a document on a solar deal can be marked as the signed contract." };
+  }
+  if (input.signed) {
+    if (file.category !== CONTRACT_FOLDER_KEY) {
+      return { ok: false as const, error: "File it into the Contract folder first." };
+    }
+    if (file.mimeType !== CONTRACT_MIME_TYPE) {
+      return { ok: false as const, error: "Only a PDF can be marked as the signed contract." };
+    }
+  }
+
+  await prisma.fileAsset.update({
+    where: { id: file.id },
+    data: {
+      documentType: input.signed ? SIGNED_LENDER_CONTRACT : null,
+      documentTypeSetById: user.userId,
+      documentTypeSetAt: new Date(),
+    },
+  });
+  if (input.signed) {
+    await advanceToContractSignedIfReady({ companyId: user.companyId, leadId: file.leadId, via: "document" });
+  }
+  revalidatePath(`/portal/leads/${file.leadId}`);
   return { ok: true as const };
 }
 
@@ -408,6 +513,9 @@ export async function deleteFileAction(id: string) {
     select: { id: true, uploadedById: true, category: true, projectId: true, leadId: true },
   });
   if (!file) return { ok: false as const, error: "File not found." };
+  // Same sentence as a missing file: whether it exists on another rep's deal
+  // is not something an id-guesser should learn.
+  if (!(await fileParentAccessible(user, file))) return { ok: false as const, error: "File not found." };
 
   /* A submitted invoice is the contractor's evidence that he billed, so it
    * outranks the "your own uploads" rule that would otherwise let him take it

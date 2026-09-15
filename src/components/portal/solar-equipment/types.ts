@@ -40,7 +40,7 @@ export type AdderItem = {
   autoApplyMaxKw: number | null;
   /**
    * This work is added to the loan ON TOP of a partner's fixed or maximum $/W,
-   * at its own price, instead of coming out of the system price. The re-roof.
+   * instead of coming out of the system price, the dealer fee still applied. The re-roof.
    */
   financedOnTop: boolean;
   rank: number;

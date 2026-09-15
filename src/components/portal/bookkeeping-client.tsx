@@ -123,10 +123,63 @@ export function BookkeepingClient({
     () => resolvePeriod(periodPreset, new Date(), { start: customStart || null, end: customEnd || null }),
     [periodPreset, customStart, customEnd]
   );
-  const { pnl, balanceSheet } = React.useMemo(
+  /**
+   * The statement for the chosen period.
+   *
+   * LOCAL WHERE IT CAN BE, SERVER WHERE IT MUST BE. Recomputing over the page
+   * we already hold makes the picker instant, and it is exact whenever that
+   * page IS the whole ledger. Past the cap it is not: a period sitting below
+   * the cut would render $0 here while the server and the downloaded PDF
+   * reported the truth. `ledgerComplete` says which case this is, and the
+   * effect below fetches the aggregate when it has to.
+   */
+  const localReports = React.useMemo(
     () => computeReports(data.transactions, resolved.period),
     [data.transactions, resolved.period]
   );
+  const [fetched, setFetched] = React.useState<{
+    pnl: typeof localReports.pnl;
+    balanceSheet: typeof localReports.balanceSheet;
+  } | null>(null);
+  const [loadingReports, setLoadingReports] = React.useState(false);
+
+  React.useEffect(() => {
+    // Nothing to fetch while the page we hold IS the whole ledger; the local
+    // recompute is exact there and `useReports` below ignores `fetched`.
+    if (data.ledgerComplete) return;
+
+    // A period change while a previous request is in flight must not let the
+    // slower answer land last and describe the wrong period.
+    const ac = new AbortController();
+    const qs = new URLSearchParams();
+    if (resolved.period.startMs != null) qs.set("start", String(resolved.period.startMs));
+    if (resolved.period.endMs != null) qs.set("end", String(resolved.period.endMs));
+
+    // Wrapped rather than called straight from the effect body: a synchronous
+    // setState there cascades a second render before the first has painted.
+    void (async () => {
+      setLoadingReports(true);
+      try {
+        const res = await fetch(`/api/bookkeeping/reports?${qs}`, { signal: ac.signal });
+        if (!res.ok) return;
+        const body = await res.json();
+        setFetched({ pnl: body.pnl, balanceSheet: body.balanceSheet });
+      } catch {
+        /* aborted, or offline — the previous figures stay on screen */
+      } finally {
+        if (!ac.signal.aborted) setLoadingReports(false);
+      }
+    })();
+
+    return () => ac.abort();
+  }, [data.ledgerComplete, resolved.period]);
+
+  /**
+   * `fetched` is only ever consulted on a ledger past the cap, so it never has
+   * to be cleared when the page turns out to be complete — which is what kept a
+   * synchronous setState in the effect above.
+   */
+  const { pnl, balanceSheet } = data.ledgerComplete ? localReports : (fetched ?? localReports);
 
   // PDF links carry the selected period so the download matches the screen.
   const pdfParams = (kind: "pnl" | "bs") => {
@@ -354,7 +407,11 @@ export function BookkeepingClient({
                 <Input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="h-9 w-40" />
               </>
             )}
-            <span className="ml-auto text-xs text-muted-foreground">{resolved.pnlLabel} · cash basis</span>
+            <span className="ml-auto text-xs text-muted-foreground">
+              {/* Only ever seen on a ledger past the table's page, where the
+                  figures come from the server rather than from what is loaded. */}
+              {loadingReports ? "Updating…" : `${resolved.pnlLabel} · cash basis`}
+            </span>
           </div>
 
           <div className="grid gap-6 lg:grid-cols-2">

@@ -4,13 +4,11 @@ import { withCustomerContact, type SolarProposalSnapshot } from "@/lib/solar-pro
 import type { ActiveVertical } from "@/lib/vertical";
 import type { ProposalCertificate } from "@/lib/proposal-signature";
 import { isSignatureImage } from "@/lib/signature-image";
-import { recordStageEntry } from "@/server/modules/pipeline/stage-history";
+import { advanceToContractSignedIfReady } from "@/server/modules/pipeline/contract-signed";
 import { approveProposalVersion } from "./proposal-approval";
 import { SIGNATURE_SELECT, certificateFor } from "./proposal-signature";
 import { readWitness } from "./witness";
 import { snapshotSolarDealComp } from "./deal-comp";
-import { solarStageRequirementError } from "@/server/modules/pipeline/solar-stage-requirements";
-import { stageEntryData } from "@/server/modules/pipeline/stage-entry-data";
 
 /**
  * Statuses that make a proposal publicly readable.
@@ -148,7 +146,7 @@ function consentTimestamp(claimedMs: number | null, now: Date): Date {
 export async function acceptSolarProposal(
   token: string,
   meta: AcceptInput
-): Promise<{ ok: boolean; error?: string; certificate?: ProposalCertificate }> {
+): Promise<{ ok: boolean; error?: string; certificate?: ProposalCertificate; proposalId?: string }> {
   // getPublicSolarProposal already refuses anything not sent, so acceptance is
   // unreachable for a draft or an internally-generated preview.
   const proposal = await getPublicSolarProposal(token);
@@ -212,32 +210,16 @@ export async function acceptSolarProposal(
       },
     });
 
-    // Signing records the customer agreement. It may only advance the pipeline
-    // once the workspace has a completed contract package as well; otherwise a
-    // stage labelled "Contract Signed" would be a false operational record.
+    // The customer's signature is ONE of the two documents Contract Signed
+    // waits for. The deal advances now only if the contract is already on file;
+    // otherwise it advances when the contract lands. It used to jump straight to
+    // the stage KEYED `contract_signed` — which production's hand-made stage is
+    // not, so it never fired there. See pipeline/contract-signed.ts.
     const { companyId: co } = await prisma.solarProposal.findUniqueOrThrow({
       where: { id: proposal.id },
       select: { companyId: true },
     });
-    const stage = await prisma.pipelineStage.findFirst({
-      where: { key: "contract_signed", pipeline: { companyId: co, vertical } },
-      select: { id: true, key: true, name: true, position: true, defaultBlocker: true, stageType: true },
-    });
-    const requirementError = stage
-      ? await solarStageRequirementError({
-          companyId: co,
-          leadId: proposal.leadId,
-          vertical,
-          stage,
-        })
-      : null;
-    if (stage && !requirementError) {
-      await prisma.lead.update({
-        where: { id: proposal.leadId },
-        data: stageEntryData(stage),
-      });
-      await recordStageEntry({ leadId: proposal.leadId, stageId: stage.id, stage, via: "signature" });
-    }
+    await advanceToContractSignedIfReady({ companyId: co, leadId: proposal.leadId, via: "signature" });
 
     // Freeze what this deal pays, now that it is sold. Best-effort and
     // create-only: a customer's signature must never fail because a rep's
@@ -248,9 +230,7 @@ export async function acceptSolarProposal(
       data: {
         companyId: co,
         type: "system",
-        message: `${name} signed solar proposal v${proposal.version}${hostId ? " in person" : ""}${
-          requirementError ? `; Contract Signed not advanced: ${requirementError}` : ""
-        }`,
+        message: `${name} signed solar proposal v${proposal.version}${hostId ? " in person" : ""}`,
         leadId: proposal.leadId,
       },
     });
@@ -280,7 +260,10 @@ export async function acceptSolarProposal(
    * just written. Returning the record means the document has everything it
    * needs without asking, and the trail says only what actually happened.
    */
-  return { ok: true, certificate: (await certificateFor(proposal.id)) ?? undefined };
+  //
+  // `proposalId` is for the server action that called this, which files the
+  // signed PDF once the response is sent; it strips the id before replying.
+  return { ok: true, certificate: (await certificateFor(proposal.id)) ?? undefined, proposalId: proposal.id };
 }
 
 /**

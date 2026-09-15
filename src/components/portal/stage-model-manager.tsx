@@ -27,6 +27,7 @@ type Stage = {
   sendInApp: boolean;
   sendEmail: boolean;
   markOverdue: boolean;
+  milestone: "contract_signed" | null;
 };
 
 const OWNER_KEYS = Object.keys(STAGE_OWNERS) as (keyof typeof STAGE_OWNERS)[];
@@ -50,7 +51,19 @@ export function StageModelManager({ stages, canEdit }: { stages: Stage[]; canEdi
           waiting on a third party carry a follow-up cadence instead and never report as overdue —
           a utility&rsquo;s queue is not your team being late.
         </p>
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">Contract Signed</span> marks the stage a deal
+          only reaches once the customer has signed the proposal AND a completed contract is in the
+          deal&rsquo;s Contract folder. Moves into or past it are refused until both are on file, and
+          the deal advances on its own when the second one arrives — whatever the stage is called.
+        </p>
       </div>
+      {!stages.some((s) => s.milestone === "contract_signed") && (
+        <p className="rounded-md border chip-warning px-3 py-2 text-xs">
+          No stage is marked Contract Signed, so nothing stops a deal being moved past the sale
+          without a signed proposal and a completed contract. Tick the stage that stands for it.
+        </p>
+      )}
       <div className="divide-y divide-border">
         {stages.map((s) => (
           <StageRow key={s.id} stage={s} canEdit={canEdit} />
@@ -83,6 +96,7 @@ function StageRow({ stage, canEdit }: { stage: Stage; canEdit: boolean }) {
       sendInApp: next.sendInApp,
       sendEmail: next.sendEmail,
       markOverdue: next.markOverdue,
+      milestone: next.milestone,
     });
     setBusy(false);
     if (!res.ok) return toast.error(res.error);
@@ -95,6 +109,24 @@ function StageRow({ stage, canEdit }: { stage: Stage; canEdit: boolean }) {
     <div className="flex flex-wrap items-center gap-2 py-2.5">
       <span className="size-2.5 shrink-0 rounded-full" style={{ background: stage.color }} />
       <span className="min-w-[13rem] flex-1 text-sm font-medium">{stage.name}</span>
+
+      {!stage.isLost && (
+        <label
+          className={cn(
+            "flex h-8 items-center gap-1.5 rounded-md border px-2 text-xs",
+            stage.milestone === "contract_signed" ? "chip-warning" : "border-input text-muted-foreground"
+          )}
+        >
+          <input
+            type="checkbox"
+            className="size-3.5"
+            checked={stage.milestone === "contract_signed"}
+            disabled={!canEdit || busy}
+            onChange={(e) => patch({ milestone: e.target.checked ? "contract_signed" : null })}
+          />
+          Contract Signed
+        </label>
+      )}
 
       {stage.isActionRequired && (
         <span className="rounded-full border chip-danger px-2 py-0.5 text-[11px] font-medium">

@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { FinanceProduct, Prisma, SolarRepPayMode } from "@prisma/client";
 import type { Db } from "@/server/db/types";
 import { priceStoredPurchase, priceStorageStored, batteryChargeCents } from "@/lib/solar-money";
 import {
@@ -41,7 +41,12 @@ async function loadSolarDeal(db: Db, companyId: string, leadId: string) {
         stickerPricePerBatteryCents: true,
         // Which price the partner's figure fixes is the quoted programme's to
         // say. No programme quoted reads as `final`, the rule as it always was.
-        lenderProduct: { select: { ppwBasis: true, batteryPriceBasis: true } },
+        lenderProduct: {
+          select: {
+            ppwBasis: true,
+            batteryPriceBasis: true,
+          },
+        },
       },
     }),
     db.solarDesign.findUnique({
@@ -232,6 +237,106 @@ export type SolarCommissionResult = {
   refusals: SolarPayRefusal[];
 };
 
+
+/**
+ * WHICH TERMS THIS DEAL PAYS ON — the one precedence chain.
+ *
+ * Extracted because it was written twice: once in
+ * `computeSolarCommissionsForProject`, which pays, and once in
+ * `estimatedSolarCommission`, which shows a rep what they will be paid. The two
+ * copies disagreed on the case that matters most — a SIGNED deal with no frozen
+ * terms. Payroll refused it; the deal page fell through to the rep's profile
+ * and showed a confident number payroll would never pay.
+ *
+ * PRECEDENCE, earliest wins:
+ *   1. the terms agreed at SIGNING (`SolarDealComp`)
+ *   2. the terms an existing commission row was written with
+ *   3. the rep's configuration today — UNSIGNED DEALS ONLY
+ *
+ * (3) is the quote path. A deal that has not sold has nothing else to be
+ * measured against, and a rep's current profile is exactly right there. A
+ * signed deal must never reach it: repricing a sale that closed six months ago
+ * against today's redline is the defect the whole snapshot chain exists to
+ * stop.
+ */
+export async function resolveDealPayTerms(
+  db: Db,
+  companyId: string,
+  input: {
+    leadId: string;
+    /** The rep the deal pays. Null means nobody is assigned. */
+    repId: string | null;
+    /** What the deal sells and how, for the unsigned fallback. */
+    deal: { systemType: "pv" | "pv_storage" | "storage"; product: FinanceProduct; lenderPayMode: SolarRepPayMode | null } | null;
+    /** The terms frozen at signing, already read by the caller. */
+    dealComp: {
+      basis: string;
+      redlineCentsPerWatt: number | null;
+      millsPerWatt: number | null;
+      redlinePerBatteryCents: number | null;
+      perBatteryFlatCents: number | null;
+      needsReview: boolean;
+    } | null;
+    /** The snapshot on an existing pending line, where the caller has one. */
+    existing: {
+      solarBasis: string | null;
+      solarRedlineCentsPerWatt: number | null;
+      solarRedlinePerBatteryCents: number | null;
+      solarPerBatteryFlatCents: number | null;
+      solarMillsPerWatt: number | null;
+    } | null;
+  }
+): Promise<SolarPayResolution> {
+  const { leadId, repId, deal, dealComp, existing } = input;
+
+  const snapshot =
+    (dealComp && snapshotFromDealComp(dealComp)) || (existing && snapshotFrom(existing));
+  if (snapshot) return { kind: "terms", terms: snapshot };
+
+  /**
+   * Has a customer put their name to this deal?
+   *
+   * Read from the proposal rather than the pipeline stage: a stage can be
+   * dragged backwards, and "signed" is a fact about a document, not a position
+   * on a board.
+   */
+  const isSigned =
+    (await db.solarProposal.count({ where: { leadId, signedAt: { not: null } } })) > 0;
+
+  if (isSigned) {
+    return {
+      kind: "refused",
+      reason:
+        dealComp?.needsReview === true
+          ? "Flagged for compensation review: this deal signed before its rep had terms for " +
+            "this kind of deal. An admin must establish what it was sold on before it pays."
+          : "This deal was signed without usable compensation terms. An admin must establish " +
+            "the terms it was sold on before it can pay — the rep's current profile is not a " +
+            "substitute for what was agreed.",
+    };
+  }
+
+  if (!repId || !deal) return { kind: "unconfigured" };
+  const rep = await db.user.findFirst({
+    where: { id: repId, companyId },
+    select: {
+      solarRedlineCentsPerWatt: true,
+      solarPerWattMills: true,
+      solarBatteryPayPlan: true,
+      solarRedlinePerBatteryCents: true,
+      solarPerBatteryFlatCents: true,
+    },
+  });
+  if (!rep) return { kind: "unconfigured" };
+
+  return resolveSolarPay({
+    systemType: deal.systemType,
+    product: deal.product,
+    lenderPayMode: deal.lenderPayMode,
+    rep,
+  });
+}
+
 /**
  * Computes and persists commissions for one solar project.
  */
@@ -313,16 +418,10 @@ export async function computeSolarCommissionsForProject(
   let repNetCents = 0;
 
   if (repId && deal) {
-    const rep = await db.user.findFirst({
-      where: { id: repId, companyId },
-      select: {
-        solarRedlineCentsPerWatt: true,
-        solarPerWattMills: true,
-        solarBatteryPayPlan: true,
-        solarRedlinePerBatteryCents: true,
-        solarPerBatteryFlatCents: true,
-      },
-    });
+    // The rep's own configuration is read by `resolveDealPayTerms`, and only on
+    // the branch that may use it — an unsigned deal. It is deliberately NOT
+    // read here any more: having it in scope is what made it easy to reach for
+    // on a signed deal, which is the defect the precedence chain prevents.
 
     /**
      * Anything the rep carries on this deal that ISN'T a solar line is stale —
@@ -380,28 +479,13 @@ export async function computeSolarCommissionsForProject(
      * exactly right. A SIGNED deal must never reach it: `isSigned` below is what
      * stops today's redline repricing a sale that closed six months ago.
      */
-    const snapshot =
-      (dealComp && snapshotFromDealComp(dealComp)) || (existing && snapshotFrom(existing));
-    const resolution: SolarPayResolution = snapshot
-      ? { kind: "terms", terms: snapshot }
-      : isSigned
-        ? {
-            kind: "refused",
-            reason: blockedForReview
-              ? "Flagged for compensation review: this deal signed before its rep had terms for " +
-                "this kind of deal. An admin must establish what it was sold on before it pays."
-              : "This deal was signed without usable compensation terms. An admin must establish " +
-                "the terms it was sold on before it can pay — the rep's current profile is not a " +
-                "substitute for what was agreed.",
-          }
-        : rep
-          ? resolveSolarPay({
-              systemType: deal.systemType,
-              product: deal.product,
-              lenderPayMode: deal.lenderPayMode,
-              rep,
-            })
-          : { kind: "unconfigured" };
+    const resolution: SolarPayResolution = await resolveDealPayTerms(db, companyId, {
+      leadId: project.leadId,
+      repId,
+      deal,
+      dealComp,
+      existing,
+    });
 
     if (resolution.kind === "refused") {
       // NOT a zero line, and not silence either. The rule is wrong for this
@@ -588,37 +672,61 @@ export async function estimatedSolarCommission(
   if (comp?.needsReview) return { state: "needs_review" };
   if (!deal) return { state: "unavailable", reason: "This deal is not designed and priced yet." };
 
-  let terms = comp ? snapshotFromDealComp(comp) : null;
-  const fromSnapshot = terms != null;
+  /**
+   * THE SAME PRECEDENCE PAYROLL USES, through the same function.
+   *
+   * This used to be a second copy of the chain, and the two disagreed on the
+   * case that matters: a SIGNED deal with no frozen terms. Payroll refused it;
+   * this showed the rep a confident figure off their current profile that
+   * payroll would never pay.
+   *
+   * The existing commission row is consulted too — layer 2 of the chain, which
+   * this never looked at. A deal whose line was written before `SolarDealComp`
+   * existed carries its terms there and nowhere else, so ignoring it showed a
+   * rep a different number from the one already generated against their name.
+   */
+  const existing = lead?.assignedRepId
+    ? await db.commission.findFirst({
+        where: {
+          companyId,
+          project: { leadId },
+          userId: lead.assignedRepId,
+          overrideId: null,
+          ruleId: null,
+          status: "pending",
+          label: { startsWith: "Solar " },
+        },
+        select: {
+          solarBasis: true,
+          solarRedlineCentsPerWatt: true,
+          solarRedlinePerBatteryCents: true,
+          solarPerBatteryFlatCents: true,
+          solarMillsPerWatt: true,
+        },
+      })
+    : null;
 
-  if (!terms) {
-    if (!lead?.assignedRepId) return { state: "unavailable", reason: "No rep is assigned." };
-    const rep = await db.user.findFirst({
-      where: { id: lead.assignedRepId, companyId },
-      select: {
-        solarRedlineCentsPerWatt: true, solarPerWattMills: true,
-        solarBatteryPayPlan: true, solarRedlinePerBatteryCents: true,
-        solarPerBatteryFlatCents: true,
-      },
-    });
-    if (!rep) return { state: "unavailable", reason: "No rep is assigned." };
-    const resolved = resolveSolarPay({
-      systemType: deal.systemType,
-      product: deal.product,
-      lenderPayMode: deal.lenderPayMode,
-      rep,
-    });
-    if (resolved.kind !== "terms") {
-      return {
-        state: "unavailable",
-        reason:
-          resolved.kind === "refused"
-            ? resolved.reason
-            : "This rep has no pay terms configured for this kind of deal.",
-      };
-    }
-    terms = resolved.terms;
+  const resolved = await resolveDealPayTerms(db, companyId, {
+    leadId,
+    repId: lead?.assignedRepId ?? null,
+    deal,
+    dealComp: comp,
+    existing,
+  });
+
+  if (resolved.kind === "refused") return { state: "unavailable", reason: resolved.reason };
+  if (resolved.kind === "unconfigured") {
+    return {
+      state: "unavailable",
+      reason: lead?.assignedRepId
+        ? "This rep has no pay terms configured for this kind of deal."
+        : "No rep is assigned.",
+    };
   }
+  const terms = resolved.terms;
+  // Whether the figure came from terms frozen at signing rather than from the
+  // rep's profile today — the deal page labels the two differently.
+  const fromSnapshot = comp != null && snapshotFromDealComp(comp) != null;
 
   const pay = solarRepPayCents(terms, deal);
   const payout = applyCompanyLeadTake(pay.amountCents, {

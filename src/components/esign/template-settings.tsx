@@ -55,6 +55,7 @@ export function TemplateSettings({
   initialName,
   initialFolderKey,
   finalPacket,
+  solarContract,
   destinations,
   fallbackLabel,
   signers,
@@ -65,6 +66,8 @@ export function TemplateSettings({
   initialName: string;
   initialFolderKey: string | null;
   finalPacket: FinalPacketState | null;
+  /** Solar only: whether this template is THE customer contract. Null elsewhere. */
+  solarContract: { checked: boolean } | null;
   destinations: DestinationOption[];
   /** Where a document goes when no folder is chosen — Contract, in both verticals. */
   fallbackLabel: string;
@@ -78,6 +81,7 @@ export function TemplateSettings({
   const [name, setName] = React.useState(initialName);
   const [folderKey, setFolderKey] = React.useState(initialFolderKey ?? NO_FOLDER);
   const [inPacket, setInPacket] = React.useState(finalPacket?.checked ?? false);
+  const [isContract, setIsContract] = React.useState(solarContract?.checked ?? false);
   const [signerId, setSignerId] = React.useState(initialCompanySignerId ?? DEFAULT_SIGNER);
   const [pending, setPending] = React.useState(false);
 
@@ -85,7 +89,8 @@ export function TemplateSettings({
     name !== initialName ||
     (initialFolderKey ?? NO_FOLDER) !== folderKey ||
     (initialCompanySignerId ?? DEFAULT_SIGNER) !== signerId ||
-    (finalPacket ? inPacket !== finalPacket.checked : false);
+    (finalPacket ? inPacket !== finalPacket.checked : false) ||
+    (solarContract ? isContract !== solarContract.checked : false);
 
   async function save() {
     const trimmed = name.trim();
@@ -102,6 +107,7 @@ export function TemplateSettings({
       // Left off entirely on a vertical with no packet, so the server keeps
       // whatever the column already held.
       ...(finalPacket ? { finalPacket: inPacket } : {}),
+      ...(solarContract ? { solarContract: isContract } : {}),
     });
     setPending(false);
     if (res.ok) {
@@ -194,6 +200,24 @@ export function TemplateSettings({
             </>
           )}
         </div>
+      )}
+
+      {solarContract && (
+        <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-lg border border-border bg-background p-3">
+          <Checkbox
+            checked={isContract}
+            onCheckedChange={(v) => setIsContract(v === true)}
+            className="mt-0.5"
+            aria-label="This is the customer's contract"
+          />
+          <span className="space-y-1">
+            <span className="block text-sm font-medium">This is the customer&rsquo;s contract</span>
+            <span className="block text-xs text-muted-foreground">
+              A fully signed copy on a deal is the completed contract Contract Signed waits for. Leave
+              it unticked on anything else — a utility authorisation, a permit form.
+            </span>
+          </span>
+        </label>
       )}
 
       {finalPacket && (

@@ -5,6 +5,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
+import { leadAccessible } from "@/server/rbac/lead-access";
 import { listScope } from "@/server/rbac/policies";
 import { getActiveVertical } from "@/server/auth/vertical";
 import { canSeeScopeCosts } from "@/server/modules/scope/policies";
@@ -13,11 +14,6 @@ import { ensureProposal } from "@/server/modules/proposals/queries";
 
 type Result = { ok: true } | { ok: false; error: string };
 
-/** Verify the user may access this lead (tenant + row scope). */
-async function leadAccessible(userId: string, companyId: string, role: string, leadId: string) {
-  const scope = listScope({ userId, companyId, role: role as never }, "Lead") as Prisma.LeadWhereInput;
-  return prisma.lead.findFirst({ where: { AND: [{ id: leadId }, scope] }, select: { id: true } });
-}
 
 /**
  * Get-or-create the estimate for a lead the user can edit.
@@ -32,7 +28,7 @@ async function ensureEstimate(
 ): Promise<{ ok: true; estimateId: string; companyId: string } | { ok: false; error: string }> {
   const user = await requireUser();
   if (!can(user, "update", "Scope")) return { ok: false, error: "Not allowed." };
-  const lead = await leadAccessible(user.userId, user.companyId, user.role, leadId);
+  const lead = await leadAccessible(user, leadId);
   if (!lead) return { ok: false, error: "Deal not found or access denied." };
 
   const existing = await prisma.estimate.findUnique({ where: { leadId }, select: { id: true } });
@@ -137,7 +133,7 @@ export async function updateEstimateLineAction(input: {
 }): Promise<Result> {
   const user = await requireUser();
   if (!can(user, "update", "Scope")) return { ok: false, error: "Not allowed." };
-  const lead = await leadAccessible(user.userId, user.companyId, user.role, input.leadId);
+  const lead = await leadAccessible(user, input.leadId);
   if (!lead) return { ok: false, error: "Access denied." };
 
   // Confirm the line belongs to this lead's estimate (tenant-safe).
@@ -164,6 +160,9 @@ export async function updateEstimateLineAction(input: {
 export async function deleteEstimateLineAction(input: { id: string; leadId: string }): Promise<Result> {
   const user = await requireUser();
   if (!can(user, "update", "Scope")) return { ok: false, error: "Not allowed." };
+  // The lookup below narrows to this leadId, but a leadId off the wire is not
+  // proof the caller may touch that deal — this line is a job cost.
+  if (!(await leadAccessible(user, input.leadId))) return { ok: false, error: "Line not found." };
   const line = await prisma.estimateLine.findFirst({
     where: { id: input.id, companyId: user.companyId, estimate: { leadId: input.leadId } },
     select: { id: true },

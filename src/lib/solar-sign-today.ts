@@ -108,8 +108,9 @@ export function resolveSignToday(input: {
   /** The array at sticker, fee included, adders and battery excluded. Cents. */
   systemPriceCents: number;
   /**
-   * The storage on the job at its catalogue price, cents. Zero or absent on a
-   * deal without one. Measured alongside the array — see the module docblock.
+   * The storage on the job as the household signs for it, cents — its catalogue
+   * price with the dealer fee on it. Zero or absent on a deal without one.
+   * Measured alongside the array — see the module docblock.
    */
   batteryPriceCents?: number | null;
   /** Installed watts, for the per-watt cap. Zero on a storage-only job. */

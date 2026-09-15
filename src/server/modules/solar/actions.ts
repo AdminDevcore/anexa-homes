@@ -6,15 +6,13 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { leadAccessible } from "@/server/rbac/lead-access";
-import { getSolarSettings } from "./settings";
+import { dealMoneyColumns, recomputeDealMoney } from "./deal-money";
+import { auditSignedEdit, checkSignedLock } from "./signed-lock";
 import { resolveDesignBattery, resolveSizingModule } from "./sizing";
 import { recomputeDesignFigures } from "./recompute";
 import { canGenerate } from "@/lib/solar-validation";
 import { readSolarReadiness } from "./readiness";
-import { financeRowForProduct } from "@/lib/solar-finance-row";
-import { LENDER_TERMS_SELECT, toLenderProductTerms } from "./lender-terms";
-import { recomputeAdderTotal, resolveAdderTotal, restampAddersForLender } from "./adders";
-import { priceStorageStored, batteryChargeCents } from "@/lib/solar-money";
+import { recomputeAdderTotal, restampAddersForLender } from "./adders";
 import { FIELD_SOURCES, WIRE_FIELDS } from "./lender-field-map";
 
 const fail = (error: string) => ({ ok: false as const, error });
@@ -58,6 +56,10 @@ const settingsSchema = z.object({
   // outage. Optional so a client that predates the field leaves it alone.
   backupOutageDrawFactor: z.number().min(1).max(3).optional(),
   minOffsetPct: z.number().min(0).max(200),
+  // A minimum of 0 CONFIRMED as "no minimum", as opposed to never set up. Only
+  // meaningful at 0; a minimum above zero is always a decision. Optional so a
+  // client that predates it leaves the stored answer alone.
+  minOffsetNone: z.boolean().optional(),
   maxOffsetPct: z.number().min(0).max(500),
   // The federal credits, for the contract-adjustment ladder. Statute, so they
   // are typed rather than compiled in. Zero is meaningful — it means the
@@ -81,8 +83,18 @@ export async function updateSolarSettingsAction(input: z.infer<typeof settingsSc
   if (!can(user, "update", "Settings")) return fail("Not allowed.");
   const parsed = settingsSchema.safeParse(input);
   if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Invalid settings.");
-  const d = parsed.data;
+  const { minOffsetNone, ...d } = parsed.data;
   if (d.minOffsetPct >= d.maxOffsetPct) return fail("Minimum offset must be below the maximum.");
+
+  // Decided = a minimum above zero, or zero confirmed as "no minimum". Saving
+  // this form for any other reason must not turn an unset minimum into a
+  // decided one, nor a confirmed "no minimum" back into an unset one.
+  const stored = await prisma.solarSettings.findUnique({
+    where: { companyId: user.companyId },
+    select: { minOffsetConfigured: true },
+  });
+  const minOffsetConfigured =
+    d.minOffsetPct > 0 ? true : (minOffsetNone ?? stored?.minOffsetConfigured ?? false);
 
   // No incentive is quoted anywhere in the product, so saving settings also
   // clears anything a legacy row still carries. Leaving a stale 30% sitting in
@@ -90,8 +102,8 @@ export async function updateSolarSettingsAction(input: z.infer<typeof settingsSc
   const incentives = { federalItcPct: null, stateIncentiveNote: null };
   await prisma.solarSettings.upsert({
     where: { companyId: user.companyId },
-    create: { companyId: user.companyId, ...d, ...incentives },
-    update: { ...d, ...incentives },
+    create: { companyId: user.companyId, ...d, minOffsetConfigured, ...incentives },
+    update: { ...d, minOffsetConfigured, ...incentives },
   });
   revalidatePath("/portal/settings/solar");
   return ok();
@@ -127,6 +139,13 @@ export async function setSolarCreditClaimsAction(input: z.infer<typeof creditCla
   const lead = await leadAccessible(user, leadId);
   if (!lead) return fail("Deal not found.");
   if (lead.vertical !== "solar") return fail("This is not a solar deal.");
+
+  /**
+   * A SIGNED CONTRACT'S ECONOMICS ARE A RECORD, not a working draft.
+   * Super admin passes and the change is logged. See ./signed-lock.ts.
+   */
+  const lock_setSolarCreditClaimsAction = await checkSignedLock(user, lead.id, "the federal credits this deal claims");
+  if (lock_setSolarCreditClaimsAction.blocked) return fail(lock_setSolarCreditClaimsAction.error);
 
   // updateMany rather than update: a deal whose financing has not been saved
   // yet has no row, and the honest outcome there is "nothing to record", not a
@@ -176,6 +195,13 @@ export async function setSolarSignTodayCreditAction(input: z.infer<typeof signTo
   const lead = await leadAccessible(user, leadId);
   if (!lead) return fail("Deal not found.");
   if (lead.vertical !== "solar") return fail("This is not a solar deal.");
+
+  /**
+   * A SIGNED CONTRACT'S ECONOMICS ARE A RECORD, not a working draft.
+   * Super admin passes and the change is logged. See ./signed-lock.ts.
+   */
+  const lock_setSolarSignTodayCreditAction = await checkSignedLock(user, lead.id, "the sign-today credit");
+  if (lock_setSolarSignTodayCreditAction.blocked) return fail(lock_setSolarSignTodayCreditAction.error);
 
   const { count } = await prisma.solarFinance.updateMany({
     where: { companyId: user.companyId, leadId },
@@ -245,6 +271,13 @@ export async function saveSolarDesignAction(input: z.infer<typeof designSchema>)
   const lead = await leadAccessible(user, d.leadId);
   if (!lead) return fail("Deal not found.");
   if (lead.vertical !== "solar") return fail("This is not a solar deal.");
+
+  /**
+   * A SIGNED CONTRACT'S ECONOMICS ARE A RECORD, not a working draft.
+   * Super admin passes and the change is logged. See ./signed-lock.ts.
+   */
+  const lock_saveSolarDesignAction = await checkSignedLock(user, lead.id, "the system design");
+  if (lock_saveSolarDesignAction.blocked) return fail(lock_saveSolarDesignAction.error);
 
   const existing = await prisma.solarDesign.findUnique({
     where: { leadId: d.leadId },
@@ -399,6 +432,11 @@ export async function setSolarDealLenderAction(input: z.infer<typeof dealLenderS
   const lead = await leadAccessible(user, leadId);
   if (!lead) return fail("Deal not found.");
 
+  // The lender decides the fee, the ceiling and how adders are financed, so on
+  // a signed contract it is an economic field like any other.
+  const lenderLock = await checkSignedLock(user, leadId, "the deal's lender");
+  if (lenderLock.blocked) return fail(lenderLock.error);
+
   // A lender id from another company must never attach to this design.
   if (lenderId) {
     const l = await prisma.solarLender.findFirst({
@@ -444,6 +482,14 @@ export async function setSolarDealLenderAction(input: z.infer<typeof dealLenderS
   // because this IS a deliberate edit to the adders — see recomputeAdderTotal.
   const restamped = await restampAddersForLender(user.companyId, leadId, lenderId);
   if (restamped > 0) await recomputeAdderTotal(user.companyId, leadId, { force: true });
+
+  /**
+   * AND THE CONTRACT. A partner brings its own dealer fee, its own $/W ceiling
+   * and its own per-battery rule, so moving a deal between lenders reprices it
+   * even when not one adder moved. Leaving the cached figure behind is how a
+   * deal quoted one price on screen and submitted another to the bank.
+   */
+  await recomputeDealMoney(user.companyId, leadId);
 
   revalidatePath(`/portal/leads/${leadId}`);
   revalidatePath(`/portal/leads/${leadId}/solar-proposal`);
@@ -528,6 +574,8 @@ const providerTermsSchema = z.object({
   vppProgramme: z.string().max(120).nullable(),
   vppUpfrontCents: z.number().int().min(0).max(100_000_00).nullable(),
   vppAnnualCents: z.number().int().min(0).max(100_000_00).nullable(),
+  /** The programme's ceiling. Null = the house rule, VPP_DEFAULT_MAX_BATTERIES. */
+  vppMaxBatteries: z.number().int().min(0).max(100).nullable(),
   /**
    * Who the programme is open to. Every list EMPTY MEANS NO RESTRICTION, which
    * is why they are plain arrays with no "restrict?" flag beside them: there is
@@ -613,6 +661,7 @@ export async function saveSolarProviderTermsAction(
       vppProgramme: d.vpp ? (d.vppProgramme?.trim() || null) : null,
       vppUpfrontCents: d.vpp ? d.vppUpfrontCents : null,
       vppAnnualCents: d.vpp ? d.vppAnnualCents : null,
+      vppMaxBatteries: d.vpp ? d.vppMaxBatteries : null,
       // The conditions follow their flag, exactly as the figures do. A battery
       // list left behind on a provider somebody has just said runs NO programme
       // is a condition on nothing, and it would come back the day the flag is
@@ -702,126 +751,43 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
   if (!lead) return fail("Deal not found.");
   if (lead.vertical !== "solar") return fail("This is not a solar deal.");
 
-  const assumptions = await getSolarSettings(user.companyId);
-
-  const design = await prisma.solarDesign.findUnique({
-    where: { leadId: f.leadId },
-    select: {
-      systemSizeKwDc: true,
-      lenderId: true,
-      systemType: true,
-      batteryQty: true,
-      // What the catalogue sells this battery for — the price the deal falls
-      // back to when nobody has typed one. See `batteryChargeCents`.
-      battery: { select: { priceCents: true } },
-      // The partner's per-battery rule, read off the LENDER rather than the
-      // programme row — the same place the $/W ceiling is read from.
-      lender: {
-        select: { maxFinalPricePerBatteryCents: true, finalBatteryPriceMode: true },
-      },
-    },
-  });
-  const lenderBand = design?.lender ?? null;
-
-  // The quoted product's terms are READ HERE, from the row, and never taken
-  // from the request. A rate sheet a caller can post arbitrary terms against is
-  // not a rate sheet — the APR a customer is quoted has to be one this lender
-  // actually offers. Scoped to the company, and to the lender the system was
-  // designed for, so a product id from elsewhere resolves to nothing.
-  const lenderProduct = f.lenderProductId
-    ? await prisma.solarLenderProduct.findFirst({
-        where: {
-          id: f.lenderProductId,
-          companyId: user.companyId,
-          ...(design?.lenderId ? { lenderId: design.lenderId } : {}),
-        },
-        select: LENDER_TERMS_SELECT,
-      })
+  /**
+   * A SIGNED CONTRACT'S ECONOMICS ARE A RECORD, not a working draft.
+   * Super admin passes and the change is logged. See ./signed-lock.ts.
+   */
+  const lock_saveSolarFinanceAction = await checkSignedLock(user, lead.id, "the price and financing");
+  if (lock_saveSolarFinanceAction.blocked) return fail(lock_saveSolarFinanceAction.error);
+  /**
+   * The contract as it stood, so an override can be answered with a figure
+   * rather than only with a timestamp. Read only when one is actually
+   * happening — an ordinary save on an unsigned deal costs no extra query.
+   */
+  const priceBefore = lock_saveSolarFinanceAction.override
+    ? (
+        await prisma.solarFinance.findUnique({
+          where: { leadId: f.leadId },
+          select: { contractPriceCents: true },
+        })
+      )?.contractPriceCents ?? null
     : null;
 
-  // The adders are the DEAL's, read here rather than taken from the request.
-  // Nothing was sending them, so every save wrote a zero over the cached total
-  // and priced the contract without the extra work in it.
-  const adders = await resolveAdderTotal(user.companyId, f.leadId);
-
   /**
-   * WHAT THE STORAGE ADDS TO THIS CONTRACT.
+   * THE ONE DERIVATION, shared with every recompute.
    *
-   * The rep's own per-battery price where the deal carries one, else the
-   * catalogue's — the rule lives in `batteryChargeCents` so that this save, the
-   * builder that called it, the proposal and payroll cannot disagree about one
-   * house. Zero on a storage-only deal, which is priced per battery below.
+   * This block used to live inline here, which meant the financing step was the
+   * only thing in the product that could put `contractPriceCents` back in step.
+   * Everything else that moves the price — the roof, the battery, an adder, a
+   * change of lender — wrote its own table and left the contract stale. It is
+   * `deal-money.ts` now, called from all of them, so there is one answer to
+   * what a house costs rather than one per caller. See that file.
    */
-  const batteryPriceCents = batteryChargeCents({
-    systemType: design?.systemType,
-    batteryQty: design?.batteryQty,
-    dealPerBatteryCents: f.stickerPricePerBatteryCents,
-    cataloguePerBatteryCents: design?.battery?.priceCents ?? null,
-  });
-
-  // Every product-specific column is gated on the product — see
-  // financeRowForProduct for why "most of them" was a customer-facing defect.
-  const rowData = financeRowForProduct({ ...f, ...adders, batteryPriceCents }, {
-    systemSizeKwDc: design?.systemSizeKwDc ?? 0,
-    assumptions,
-    lenderProduct: toLenderProductTerms(lenderProduct),
-    targetNetPpwCents: assumptions.targetNetPpwCents,
-  });
-
-  /**
-   * The storage sticker, and the contract that follows from it.
-   *
-   * `financeRowForProduct` prices per watt — the company default, the target
-   * net, the partner's $/W ceiling. On a deal with no array every one of those
-   * multiplies by zero, so a storage deal is priced here instead, through the
-   * same ladder over batteries.
-   */
-  const isStorage = design?.systemType === "storage";
-  const storageSticker = isStorage ? (f.stickerPricePerBatteryCents ?? 0) : 0;
-  const storagePrice =
-    isStorage && (f.product === "cash" || f.product === "loan") && storageSticker > 0
-      ? priceStorageStored({
-          product: f.product,
-          batteryQty: design?.batteryQty ?? 0,
-          stickerPricePerBatteryCents: storageSticker,
-          dealerFeePct: f.product === "cash" ? 0 : (rowData.dealerFeePct ?? 0),
-          adderTotalCents: adders.adderTotalCents,
-          onTopAdderTotalCents: adders.onTopAdderTotalCents,
-          maxFinalPricePerBatteryCents: lenderBand?.maxFinalPricePerBatteryCents ?? null,
-          finalBatteryPriceMode: lenderBand?.finalBatteryPriceMode ?? "cap",
-          // Which price that figure fixes is the quoted programme's to say.
-          batteryPriceBasis: lenderProduct?.batteryPriceBasis,
-        })
-      : null;
-
-  const data = {
-    ...rowData,
-    /**
-     * WHAT ONE BATTERY SELLS FOR ON THIS DEAL — on either kind of deal.
-     *
-     * It used to be zeroed on anything that was not storage-only, because
-     * nothing else read it. Something else reads it now: a battery beside an
-     * array is charged for on top of the per-watt price, and this is where a
-     * rep's own figure for it lives. Wiping it here would throw that price away
-     * on the next save of the financing step and quietly re-quote the deal at
-     * the catalogue's.
-     *
-     * Still zeroed on a deal with NO battery at all, which is the case the old
-     * rule was really about: a deal switched back to solar-only must not keep a
-     * price per battery nothing reads.
-     */
-    stickerPricePerBatteryCents: isStorage
-      ? storageSticker
-      : (design?.batteryQty ?? 0) > 0
-        ? (f.stickerPricePerBatteryCents ?? 0)
-        : 0,
-    // The $/W sticker is meaningless on storage and would be read as one.
-    ...(isStorage ? { grossPpwCents: 0 } : {}),
-    ...(storagePrice ? { contractPriceCents: storagePrice.breakdown.contractPriceCents } : {}),
-  };
+  const data = await dealMoneyColumns(user.companyId, f.leadId, f);
 
   const saved = await prisma.solarFinance.upsert({
     where: { leadId: f.leadId },
+    // A new deal claims the ITC and NEITHER bonus: whether a roof is in an
+    // energy community, or the kit is domestic content, is established case by
+    // case. The column defaults agree; stated here so no create path can differ.
     create: {
       companyId: user.companyId,
       leadId: f.leadId,
@@ -841,6 +807,16 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
       lenderProductId: true,
     },
   });
+
+  // A super admin rewriting a signed contract's price, with both figures.
+  if (lock_saveSolarFinanceAction.override) {
+    await auditSignedEdit(user, lead.id, {
+      what: "the contract price",
+      before: priceBefore,
+      after: saved.contractPriceCents,
+      reason: lock_saveSolarFinanceAction.override.reason,
+    });
+  }
 
   revalidatePath(`/portal/leads/${f.leadId}`);
   // Return what was actually STORED, so the panel re-seeds from the database
@@ -900,7 +876,7 @@ const equipmentSchema = z.object({
   autoApplyMinKw: z.number().min(0).max(1000).nullable().optional(),
   autoApplyMaxKw: z.number().min(0).max(1000).nullable().optional(),
   // Adders only: this work is added to the loan ON TOP of a partner's fixed or
-  // maximum $/W, at its own price, rather than coming out of the system price.
+  // maximum $/W, rather than coming out of the system price (the dealer fee still applies).
   financedOnTop: z.boolean().optional(),
   rank: z.number().int().min(0).max(999).optional(),
   isActive: z.boolean().optional(),
@@ -1870,6 +1846,11 @@ export async function setSolarSystemTypeAction(input: unknown) {
   const { leadId, systemType } = parsed.data;
   if (!(await leadAccessible(user, leadId))) return fail("Deal not found.");
 
+  // Switching between PV, PV + storage and storage-only re-prices the whole
+  // deal, which a signature has settled.
+  const typeLock = await checkSignedLock(user, leadId, "what the deal sells");
+  if (typeLock.blocked) return fail(typeLock.error);
+
   const design = await prisma.solarDesign.findFirst({
     where: { leadId, companyId: user.companyId },
     select: {
@@ -1920,6 +1901,13 @@ export async function setSolarSystemTypeAction(input: unknown) {
         : {}),
     },
   });
+
+  /**
+   * AND THE CONTRACT. Switching between an array and storage-only changes which
+   * ladder prices the deal — per watt or per battery — so the cached figure is
+   * a price for a system this deal no longer sells.
+   */
+  await recomputeDealMoney(user.companyId, leadId);
 
   revalidatePath(`/portal/leads/${leadId}/solar-proposal`);
   revalidatePath(`/portal/leads/${leadId}`);

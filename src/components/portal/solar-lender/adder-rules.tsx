@@ -73,9 +73,10 @@ export function AdderRulesPanel({
           On a partner with a fixed or maximum $/W, every adder comes out of that figure by default:
           the homeowner&rsquo;s number does not move and the work is paid for out of what you keep.
           Switch one on here and this partner funds it{" "}
-          <span className="font-medium text-foreground">on top</span>{" "}instead, at its own price — a
-          10&nbsp;kW job at $5.50/W is $55,000, and the same job with a $7,000 roof on top is
-          $62,000.
+          <span className="font-medium text-foreground">on top</span>{" "}of that figure instead. It is
+          still part of the gross, so the dealer fee is taken on it like every other adder: at an 18%
+          fee a 10&nbsp;kW job at $5.50/W is $55,000, and the same job with a $7,000 roof on top is
+          $63,537.
         </p>
         {!priced && (
           <div className="mt-3">

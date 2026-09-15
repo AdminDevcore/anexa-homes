@@ -14,10 +14,17 @@ import { getClaimStatuses } from "@/server/modules/settings/queries";
 import { claimStatusOpensClaim } from "@/lib/claim-status";
 import { VERTICAL_SERVICE_TYPE } from "@/lib/vertical";
 import { resolveStageForAppointment } from "./staging";
+import { guardedStageId } from "@/server/modules/pipeline/stage-guard";
 import { resolveOwningRepId } from "./owning-rep";
 import { zonedWallClockToUtc } from "@/lib/tz";
 import { addressChanged } from "@/server/modules/geo/resolve";
 import { leadContactFields } from "./contact-fields";
+import {
+  appointmentMovePatch,
+  planLeadAppointmentMove,
+  recordAppointmentReschedule,
+} from "./appointment-moves";
+import type { AppointmentReschedule } from "@/lib/appointment-reschedule";
 
 /** The company's appointment timezone (defaults to Central if unset). */
 async function companyTimeZone(companyId: string): Promise<string> {
@@ -109,11 +116,23 @@ export async function createLeadAction(input: LeadInput) {
   // Stage follows the appointment date: a date lands the deal in "Appointment Set",
   // no date keeps it in "New Lead" (unless an explicit forward stage was chosen).
   const hasAppointment = Boolean(d.appointmentAt);
-  const stageId = await resolveStageForAppointment({
+  const resolvedStageId = await resolveStageForAppointment({
     pipelineId: pipeline?.id ?? null,
     candidateStageId: d.stageId || null,
     hasAppointment,
   });
+  // A new deal has no documents and no certified funding, so it can never
+  // START at or past Contract Signed or M1 Funding — see guardedStageId.
+  const guard = await guardedStageId({
+    companyId: user.companyId,
+    actor: user,
+    lead: { id: null, vertical, stageId: null },
+    resolvedStageId,
+    explicitStageId: d.stageId || null,
+    fallbackStageId: pipeline?.stages[0]?.id ?? null,
+  });
+  if (!guard.ok) return { ok: false as const, error: guard.error };
+  const stageId = guard.stageId;
 
   const tz = await companyTimeZone(user.companyId);
   const lead = await prisma.lead.create({
@@ -197,6 +216,9 @@ export async function updateLeadAction(id: string, input: LeadInput) {
       // Which workspace this deal is in decides whether the form's solar-only
       // fields mean anything.
       vertical: true,
+      // Moving the time on a solar deal is recorded as a reschedule.
+      appointmentAt: true,
+      appointmentDisposition: true,
     },
   });
   if (!existing) return { ok: false as const, error: "Lead not found or access denied." };
@@ -217,14 +239,27 @@ export async function updateLeadAction(id: string, input: LeadInput) {
   // date moves it to "Appointment Set", clearing it returns it to "New Lead";
   // deals already past those stages are left where they are.
   const hasAppointment = Boolean(d.appointmentAt);
-  const stageId = await resolveStageForAppointment({
+  const resolvedStageId = await resolveStageForAppointment({
     pipelineId: existing.pipelineId,
     candidateStageId: d.stageId || existing.stageId,
     hasAppointment,
   });
+  // The lead form can move a deal as well as the board can, so it is held to
+  // the same stage rules — M1 Funding and Contract Signed.
+  const guard = await guardedStageId({
+    companyId: user.companyId,
+    actor: user,
+    lead: { id, vertical: existing.vertical, stageId: existing.stageId },
+    resolvedStageId,
+    explicitStageId: d.stageId || null,
+  });
+  if (!guard.ok) return { ok: false as const, error: guard.error };
+  const stageId = guard.stageId;
   const stageChanged = stageId !== existing.stageId;
 
   const tz = await companyTimeZone(user.companyId);
+  const appointmentAt = d.appointmentAt ? zonedWallClockToUtc(d.appointmentAt, tz) : null;
+  const move = await planLeadAppointmentMove(user.companyId, existing, appointmentAt);
   await prisma.lead.update({
     where: { id },
     data: {
@@ -252,13 +287,15 @@ export async function updateLeadAction(id: string, input: LeadInput) {
       dealType: d.dealType,
       value: d.valueCents,
       priority: d.priority,
-      appointmentAt: d.appointmentAt ? zonedWallClockToUtc(d.appointmentAt, tz) : null,
+      appointmentAt,
+      ...appointmentMovePatch(move),
       notes: d.notes || null,
       customFields: d.customFields as Prisma.InputJsonValue,
     },
   });
 
   if (stageChanged) await recordStageEntry({ leadId: id, stageId, movedById: user.userId });
+  await recordAppointmentReschedule(id, move, user.userId);
 
   // The utility is the design's, not the lead's, so an edit writes it through
   // to the design. Only when the form actually sent one: a roofing edit, or a
@@ -344,6 +381,7 @@ export async function updateLeadPatchAction(leadId: string, patch: LeadPatch) {
     select: {
       id: true, assignedRepId: true, pipelineId: true, stageId: true,
       address: true, city: true, state: true, zip: true,
+      vertical: true, appointmentAt: true, appointmentDisposition: true,
     },
   });
   if (!existing) return { ok: false as const, error: "Lead not found or access denied." };
@@ -401,14 +439,30 @@ export async function updateLeadPatchAction(leadId: string, patch: LeadPatch) {
   // exactly as the full form does — otherwise booking from the Summary card
   // would leave the deal sitting in "New Lead" with a date on it.
   let movedTo: string | null = null;
+  let move: AppointmentReschedule | null = null;
   if ("appointmentAt" in d) {
     const tz = await companyTimeZone(user.companyId);
-    data.appointmentAt = d.appointmentAt ? zonedWallClockToUtc(d.appointmentAt, tz) : null;
-    const stageId = await resolveStageForAppointment({
+    const nextAt = d.appointmentAt ? zonedWallClockToUtc(d.appointmentAt, tz) : null;
+    data.appointmentAt = nextAt;
+    // Moving a solar deal's time is a reschedule; a stale outcome comes off with it.
+    move = await planLeadAppointmentMove(user.companyId, existing, nextAt);
+    Object.assign(data, appointmentMovePatch(move));
+    const resolvedStageId = await resolveStageForAppointment({
       pipelineId: existing.pipelineId,
       candidateStageId: existing.stageId,
       hasAppointment: Boolean(d.appointmentAt),
     });
+    // Automatic only, so a re-stage that would cross Contract Signed or M1
+    // Funding is simply not applied rather than failing the save — see
+    // guardedStageId.
+    const guard = await guardedStageId({
+      companyId: user.companyId,
+      actor: user,
+      lead: { id: existing.id, vertical: existing.vertical, stageId: existing.stageId },
+      resolvedStageId,
+      explicitStageId: null,
+    });
+    const stageId = guard.ok ? guard.stageId : existing.stageId;
     if (stageId && stageId !== existing.stageId) {
       data.stage = { connect: { id: stageId } };
       data.stageChangedAt = new Date();
@@ -418,6 +472,7 @@ export async function updateLeadPatchAction(leadId: string, patch: LeadPatch) {
 
   await prisma.lead.update({ where: { id: existing.id }, data });
   if (movedTo) await recordStageEntry({ leadId: existing.id, stageId: movedTo, movedById: user.userId });
+  await recordAppointmentReschedule(existing.id, move, user.userId);
 
   if (canAssign && d.assignedRepId && d.assignedRepId !== existing.assignedRepId) {
     await fireEvent({ companyId: user.companyId, event: "lead_assigned", actorId: user.userId, leadId: existing.id });

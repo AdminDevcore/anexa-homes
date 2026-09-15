@@ -108,6 +108,7 @@ export default async function TemplateEditorPage({
               }
             : null
         }
+        solarContract={template.vertical === "solar" ? { checked: template.type === "solar_contract" } : null}
         // The packages folder is already the default option, so it is not
         // offered a second time under its own name — two entries that do the
         // same thing only raise the question of how they differ.

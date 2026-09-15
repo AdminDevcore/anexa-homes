@@ -1305,8 +1305,14 @@ export type SolarProposalSnapshot = {
  *     programme, with the dealer fee added on top, as well as the FINAL price
  *     with the fee inside it. Chosen per programme; `final` is the default, so
  *     a revision-4 document was necessarily priced on `final`.
+ * 6 — the BATTERY sits inside the dealer fee: it grosses up by the programme's
+ *     fee like an adder, and the customer's battery line is that grossed-up
+ *     figure. Every document at revision 5 or below charged the battery on top,
+ *     at its catalogue price. (On 2026-09-14 this shipped as a per-lender
+ *     switch, on for every lender; it was removed on 2026-09-15 with both live
+ *     lenders still on, so every revision-6 document prices it the same way.)
  */
-export const PRICING_CALCULATION_VERSION = 5;
+export const PRICING_CALCULATION_VERSION = 6;
 
 /** The standing non-binding-estimate wording. Shown on every proposal. */
 export const ESTIMATE_DISCLAIMER =
@@ -1548,9 +1554,10 @@ function priceOption(args: {
   const signToday = resolveSignToday({
     rule: args.signTodayRule,
     systemPriceCents: purchase?.baseStickerCents ?? 0,
-    // The storage rides on top at catalogue price and the household signs for
-    // it, so the cap is measured over it too. See `solar-sign-today`.
-    batteryPriceCents: purchase?.batteryPriceCents ?? 0,
+    // The storage as the household signs for it — with the partner's fee on it
+    // where the partner takes one — so the cap is measured over it too. See
+    // `solar-sign-today`.
+    batteryPriceCents: purchase?.batteryStickerCents ?? 0,
     systemWatts: purchase?.systemWatts ?? 0,
     // The same percentages and the same tick-boxes the ladder below is built
     // from, so the rung and the net cost it lands on cannot disagree.
@@ -1826,26 +1833,21 @@ function priceOption(args: {
     // leaves a breakdown a few cents out from its own total, which is a
     // question a homeowner with a calculator is entitled to ask.
     //
-    // APPORTIONED WITHIN THE FEE-BEARING HALF ONLY. A line financed on top does
-    // not carry a share of the dealer fee — that is the whole meaning of the
-    // flag — so it is printed at its own amount, and only the rest is spread
-    // across the grossed-up total. Sharing the fee out over all of them would
-    // put part of the array's cut on the roof line and leave the roof reading
-    // $20,000 on a contract that added $7,000 for it.
+    // APPORTIONED ACROSS EVERY LINE, a roof financed on top included. The
+    // dealer fee is taken on the whole gross, so each line of work carries its
+    // share of it; a line flagged on top used to print at its own amount, which
+    // was the fee on that line given away.
     ...(purchase && finance.adders?.some((x) => x.amountCents > 0)
       ? (() => {
           const lines = finance.adders!.filter((x) => x.amountCents > 0);
-          const inside = lines.filter((x) => !x.financedOnTop);
-          const grossedInside = apportionCents(
-            purchase.adderStickerCents - purchase.onTopAdderTotalCents,
-            inside.map((x) => x.amountCents)
+          const grossed = apportionCents(
+            purchase.adderStickerCents,
+            lines.map((x) => x.amountCents)
           );
-          const byLine = new Map<(typeof lines)[number], number>();
-          inside.forEach((x, i) => byLine.set(x, grossedInside[i]));
           return {
-            adders: lines.map((x) => ({
+            adders: lines.map((x, i) => ({
               label: x.label,
-              amountCents: x.financedOnTop ? x.amountCents : (byLine.get(x) ?? 0),
+              amountCents: grossed[i],
               // Spread, not assigned undefined: the snapshot is asserted to
               // hold no undefined anywhere, because an undefined reaching a
               // renderer prints as "undefined" in front of a homeowner.
@@ -1868,7 +1870,10 @@ function priceOption(args: {
      */
     ...(purchase && purchase.batteryPriceCents > 0
       ? {
-          batteryPriceCents: purchase.batteryPriceCents,
+          // What the HOUSEHOLD pays for it, so the rows on their breakdown —
+          // system, work, battery — still add up to the total. The catalogue
+          // price itself unless the partner takes its fee on the battery.
+          batteryPriceCents: purchase.batteryStickerCents,
           batteryQty: design.batteryQty,
           ...(design.batteryLabel ? { batteryLabel: design.batteryLabel } : {}),
         }
