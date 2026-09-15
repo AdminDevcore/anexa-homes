@@ -2111,6 +2111,8 @@ export default async function LeadDetailPage({
                   name: f.name,
                   kind: f.kind,
                   category: f.category,
+                  mimeType: f.mimeType,
+                  documentType: f.documentType,
                 }))}
               dropboxCounts={dealDropboxCounts}
               packages={lead.documentPackages.map((d) => ({
@@ -2122,6 +2124,7 @@ export default async function LeadDetailPage({
               }))}
               canUpload={can(user, "create", "File")}
               canDelete={can(user, "create", "File")}
+              canClassifyContract={can(user, "update", "File")}
             />
           </Card>
             </section>

@@ -96,6 +96,15 @@ enum FileKind {
   other
 }
 
+/// What a file IS, where that has to be known reliably rather than read off its
+/// folder or its name. Set only by a person, explicitly — never inferred.
+enum FileDocumentType {
+  /// The lender's own signed contract (Amos's), marked as such on a PDF in a
+  /// solar deal's Contract folder. With a signed proposal it satisfies Contract
+  /// Signed — see server/modules/pipeline/contract-signed.ts.
+  signed_lender_contract
+}
+
 enum ActivityType {
   note
   call
@@ -119,6 +128,10 @@ enum DocumentTemplateType {
   warranty_certificate
   customer_closeout
   custom
+  /// The solar customer contract. A COMPLETED package from a template of this
+  /// type, in the deal's Contract folder, is the Anexa contract Contract Signed
+  /// accepts. Chosen on the template ("This is the customer's contract").
+  solar_contract
 }
 
 enum DocumentFieldType {
@@ -1569,6 +1582,15 @@ model FileAsset {
   mimeType            String?
   size                Int                @default(0)
   category            String? // e.g. "before", "after", "contract", or a photo slot label
+  /// Explicit classification — see FileDocumentType. NULL on every file nobody
+  /// has classified, which is nearly all of them. A folder is where a file is
+  /// KEPT; this is what it IS, and only this can make an uploaded file count as
+  /// a completed contract.
+  documentType        FileDocumentType?
+  /// Who classified it and when. An id rather than a relation, like
+  /// DocumentPackage.createdById: an audit stamp, not a join anybody reads.
+  documentTypeSetById String?
+  documentTypeSetAt   DateTime?
   leadId              String?
   lead                Lead?              @relation(fields: [leadId], references: [id], onDelete: Cascade)
   projectId           String?

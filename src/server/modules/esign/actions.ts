@@ -516,6 +516,9 @@ const updateTemplateSchema = z.object({
   // Who signs this one for us. "" means the company default. Optional for the
   // same reason as finalPacket.
   companySignerId: z.string().optional().or(z.literal("")),
+  // Whether this template IS the solar customer contract — the classification
+  // Contract Signed reads. Optional for the same reason as finalPacket.
+  solarContract: z.boolean().optional(),
 });
 
 /**
@@ -537,7 +540,7 @@ export async function updateTemplateAction(input: z.infer<typeof updateTemplateS
 
   const template = await prisma.documentTemplate.findFirst({
     where: { id: parsed.data.id, companyId: user.companyId },
-    select: { id: true, vertical: true },
+    select: { id: true, vertical: true, type: true },
   });
   if (!template) return { ok: false as const, error: "Template not found." };
 
@@ -556,6 +559,18 @@ export async function updateTemplateAction(input: z.infer<typeof updateTemplateS
   const finalPacket =
     template.vertical === "solar" && parsed.data.finalPacket !== undefined
       ? { finalPacket: parsed.data.finalPacket }
+      : {};
+
+  // THE CONTRACT CLASSIFICATION, solar only for the same reason as the packet.
+  // A COMPLETED package from a template marked here is the Anexa contract that
+  // Contract Signed accepts; unticking returns it to an ordinary document.
+  const contractType =
+    template.vertical === "solar" && parsed.data.solarContract !== undefined
+      ? parsed.data.solarContract
+        ? { type: "solar_contract" as const }
+        : template.type === "solar_contract"
+          ? { type: "custom" as const }
+          : {}
       : {};
 
   /**
@@ -578,7 +593,7 @@ export async function updateTemplateAction(input: z.infer<typeof updateTemplateS
 
   await prisma.documentTemplate.update({
     where: { id: template.id },
-    data: { name: parsed.data.name, folderKey, ...finalPacket, ...companySigner },
+    data: { name: parsed.data.name, folderKey, ...finalPacket, ...companySigner, ...contractType },
   });
 
   revalidatePath("/portal/documents");

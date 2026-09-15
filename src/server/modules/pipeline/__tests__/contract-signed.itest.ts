@@ -10,7 +10,7 @@ import { runInVertical } from "@/server/vertical/context";
  *
  * A solar deal reaches Contract Signed only when the customer has signed the
  * proposal AND a completed contract is in the deal's Contract folder (Anexa's
- * e-signed contract, or the lender's — Amos's — filed there). Every path that
+ * e-signed contract, or the lender's — Amos's — marked as the signed contract there). Every path that
  * can move a deal is driven here the way a hand-rolled request would drive it,
  * with no UI in the loop, because hiding a control is not a control.
  *
@@ -34,7 +34,10 @@ vi.mock("@/server/auth/vertical", () => ({ getActiveVertical: vi.fn(async () => 
 
 const { moveLeadStage, cancelLeadAction } = await import("@/server/modules/leads/actions");
 const { updateLeadAction } = await import("@/server/modules/leads/manage");
-const { uploadFileAction, moveFileAction } = await import("@/server/modules/files/actions");
+const { uploadFileAction, moveFileAction, setSignedLenderContractAction } = await import(
+  "@/server/modules/files/actions"
+);
+const { updateTemplateAction } = await import("@/server/modules/esign/actions");
 const { moveStageAction } = await import("@/server/modules/automations/actions/move-stage");
 const { acceptSolarProposal } = await import("@/server/modules/solar/proposal-public");
 const { advanceToContractSignedIfReady, guardedStageId } = await import(
@@ -109,22 +112,50 @@ const signedProposal = () =>
     data: { companyId, leadId, version: 1, status: "signed", signedAt: new Date(), snapshot: SNAPSHOT as never },
   });
 
-/** Anexa's own contract, e-signed to completion. `folderKey` null = Contract. */
-const completedContractPackage = (folderKey: string | null = null) =>
+/** THE solar contract template, and an ordinary one (a utility authorisation). */
+let contractTemplateId: string;
+let otherTemplateId: string;
+
+type PackageStatus = "completed" | "sent" | "viewed" | "partially_signed" | "declined" | "voided";
+
+/**
+ * An e-signature package on this deal. By default Anexa's own contract signed
+ * to completion: a package of the template classified as the solar contract,
+ * filed to Contract (`folderKey` null = Contract).
+ */
+const completedContractPackage = (
+  folderKey: string | null = null,
+  opts: { status?: PackageStatus; templateId?: string | null } = {},
+) =>
   db.documentPackage.create({
-    data: { companyId, leadId, vertical: "solar", title: "Solar Agreement", status: "completed", folderKey },
+    data: {
+      companyId, leadId, vertical: "solar", title: "Solar Agreement", status: opts.status ?? "completed", folderKey,
+      templateId: opts.templateId === undefined ? contractTemplateId : opts.templateId,
+    },
   });
 
-/** A document filed into a deal folder — the lender's signed contract, say. */
-const filedDocument = (category: string) =>
+/** A file on this deal. Classified as nothing unless told. */
+const filedDocument = (
+  category: string,
+  opts: {
+    name?: string;
+    mimeType?: string;
+    kind?: "document" | "photo" | "signed_document";
+    documentType?: "signed_lender_contract" | null;
+  } = {},
+) =>
   db.fileAsset.create({
     data: {
-      companyId, leadId, kind: "document", name: "Amos Signed Contract.pdf", category,
-      storageKey: `test/${randomBytes(8).toString("hex")}.pdf`, mimeType: "application/pdf", size: 10,
-      uploadedById: users.admin,
+      companyId, leadId, kind: opts.kind ?? "document", name: opts.name ?? "Amos Signed Contract.pdf", category,
+      storageKey: `test/${randomBytes(8).toString("hex")}.pdf`, mimeType: opts.mimeType ?? "application/pdf", size: 10,
+      uploadedById: users.admin, documentType: opts.documentType ?? null,
     },
     select: { id: true },
   });
+
+/** The lender's signed contract: a PDF, MARKED as such. In Contract unless told. */
+const markedLenderContract = (category = "contract") =>
+  filedDocument(category, { documentType: "signed_lender_contract" });
 
 const lastEntryVia = async () =>
   (await db.leadStageEvent.findFirst({
@@ -138,6 +169,12 @@ beforeAll(async () => {
     data: { name: "Contract Signed Co", slug: `cs-${process.pid}-${Date.now()}` },
   });
   companyId = company.id;
+  contractTemplateId = (
+    await db.documentTemplate.create({ data: { companyId, name: "Solar Agreement", vertical: "solar", type: "solar_contract" } })
+  ).id;
+  otherTemplateId = (
+    await db.documentTemplate.create({ data: { companyId, name: "Utility Authorization", vertical: "solar", type: "custom" } })
+  ).id;
 
   const pipeline = await db.pipeline.create({ data: { companyId, name: "Solar", vertical: "solar" } });
   pipelineId = pipeline.id;
@@ -199,6 +236,8 @@ beforeEach(async () => {
   await db.solarProposal.deleteMany({ where: { companyId } });
   await db.documentPackage.deleteMany({ where: { companyId } });
   await db.fileAsset.deleteMany({ where: { companyId } });
+  await db.documentTemplate.update({ where: { id: contractTemplateId }, data: { type: "solar_contract" } });
+  await db.documentTemplate.update({ where: { id: otherTemplateId }, data: { type: "custom" } });
   await db.leadStageEvent.deleteMany({ where: { leadId } });
   await db.lead.update({ where: { id: leadId }, data: { stageId: stages.proposal_sent, status: "open" } });
   await db.pipelineStage.update({ where: { id: stages[CS] }, data: { name: "Contract Signed / Hold", milestone: "contract_signed" } });
@@ -245,9 +284,9 @@ describe("Contract Signed needs a signed proposal AND a completed contract", () 
     expect(await stageKeyOf()).toBe(CS);
   });
 
-  it("both (the Amos contract filed into the Contract folder) → allowed", async () => {
+  it("both (the Amos contract, marked as the signed contract in the Contract folder) → allowed", async () => {
     await signedProposal();
-    await filedDocument("contract");
+    await markedLenderContract();
     expect((await moveTo(CS)).ok).toBe(true);
     expect(await stageKeyOf()).toBe(CS);
   });
@@ -260,7 +299,7 @@ describe("Contract Signed needs a signed proposal AND a completed contract", () 
 
   it("the lender's contract left in Other is not filed into Contract", async () => {
     await signedProposal();
-    await filedDocument("other");
+    await markedLenderContract("other");
     expect((await moveTo(CS)).ok).toBe(false);
   });
 
@@ -270,6 +309,169 @@ describe("Contract Signed needs a signed proposal AND a completed contract", () 
     });
     await completedContractPackage();
     expect((await moveTo(CS)).ok).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 1b. Only RELIABLE evidence is a completed contract
+// ---------------------------------------------------------------------------
+
+describe("a file is not a contract for being in the Contract folder", () => {
+  it("signed proposal + a random PDF in Contract → BLOCK", async () => {
+    await signedProposal();
+    await filedDocument("contract", { name: "Scan 0042.pdf" });
+    const res = await moveTo(CS);
+    expect(res.ok).toBe(false);
+    expect("error" in res && res.error).toMatch(/completed contract in the Contract folder/);
+    expect(await stageKeyOf()).toBe("proposal_sent");
+  });
+
+  it("signed proposal + a utility bill in Contract → BLOCK", async () => {
+    await signedProposal();
+    await filedDocument("contract", { name: "Oncor bill - August.pdf" });
+    expect((await moveTo(CS)).ok).toBe(false);
+    expect(await stageKeyOf()).toBe("proposal_sent");
+  });
+
+  it("signed proposal + a photo in Contract → BLOCK, even carrying the mark", async () => {
+    await signedProposal();
+    await filedDocument("contract", {
+      name: "IMG_2231.jpg", mimeType: "image/jpeg", kind: "photo", documentType: "signed_lender_contract",
+    });
+    expect((await moveTo(CS)).ok).toBe(false);
+  });
+
+  it("signed proposal + an unsigned document generated into Contract (the automation's output) → BLOCK", async () => {
+    await signedProposal();
+    await filedDocument("contract", { name: "Solar Agreement.pdf" });
+    expect((await moveTo(CS)).ok).toBe(false);
+  });
+
+  it("signed proposal + a signed PDF of some other package refiled into Contract → BLOCK", async () => {
+    await signedProposal();
+    await filedDocument("contract", { name: "Proposal v1 (signed).pdf", kind: "signed_document" });
+    expect((await moveTo(CS)).ok).toBe(false);
+  });
+
+  it("signed proposal + an incomplete or unsigned contract package → BLOCK, at every status short of completed", async () => {
+    await signedProposal();
+    for (const status of ["sent", "viewed", "partially_signed", "declined", "voided"] as const) {
+      await db.documentPackage.deleteMany({ where: { companyId } });
+      await completedContractPackage(null, { status });
+      expect((await moveTo(CS)).ok, status).toBe(false);
+    }
+    expect(await stageKeyOf()).toBe("proposal_sent");
+  });
+
+  it("signed proposal + a COMPLETED package of a document that is not the contract, in Contract → BLOCK", async () => {
+    await signedProposal();
+    await completedContractPackage(null, { templateId: otherTemplateId });
+    expect((await moveTo(CS)).ok).toBe(false);
+    await db.documentPackage.deleteMany({ where: { companyId } });
+    await completedContractPackage(null, { templateId: null });
+    expect((await moveTo(CS)).ok).toBe(false);
+  });
+
+  it("signed proposal + completed Anexa contract → PASS", async () => {
+    await signedProposal();
+    await completedContractPackage();
+    expect((await moveTo(CS)).ok).toBe(true);
+    expect(await stageKeyOf()).toBe(CS);
+  });
+
+  it("signed proposal + properly classified completed Amos contract → PASS, and marking it advances the deal", async () => {
+    await signedProposal();
+    const file = await filedDocument("contract");
+    expect((await moveTo(CS)).ok).toBe(false);
+    expect((await solar(() => setSignedLenderContractAction({ fileId: file.id, signed: true }))).ok).toBe(true);
+    expect(await stageKeyOf()).toBe(CS);
+    expect(await lastEntryVia()).toBe("document");
+  });
+});
+
+describe("marking a PDF as the lender's signed contract", () => {
+  it("the deal's own sales rep cannot", async () => {
+    await signedProposal();
+    const file = await filedDocument("contract");
+    actAs("sales_rep");
+    const res = await solar(() => setSignedLenderContractAction({ fileId: file.id, signed: true }));
+    expect(res.ok).toBe(false);
+    expect((await db.fileAsset.findUniqueOrThrow({ where: { id: file.id } })).documentType).toBeNull();
+    expect(await stageKeyOf()).toBe("proposal_sent");
+  });
+
+  it("records who marked it and when", async () => {
+    const file = await filedDocument("contract");
+    expect((await solar(() => setSignedLenderContractAction({ fileId: file.id, signed: true }))).ok).toBe(true);
+    const row = await db.fileAsset.findUniqueOrThrow({ where: { id: file.id } });
+    expect(row.documentType).toBe("signed_lender_contract");
+    expect(row.documentTypeSetById).toBe(users.admin);
+    expect(row.documentTypeSetAt).toBeInstanceOf(Date);
+  });
+
+  it("only a PDF, and only in the Contract folder", async () => {
+    const photo = await filedDocument("contract", { name: "IMG_1.jpg", mimeType: "image/jpeg", kind: "photo" });
+    expect((await solar(() => setSignedLenderContractAction({ fileId: photo.id, signed: true }))).ok).toBe(false);
+    const elsewhere = await filedDocument("utility_bill", { name: "Amos Signed Contract.pdf" });
+    expect((await solar(() => setSignedLenderContractAction({ fileId: elsewhere.id, signed: true }))).ok).toBe(false);
+    expect(await db.fileAsset.count({ where: { companyId, documentType: { not: null } } })).toBe(0);
+  });
+
+  it("taking the mark off never drags the deal back", async () => {
+    await signedProposal();
+    const file = await markedLenderContract();
+    expect((await moveTo(CS)).ok).toBe(true);
+    expect((await solar(() => setSignedLenderContractAction({ fileId: file.id, signed: false }))).ok).toBe(true);
+    expect((await db.fileAsset.findUniqueOrThrow({ where: { id: file.id } })).documentType).toBeNull();
+    expect(await stageKeyOf()).toBe(CS);
+  });
+
+  it("a roofing deal's document cannot be marked", async () => {
+    const f = await db.fileAsset.create({
+      data: {
+        companyId, leadId: roofingLeadId, kind: "document", name: "Roofing Contract.pdf", category: "contract",
+        storageKey: `test/${randomBytes(8).toString("hex")}.pdf`, mimeType: "application/pdf", size: 10,
+      },
+      select: { id: true },
+    });
+    expect((await solar(() => setSignedLenderContractAction({ fileId: f.id, signed: true }))).ok).toBe(false);
+  });
+});
+
+describe("which template is THE solar contract is chosen on the template", () => {
+  const save = (id: string, solarContract: boolean) =>
+    solar(() => updateTemplateAction({ id, name: "Utility Authorization", folderKey: "", solarContract }));
+
+  it("ticking it makes that template's completed packages count; unticking stops them", async () => {
+    await signedProposal();
+    await completedContractPackage(null, { templateId: otherTemplateId });
+    expect((await moveTo(CS)).ok).toBe(false);
+
+    expect((await save(otherTemplateId, true)).ok).toBe(true);
+    expect((await db.documentTemplate.findUniqueOrThrow({ where: { id: otherTemplateId } })).type).toBe("solar_contract");
+    expect((await save(otherTemplateId, false)).ok).toBe(true);
+    expect((await db.documentTemplate.findUniqueOrThrow({ where: { id: otherTemplateId } })).type).toBe("custom");
+    expect((await moveTo(CS)).ok).toBe(false);
+
+    expect((await save(otherTemplateId, true)).ok).toBe(true);
+    expect((await moveTo(CS)).ok).toBe(true);
+  });
+
+  it("a sales rep cannot classify a template", async () => {
+    actAs("sales_rep");
+    expect((await save(otherTemplateId, true)).ok).toBe(false);
+    expect((await db.documentTemplate.findUniqueOrThrow({ where: { id: otherTemplateId } })).type).toBe("custom");
+  });
+
+  it("a roofing template is never made the solar contract", async () => {
+    const roofT = await db.documentTemplate.create({
+      data: { companyId, name: "Roofing Agreement", vertical: "roofing", type: "roofing_contract" },
+    });
+    const res = await runInVertical("roofing", () =>
+      updateTemplateAction({ id: roofT.id, name: "Roofing Agreement", folderKey: "", solarContract: true })
+    );
+    expect(res.ok).toBe(true);
+    expect((await db.documentTemplate.findUniqueOrThrow({ where: { id: roofT.id } })).type).toBe("roofing_contract");
   });
 });
 
@@ -394,7 +596,7 @@ describe("the deal advances on its own when both documents are on file", () => {
   }
 
   it("the customer signing, with the contract already filed, advances it — recorded as the signature", async () => {
-    await filedDocument("contract");
+    await markedLenderContract();
     const token = await sentProposal();
     expect((await acceptSolarProposal(token, GOOD_SIGNATURE)).ok).toBe(true);
     expect(await stageKeyOf()).toBe(CS);
@@ -407,7 +609,7 @@ describe("the deal advances on its own when both documents are on file", () => {
     expect(await stageKeyOf()).toBe("proposal_sent");
   });
 
-  it("uploading the Amos contract into Contract after the signature advances it", async () => {
+  it("uploading the Amos contract into Contract does NOT advance it — marking it as the signed contract does", async () => {
     await signedProposal();
     const form = new FormData();
     form.set("file", new File(["%PDF-1.4 amos"], "Amos Signed Contract.pdf", { type: "application/pdf" }));
@@ -415,6 +617,10 @@ describe("the deal advances on its own when both documents are on file", () => {
     form.set("category", "contract");
     const res = await solar(() => uploadFileAction(form));
     expect(res.ok).toBe(true);
+    expect(await stageKeyOf()).toBe("proposal_sent");
+
+    const uploaded = await db.fileAsset.findFirstOrThrow({ where: { leadId, category: "contract" }, select: { id: true } });
+    expect((await solar(() => setSignedLenderContractAction({ fileId: uploaded.id, signed: true }))).ok).toBe(true);
     expect(await stageKeyOf()).toBe(CS);
     expect(await lastEntryVia()).toBe("document");
   });
@@ -429,10 +635,14 @@ describe("the deal advances on its own when both documents are on file", () => {
     expect(await stageKeyOf()).toBe("proposal_sent");
   });
 
-  it("refiling a document INTO Contract counts exactly like uploading it there", async () => {
+  it("refiling the MARKED lender contract into Contract advances it; an unmarked PDF refiled there does not", async () => {
     await signedProposal();
-    const file = await filedDocument("other");
-    expect((await solar(() => moveFileAction(file.id, "contract"))).ok).toBe(true);
+    const plain = await filedDocument("other", { name: "Scan 0042.pdf" });
+    expect((await solar(() => moveFileAction(plain.id, "contract"))).ok).toBe(true);
+    expect(await stageKeyOf()).toBe("proposal_sent");
+
+    const marked = await markedLenderContract("other");
+    expect((await solar(() => moveFileAction(marked.id, "contract"))).ok).toBe(true);
     expect(await stageKeyOf()).toBe(CS);
   });
 

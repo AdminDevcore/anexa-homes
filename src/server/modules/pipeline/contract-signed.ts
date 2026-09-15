@@ -3,7 +3,10 @@ import { packagesByFolder } from "@/lib/deal-folders";
 import type { StageMoveVia } from "@/lib/stage-history";
 import {
   CONTRACT_FOLDER_KEY,
+  CONTRACT_MIME_TYPE,
   CONTRACT_SIGNED_MILESTONE,
+  SIGNED_LENDER_CONTRACT,
+  SOLAR_CONTRACT_TEMPLATE_TYPE,
   NO_EVIDENCE,
   contractSignedMet,
   contractSignedMissing,
@@ -39,16 +42,33 @@ export async function readContractSignedEvidence(
       where: { companyId, leadId, signedAt: { not: null } },
       select: { id: true },
     }),
+    // COMPLETED — every signer signed and the certificate issued — and from a
+    // template somebody classified as THE solar contract. A package still out
+    // for signature, or a completed utility authorisation or permit form, is
+    // not a contract however it was routed.
     prisma.documentPackage.findMany({
-      where: { companyId, leadId, status: "completed" },
+      where: {
+        companyId,
+        leadId,
+        status: "completed",
+        template: { type: SOLAR_CONTRACT_TEMPLATE_TYPE },
+      },
       select: { folderKey: true },
     }),
-    // A document FILED into the Contract folder. The countersigned PDF of an
-    // e-signature package is stored as `signed_contract` and is counted through
-    // its package above, so a package routed to another folder (a permit form)
-    // cannot satisfy this through its PDF.
+    // An uploaded file counts only when a person allowed to edit files has
+    // MARKED it as the lender's signed contract, it is a PDF, and it sits in the
+    // Contract folder. Being in the folder is not evidence: a utility bill, a
+    // photo, a generated-but-unsigned document or the proposal's own PDF can all
+    // be filed there. The countersigned PDF of an e-signature package is counted
+    // through its package above, never as a loose file.
     prisma.fileAsset.findFirst({
-      where: { companyId, leadId, category: CONTRACT_FOLDER_KEY },
+      where: {
+        companyId,
+        leadId,
+        category: CONTRACT_FOLDER_KEY,
+        documentType: SIGNED_LENDER_CONTRACT,
+        mimeType: CONTRACT_MIME_TYPE,
+      },
       select: { id: true },
     }),
   ]);
