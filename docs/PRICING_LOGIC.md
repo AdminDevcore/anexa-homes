@@ -703,13 +703,20 @@ A $5.50/W lender, 30% fee, 10 kW, $2,700 adder inside, $7,000 roof **on top** (o
   - §4.4: the proposal shows $28,453.33 financed; the lender would be asked for $45,453.33.
 - **L11. "contract_value" sent to the lender is actually the amount financed** (contract − down payment, `lender-submit.ts:992`). Identical today only because the down payment is always cleared.
 - **L12. Payroll prices from the live deal row at each payroll run, not from the signed or approved proposal** (`solar-engine.ts:107-146`). It also uses the stored fee and the design lender's cap. If the deal is edited after signing, commission follows the edit. Since 04e7be3 that needs a super-admin unlock (§5, Signed lock); the rep's rates, not the price, are frozen at signature.
+  - **Stage 1:** the watts, base price and battery count are now frozen at signature too, and payroll reads that copy once it exists (§8.9).
 - **L13. The credit total on the cost chapter is summed again without the cap** (`cost.tsx:138`), instead of reading the frozen `creditTotalCents` (`solar-credit-ladder.ts:297-300`). They differ only if the percentages add up past 100.
 - **L14. The same payment is printed at two precisions on one page.** The Pay chapter headline rounds to whole dollars (`pay.tsx:138`); the battery card prints cents (`battery-credit.tsx:119`).
 - **L15. The payment menu does not price other programmes from the deal's base.** Each alternative loan is priced by `financeRowForProduct` with **no sticker** (`solar-proposal-options.ts:300-325`). It therefore takes the company's target net grossed up by that programme's fee or, with no target net, the $3.50/W default **sticker** (§5, Target net / Default sticker). The quoted option uses the rep's own sticker.
   - On the golden capped-partner deal, the quoted programme sells the system at $5.50/W and the menu's other loan at $3.50/W (pinned in Stage 0).
   - Production has a target net of $2.50/W, so its menu shows every other lender at a $2.50/W base, whatever the rep sold.
+  - **Fixed in Stage 1** (§8.9): every alternative is the quoted sticker's base re-grossed by its own fee, and cash is that base.
 - **L16. Two server paths store different per-battery stickers on a capped storage deal.** `recomputeDealMoney` keeps the typed sticker (2,000,000¢ on the golden storage deal) beside a contract priced at the capped one. Generation writes the capped sticker (2,400,000¢) back. The contract agrees; the stored sticker depends on which ran last (pinned in Stage 0).
-- **L17. The lender submission refuses the golden storage-only document**: "no annual production" and "no saving on the electricity bill" (`lender-submit.ts` preflight). A storage-only deal has no array, so this may refuse every storage-only application. Not checked against production.
+  - **Cause (found in Stage 1, not fixed).** `dealMoneyColumns` prices the storage contract from the capped sticker (`priceStorageStored`) but returns the sticker it was handed (`deal-money.ts:135`, `:160`). Generation writes the capped sticker back (`proposal-generate.ts:557`). The per-watt path has no such split: `financeRowForProduct` returns the capped sticker and the save stores it.
+  - After one generation the capped sticker becomes the stored input, so the deal reads $24,000 per battery where the rep typed $20,000. Pinned explicitly in `pricing-stage1.itest.ts`.
+- **L17. The lender submission refuses the golden storage-only document**: "no annual production" and "no saving on the electricity bill" (`lender-submit.ts` preflight). A storage-only deal has no array, so this may refuse every storage-only application.
+  - **Checked against production in Stage 1:** there are **no storage-only designs**, so no real storage-only deal has been submitted or refused.
+  - The refusal is structural. `preflightAmosSubmission` also requires a panel, a panel quantity and an inverter, and `savingsProblems` requires production above zero, so any storage-only deal fails on at least three problems before anything is sent.
+  - The one storage programme, Amos 20 Year Battery, belongs to a lender whose API product slug is `solar-30-year-cpe`. A storage deal that passed preflight would be submitted against the 30-year solar product.
 
 ### 6.2 Dead, never displayed, or always constant
 
@@ -723,7 +730,7 @@ A $5.50/W lender, 30% fee, 10 kW, $2,700 adder inside, $7,000 roof **on top** (o
   - as the deal page's only loan "Monthly payment" row, so **loan deals show no monthly payment on the deal page** (`src/components/portal/solar/financing-terms.tsx:105-107`)
   - to set `loanPaymentApproved`, which is therefore always false, so the proposal always says "Estimated monthly payment" (`pay.tsx:130-132`)
 - **D5. `marginCents` is always 0 in pricing.** No pricing caller passes `equipmentCostCents` (`solar-compare.ts:274-282`, `solar-finance-row.ts:192-200`, `solar-proposal.ts:1494-1502`, `proposal-generate.ts:494-502`). `solarCommissionCents` (`solar-money.ts:1223-1261`) is only called from a test.
-- **D6. Payroll works out the contract price and never uses it** (`solar-engine.ts:168`; overrides use rep net, `solar-pay.ts:405-408`). The battery input to payroll therefore affects no pay.
+- **D6. Payroll works out the contract price and never uses it** (`solar-engine.ts:168`; overrides use rep net, `solar-pay.ts:405-408`). The battery input to payroll therefore affects no pay. Since Stage 1 it has one use: checking the signed document when the commission measure is frozen (`commission-pricing.ts`).
 - **D7. Retired settings columns.** `SolarSettings.minPpwCents` / `maxPpwCents` (`schema.prisma:3504-3505`), `targetOffsetPct` (`:3350`), `federalItcPct` (`:3372`).
 - **D8. `SolarLender.batteryPayMode` does not decide pay.** `resolveSolarPay` never reads it (`solar-pay.ts:105-161`), but it is still editable in Settings.
 - **D9. Frozen but never shown.** `CreditLadder.reliefCents` and `creditTotalCents`; `SavingsModel.solarPaidCents`, `totalSavingsCents` (same as `netSavingsCents`, `solar-proposal.ts:583-584`) and `creditReliefTotalCents`.
@@ -758,6 +765,7 @@ A $5.50/W lender, 30% fee, 10 kW, $2,700 adder inside, $7,000 roof **on top** (o
 - **N12. The dealer fee can reach the customer, although the deal page hides it on purpose** (`financing-terms.tsx:97-101`).
   - `lenderProductLabel()` builds "25 yr · 6.99% · fee 25%" for an unnamed programme (`src/lib/solar-lender-product.ts:36-43`).
   - That label is printed in the Pay chapter lede (`pay.tsx:77`) and in the payment menu and option labels (`solar-proposal-options.ts:352`).
+  - **Fixed in Stage 1** (§8.9): documents freeze `customerProductLabel`, and the renderers strip a fee from labels frozen earlier.
 
 ### 6.4 Sequence effects: fee → credit → payment
 
@@ -768,6 +776,7 @@ A $5.50/W lender, 30% fee, 10 kW, $2,700 adder inside, $7,000 roof **on top** (o
 - **S5. Generation writes the deal row before its last check can fail.**
   - Generation re-prices and **writes** `SolarFinance` (`proposal-generate.ts:504-517`) before the reconciliation gate (`:1089-1090`). A refused document still leaves the row re-priced.
   - The live re-price calls `financeRowForProduct` **without `batteryPriceCents`** (`proposal-reprice-actions.ts:293-312`) and writes that battery-less contract (`:343`). Only a *successful* generation writes the battery back. On failure the action returns `dealUpdated: true` (`:356-364`).
+  - **Fixed in Stage 1:** the re-price prices through `dealMoneyColumns` (§8.9).
 - **S6. Fee staleness is mixed inside one proposal.** The quoted option is priced on the fee **stored at the deal's last save** (`proposal-generate.ts:467, 973`); alternatives use each programme's **current** fee (`solar-proposal-options.ts:300-325`). Likewise APR and term come from the deal row (`:991, 999`), while payment factors come from the live programme (`:428-451`).
 - **S7. The credited payment assumes the credit is applied from month 1** (`solar-proposal.ts:1782-1792`). The OFF model bills the with-paydown factor payment for the whole term (`:1754-1762`), although OFF is described as the credit never being claimed. On a factor programme that payment would really be the without-paydown one.
 - **S8. A typed base does not survive the round trip exactly** (§4.5; up to −$16.50 on an 11 kW, 65% deal).
@@ -945,17 +954,17 @@ revenue       = net gross + credit amount × monetizer payout rate
 | D1 | Factor programmes quote the **without-paydown** factor on the net final | The owner checks which rate sheets require the paydown assumption. **No production programme has a factor or paydown configured** (§8.4). |
 | D2 | The sign-today credit reduces the net final, and the lender amount includes it | Removes L10 by construction |
 | D3 | Remove the customer-facing credit switch | Keep filing "Proposal PAR" at signing |
-| D4 | Replace the credit disclaimer | **Moved into Stage 1.** The current text is false on production and creates customer tax exposure. The draft goes to legal review; **no wording ships without owner sign-off.** Locations: `CREDIT_DISCLAIMER_DEFAULT` (`solar-credit-ladder.ts:167-171`); the `SolarSettings.creditDisclaimer` schema default (`schema.prisma:3393`) and its live production value; the agreement body |
+| D4 | Replace the credit disclaimer | **Moved into Stage 1.** The current text is false on production and creates customer tax exposure. The draft goes to legal review; **no wording ships without owner sign-off.** Locations: `CREDIT_DISCLAIMER_DEFAULT` (`solar-credit-ladder.ts:167-171`); the `SolarSettings.creditDisclaimer` schema default (`schema.prisma:3393`) and its live production value; the agreement body. **Draft and every location: §8.10.** |
 | D5 | Store the rep's sold base $/W | `SolarFinance.grossPpwCents` becomes `soldBasePpwCents` |
 | D6 | Retire the per-lender submission basis | Always send credits applied |
 | D7 | Code-only renames (`@map`; no column renames) | Every kept column gets a schema comment naming its code-side name |
-| D8 | Unsigned quotes use the **current** programme fee | **Blocked** until the owner confirms the production lender configs are corrected (§8.4) |
-| D9 | New `monetizerPayoutRate`: a company default, overridable per programme and deal. `revenue = netGrossPriceCents + creditAmountCents × monetizerPayoutRate`. A visible margin indicator wherever the fee and the payout are both known | **The loss condition is an open question, below** |
+| D8 | Unsigned quotes use the **current** programme fee | **Blocked** until the owner confirms the production lender configs are corrected (§8.4). The owner is setting fee, cap and floor together in the UI; the 550¢ cap and 200¢ floor can only both hold at a fee ≤ 63.6%. No lender config is changed from code. |
+| D9 | New `monetizerPayoutRate`: a company default, overridable per programme and deal. `revenue = netGrossPriceCents + creditAmountCents × monetizerPayoutRate`. A visible margin indicator wherever the fee and the payout are both known | **Loss condition decided: `payout + fee < 100%`** (below) |
 | D10 | The finance page is the builder's Financing step | Dealer-fee rungs and before/after gross behind a role check: that screen is turned toward homeowners |
 
 **Naming rule (added to the rename map).** The word "contract" is reserved for the signed document. **No pricing field may contain it, and every price field states which credit state it belongs to.**
 
-**D9, open question for the owner.** The approved indicator flags a deal when `dealerFeePct > monetizerPayoutRate`. Working the revenue formula through:
+**D9, decided 2026-09-15.** A deal is flagged when **`monetizerPayoutRate + dealerFeePct < 100%`**, because every credit dollar applied then loses money. The condition first approved (`fee > payout`) was inverted, and the owner confirmed the derivation below.
 - Applying a credit of C lowers the net final by C.
 - That lowers net gross by C × (1 − fee).
 - The monetizer adds C × payout.
@@ -968,14 +977,18 @@ So a deal **loses** money on every credit dollar applied when **`payout < 1 − 
 - an 18% fee **loses** 32¢ per credit dollar (0.50 + 0.18 − 1 = −0.32)
 - a 65% fee **gains** 15¢ per credit dollar (0.50 + 0.65 − 1 = +0.15)
 
-The condition as approved would flag the deals that gain and pass the deals that lose. **Not implemented until the owner confirms which condition is intended.**
+> **Watch:**
+> - **The company default fee is 0%.** At a 50% payout, every deal priced on the default loses **50¢ per credit dollar** (0.50 + 0 − 1).
+> - **A signed loan deal already stores 50% with no programme** (§8.4 finding 5). At a 50% payout it breaks even exactly; at any lower payout it loses.
+
+Implemented with the model flip (Stage 5).
 
 ### 8.3 Stages
 
 | Stage | Scope | Gate |
 |---|---|---|
-| 0 | Worktree on `origin/main`; pricing-file freeze; reconcile the shared tree; production config report; golden tests; this document | **Awaiting approval** |
-| 1 | Re-price keeps the battery; commission pricing snapshotted at signature, read by payroll, backfilled; commission-invariance test; dealer fee off customer documents; D4 draft and every location (not shipped) | Owner approval; D4 wording needs sign-off |
+| 0 | Worktree on `origin/main`; pricing-file freeze; reconcile the shared tree; production config report; golden tests; this document | **Approved** 2026-09-15 |
+| 1 | Re-price keeps the battery; commission pricing snapshotted at signature, read by payroll, backfilled; commission-invariance test; dealer fee off customer documents; D4 draft and every location (not shipped); **menu priced from the deal's base (L15, moved up from Stage 4)**; storage-only submission checked against production; L16 pinned | **Awaiting approval** (§8.9); D4 wording needs sign-off |
 | 2 | Renames: code-only with `@map`; schema comments on kept columns; snapshot v9 plus a reader for older versions; CI guard against the retired names | Owner approval |
 | 3 | `priceDeal()`: the one function for both credit states | Owner approval |
 | 4 | Rewire the 25 sites (§8.5); D5 sold base; D8 fee source | D8 blocked until the production configs are fixed |
@@ -1012,12 +1025,12 @@ Read from production inside `BEGIN READ ONLY … ROLLBACK`, for company Anexa Ho
 **Findings**
 1. **Amos 30 Year Solar reads 0%, but all 5 of its deals store 65%** (1 signed). Generation prices on the stored fee, so D8 would change every one of these quotes. This is why D8 is blocked.
 2. **Amos's submission basis is "after credits".** D6 retires it. Until then Amos is asked for the amount less the credit lines, without the sign-today credit (L10).
-3. **Credit Humen's programme has no name**, so its auto-label prints "fee 25%" to customers today (N12).
+3. **Credit Humen's programme has no name**, so its auto-label prints "fee 25%" to customers today (N12). **Fixed in Stage 1.** No frozen production document carried it yet: the programme was created 2026-09-14, after the last proposal (2026-09-10).
 4. **Amos 20 Year Battery stores a 50% fee.** Confirm against the sheet.
 5. **One signed loan deal has no programme and stores 50%.**
 6. **Company settings:** default fee 0%, default $/W 250¢, target net 250¢, credit rates 30/10/10. The credit disclaimer is the customer-claims text, **so the D4 exposure is live.**
 7. **For D1:** no programme has a payment factor or paydown, and every payment amortises at 0% APR as `principal ÷ term`. No rate sheet in the app requires the paydown assumption; the paper sheets are the owner's to check.
-8. **Amos's floor refuses every deal at the stored fee.** At 65%, no sticker the 550¢/W cap allows can clear Amos's 200¢/W floor: the most a deal keeps is 193¢/W of base. The Stage 0 itest confirms generation refuses (`pricing.below_lender_floor`). **No new version can be generated on any Amos 30 Year Solar deal at 65% until the fee or the floor is corrected.** At the programme's 0%, a deal clears the floor whenever its base is 200¢/W or more.
+8. **Amos's floor refuses every deal at the stored fee.** At 65%, no sticker the 550¢/W cap allows can clear Amos's 200¢/W floor: the most a deal keeps is 193¢/W of base. The Stage 0 itest confirms generation refuses (`pricing.below_lender_floor`). **No new version can be generated on any Amos 30 Year Solar deal at 65% until the fee or the floor is corrected.** At the programme's 0%, a deal clears the floor whenever its base is 200¢/W or more. **The 550¢ cap and the 200¢ floor can only both hold at a fee ≤ 1 − 200/550 = 63.6%.** The owner is deciding the fee, cap and floor together.
 9. **The fee also decides the sign-today credit.** Amos's above-cap rule measures the system and battery **stickers**, fee included. On the golden capped-partner deal (12.76 kW, two $36,000 batteries), the rule gives $116,566 at the stored 65%, clamped to $100,000. At the programme's 0% it gives $0. **Correcting the fee (D8) moves this credit as well as the price.**
 
 ### 8.5 Independent price sites on `ed3b832`
@@ -1025,9 +1038,9 @@ Read from production inside `BEGIN READ ONLY … ROLLBACK`, for company Anexa Ho
 Every place that works out a price on its own. Stage 4 points all of them at `priceDeal()`.
 
 1. `src/server/modules/solar/deal-money.ts:68-168`: the server's cached money columns
-2. `src/server/modules/solar/proposal-reprice-actions.ts:293-343`: live re-price (drops the battery)
+2. `src/server/modules/solar/proposal-reprice-actions.ts:293-343`: live re-price (drops the battery; **fixed in Stage 1**)
 3. `src/server/modules/solar/proposal-generate.ts:425-540`: generation's re-price and write-back
-4. `src/lib/solar-proposal-options.ts:219-420`: payment-menu alternatives
+4. `src/lib/solar-proposal-options.ts:219-420`: payment-menu alternatives (**priced from the deal's base since Stage 1**)
 5. `src/lib/solar-proposal.ts:1484-1622, 1665, 1997`: document option pricing and payments
 6. `src/lib/solar-proposal.ts:994, 1010` + `src/components/proposal/solar/index.tsx:397-406, 454`: price per watt on the document and customer page
 7. `src/server/modules/payroll/solar-engine.ts:107-168`: payroll's live re-price
@@ -1085,7 +1098,7 @@ Characterization, not specification. They pin what `ed3b832` produces, **includi
 - Site 25: pay-structure examples
 - Site 12: Nova tools. They read the frozen contract, which is pinned.
 - Site 14: adder actions. They call `recomputeDealMoney`, which is pinned.
-- Site 2: the live re-price. It re-derives the system size from the drawn roof layout before pricing, and the Stage 0 fixture has no drawing. Stage 1 fixes its battery drop with a fixture that has one, and pins it there.
+- Site 2: the live re-price. It re-derives the system size from the drawn roof layout before pricing, and the Stage 0 fixture has no drawing. **Pinned in Stage 1** with a drawn fixture (`pricing-stage1.itest.ts`).
 
 ### 8.7 Process
 
@@ -1121,3 +1134,84 @@ Under the naming rule, each price field also carries its credit state. Exact spe
 | snapshot `lenderProductLabel` | `programmeLabel`, never carrying the fee |
 | `CompareRow.netPpwCents` | `grossPpwCents` |
 | dead ladder fields (`shortfallCents`, `incentiveCents`, …) | deleted |
+
+### 8.9 Stage 1: what landed (awaiting approval)
+
+Branch `feat/pricing-rework`, one local commit on top of Stage 0. Not pushed.
+
+**Tests:**
+- Unit: 2,475 passing (2,458 at Stage 0).
+- Integration: 781 passing. The 7 failures are the existing baseline on `ed3b832`: `retention.itest.ts` ×6 and `visit-crew.itest.ts` ×1.
+- Typecheck and lint are clean.
+
+| Change | Where | Pinned by |
+|---|---|---|
+| **The re-price keeps the battery.** The live re-price prices through `dealMoneyColumns` (the derivation the save and every recompute run) instead of its own `financeRowForProduct` call. That also gives it the storage branch. A storage deal's floor is now asked per battery: the per-watt floor refused every storage re-price on a lender that had one. | `proposal-reprice-actions.ts` | `pricing-stage1.itest.ts`. Three of its four re-price tests fail on the old code; the success path passed before too, because generation wrote the battery back. |
+| **The commission measure is frozen at signature.** Seven additive, nullable columns on `solar_deal_comp`: `systemWatts`, `basePriceCents`, `batteryQty`, `pricedAt`, `pricedFrom`, `pricedProposalId`, `pricingMatchesSignedDocument`.<br>Every signature freezes the live measure and checks it against the signed version. A mismatch is logged on the deal and does not block pay.<br>The rates stay the first signature's; the measure re-freezes on a later signature.<br>Payroll and the estimate read the frozen copy once it exists, and the live deal before then.<br>`loadSolarDeal` moved to `commission-pricing.ts` as `loadCommissionDeal`. It is unchanged except that its final price is named `finalPriceCents`. | migration `20260915200000_solar_deal_comp_pricing`; `commission-pricing.ts`; `deal-comp.ts`; `proposal-public.ts`; `payroll/solar-engine.ts` | `commission-pricing.test.ts`; `pricing-stage1.itest.ts` |
+| **Backfill.** `scripts/backfill-deal-comp-pricing.ts` only reports unless run with `--apply`. It freezes the same live figure payroll reads today, so no commission moves on the day it runs. Production has **1** deal-comp row (signed 2026-09-09). **Not run against production.** | script; `backfillCommissionMeasure` | `pricing-stage1.itest.ts` |
+| **Credits never change a commission.** No code change was needed; this is now pinned. It covers unsigned and signed deals, across ITC, EC and DC, a typed sign-today credit and a lender's above-cap rule. The test also checks that each document's net price really moved. | — | `pricing-stage1.itest.ts` |
+| **The dealer fee is off customer documents.** Generation freezes `customerProductLabel` (the label without "fee N%") into `financing.lenderProductLabel` and every menu label. The Pay chapter and payment menu strip a fee from labels frozen earlier. Rep screens keep the fee; D10 gates them. | `solar-lender-product.ts`; `proposal-generate.ts`; `solar-proposal-options.ts`; `pay.tsx`; `payment-menu.tsx` | `solar-lender-product-customer.test.ts`; the goldens |
+| **The menu is priced from the deal's base (L15), moved up from Stage 4.** Every other programme takes the quoted sticker's base, re-grossed by its own fee, then capped. Cash is priced at that base. The target net is only the fallback for a quote with no per-watt price (a lease or PPA). D5 later replaces this sticker-derived base with the stored sold base. | `solar-proposal-options.ts` | `solar-proposal-options-build.test.ts`; the goldens |
+| **L16 pinned, with its cause found (§6.1). Not fixed.** | — | `pricing-stage1.itest.ts` |
+
+**Golden figures that moved on purpose.** The snapshots were updated in the same commit.
+- **Menu alternatives:**
+  - Capped partner: the other 25% loan went from a 350¢/W sticker to **257¢/W** (the deal's 193¢ base ÷ 0.75).
+  - Worked example (itest): the Capped Partner programme went from 350¢ to **444¢/W** (300¢ ÷ 0.35 = 857¢, then capped). This also switches on that option's above-cap sign-today credit ($1,080).
+  - Cash deal (itest): Example Lender went from 350¢ to **413¢/W**; Capped Partner went from 350¢ to **496¢/W**, which is its $5.50 final cap.
+- **Labels:** "25 yr · 6.99% · fee 25%" became "25 yr · 6.99%" on the customer's document and menu.
+- **Nothing else moved:** quoted prices, write-backs, `Lead.value`, `Project.contractValue`, revenue, estimates and commission lines are unchanged. The lender golden did not move.
+
+**Not done in Stage 1, on purpose:**
+- D4 wording is drafted (§8.10), not shipped.
+- L16 and L17 are reported, not fixed.
+- The fee on rep screens (builder price card, offer shelf, quoted strip, readiness messages) waits for D10 (Stage 6).
+
+### 8.10 D4: credit disclaimer, draft for legal review (NOT SHIPPED)
+
+Nothing in this section is in the code. The current text stays everywhere until the owner signs off on new wording.
+
+**The current text.** The code default, the schema default and production's stored value are all this, verbatim:
+> Tax credits are claimed on your own federal return and depend on your tax liability and on your eligibility for each credit shown. They are not a discount applied by us and they are not a guarantee. We are not tax advisers — please confirm with your tax professional.
+
+**Draft.** Items in brackets are for legal to fill in or strike.
+> The credits shown are federal [clean-energy] tax credits [Company] expects this system to qualify for. [Company], not you, [claims these credits / transfers them to a third party], and their value has already been taken off your price: the price after credits is the price you pay. Do not claim these credits on your own tax return for this system. [If a credit shown turns out not to be available — for example, because the system does not qualify — WHAT HAPPENS TO THE PRICE.] This is not tax advice; ask a tax professional about your own situation.
+
+**Legal must answer these before any wording ships:**
+1. Can the company claim or transfer the credits on a system the customer owns (cash and loan)? The code does not record which structure the monetizer uses, and the wording has to name it.
+2. If a credit is disallowed after signing, who bears it: the company or the customer?
+3. Do the bonus credits (energy community, domestic content) need their own qualifying language?
+
+**Every place the current text, or its premise, appears:**
+
+| Where | What | Change once approved |
+|---|---|---|
+| `src/lib/solar-credit-ladder.ts:167-171` | `CREDIT_DISCLAIMER_DEFAULT` | New text |
+| `src/server/modules/solar/settings.ts:96` | Code default when the column is blank | Follows the constant |
+| `prisma/schema.prisma:3393` (`SolarSettings.creditDisclaimer`) | Column default, from migration `20260829210000_solar_credit_ladder` | A migration for the new default |
+| **Production `solar_settings.creditDisclaimer`** (Anexa Homes) | Stores the current text verbatim (267 characters) | A data update or a Settings save. **Changing the default alone leaves production printing the old text.** |
+| `src/components/portal/solar-settings-form.tsx:501-512` | Settings hint ("A credit is claimed on the customer's own return…") and its warning | Rewrite |
+| Snapshot `financing.creditLadder.disclaimer`, printed by `cost.tsx:339-340` | Under the credit rows on the page, the print view and both filed PDFs | New documents only. The 43 frozen production proposals keep the text they were issued with. |
+| `cost.tsx:179-180` | Lede: "…what it costs you once they are claimed" | Rewrite |
+| `cost.tsx:280, 301, 309, 328` | "What your tax credits are worth", "After tax credits", "Your net cost after credits" | Review |
+| `solar-proposal.ts:1318-1319`, printed by `back-matter.tsx:377` and `storage.tsx:522` | Estimate disclaimer: "…Figures do not constitute tax advice." | Review |
+| `credit-switch.tsx:89`; `pay.tsx:95-99` | The "Tax credit applied" switch, and the paydown warning shown when credits are off | Removed by D3 |
+| `credit-claims.tsx:185, 212, 241, 305`; `solar-credit-ladder.ts:85-89` | Rep copy: "claims on their behalf", "Claimed on nearly every owned system." | Rewrite |
+| `solar-panels.tsx:1636-1638`; `solar-finance-offers.tsx:245, 254-255` | Rep copy: "without the tax credit", "If they never claim it" | Rewrite |
+
+**The agreement body.** Production templates were read read-only on 2026-09-15.
+- No template is classified `solar_contract`. All eight solar templates are `custom`, and each document is an uploaded PDF with no body text.
+- **CPE Solar IA / CPE Battery IA** (the same 12-page PDF) has **no credit-claim wording**. It says no salesperson may guarantee "tax credits" (No Reliance on Oral Statements).
+- **Participate Docs** (48 pages) is a third-party **lease** agreement. It says: "Any state or federal tax credits generated by the System WILL NOT be owned by you but WILL be owned by System Owner" (also §9). That is consistent with credits leaving the customer, and it is not ours to edit.
+
+### 8.11 Stage 1 findings for the owner
+
+1. **The installation agreement contradicts the pricing model.**
+   - CPE Solar IA, Financed Purchase B.3: *"The Total Cash Contract Price in Article 2 is the same whether Owner pays cash or finances. Any dealer fee charged by the Lender to Contractor is not added to Owner's price under this Agreement."*
+   - The app grosses the dealer fee into a financed price (final = gross ÷ (1 − fee)) and prices cash at the base, below the loan. That was already true before Stage 1.
+   - Either the agreement or the model has to change. **This is a legal and business decision.**
+2. **No storage-only deal can be submitted to a lender, and none exists in production (L17).** Any would be refused by the preflight, and Amos's API slug is for its 30-year solar product.
+3. **The fee label had not reached a customer yet.** No frozen production proposal carries "fee N%". It would have appeared on the next menu that offered Credit Humen.
+4. **Freezing from the live deal or from the signed document is the owner's call.** At signing, the measure is frozen from the live deal and only *checked* against the signed version. If the two disagree (the deal changed between generating and signing), payroll pays on the live figure and the deal log records the difference. The alternative is to freeze from the signed document.
+5. **A super-admin unlock no longer moves commission.** Editing a signed deal after an unlock changes the live deal, but not the frozen measure, until a new version is signed. If an unlocked edit should move pay without a new signature, a "re-freeze" action is needed; it is not built.
+6. The D8 and D9 notes are in §8.2 and §8.4.

@@ -16,7 +16,7 @@ import {
   proposalAlternatives,
   type CatalogueProgramme,
 } from "@/lib/solar-proposal-options";
-import { lenderProductLabel } from "@/lib/solar-lender-product";
+import { customerProductLabel } from "@/lib/solar-lender-product";
 import { canGenerate, type ValidationIssue } from "@/lib/solar-validation";
 import { adderAmountCents } from "@/lib/solar-adders";
 import {
@@ -577,7 +577,8 @@ export async function generateProposalVersion(
         }
       : null;
 
-  const quotedProductLabel = quotedRow ? lenderProductLabel(quotedRow) : null;
+  // Without the dealer fee: this label is printed on the customer's document.
+  const quotedProductLabel = quotedRow ? customerProductLabel(quotedRow) : null;
 
   /**
    * The menu the homeowner gets to choose from.

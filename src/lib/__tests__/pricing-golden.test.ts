@@ -9,7 +9,7 @@ import {
   solarDealValue,
   solarLeadValueCents,
 } from "@/lib/solar-deal-value";
-import { lenderProductLabel } from "@/lib/solar-lender-product";
+import { customerProductLabel, lenderProductLabel, withoutDealerFee } from "@/lib/solar-lender-product";
 import { programmeMonthlyCents } from "@/lib/solar-loan";
 import { priceStoredPurchase } from "@/lib/solar-money";
 import { managerOverrideCents, solarRepPayCents, type SolarPayTerms } from "@/lib/solar-pay";
@@ -310,6 +310,10 @@ describe("golden: every pure pricing site, every golden deal", () => {
     expect({
       named: lenderProductLabel({ product: "loan", name: "Amos 30 Year Solar", aprPct: 0, termMonths: 360, dealerFeePct: 65 }),
       unnamed: lenderProductLabel({ product: "loan", name: null, aprPct: 0, termMonths: 360, dealerFeePct: 25 }),
+      // Stage 1: what generation now freezes into the customer's document, and what
+      // the renderers make of a label frozen before that.
+      unnamedOnCustomerDocument: customerProductLabel({ product: "loan", name: null, aprPct: 0, termMonths: 360, dealerFeePct: 25 }),
+      frozenLabelAsRendered: withoutDealerFee("Credit Humen · 30 yr · 0% · fee 25%"),
     }).toMatchSnapshot();
   });
 

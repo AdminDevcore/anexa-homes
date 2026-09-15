@@ -1,6 +1,10 @@
 import type { FinanceProduct, Prisma, SolarRepPayMode } from "@prisma/client";
 import type { Db } from "@/server/db/types";
-import { priceStoredPurchase, priceStorageStored, batteryChargeCents } from "@/lib/solar-money";
+import {
+  commissionMeasure,
+  loadCommissionDeal,
+  FROZEN_MEASURE_SELECT,
+} from "@/server/modules/solar/commission-pricing";
 import {
   resolveSolarPay,
   solarRepPayCents,
@@ -27,147 +31,10 @@ import { VERTICAL_LABEL } from "@/lib/vertical";
  * THE PRICE DOES NOT COME FROM THE PROJECT. `Project.contractValue` is 0 on
  * every solar row and always has been — nothing writes a solar deal's price
  * onto its Project. Reading it is why solar deals, and every manager override on
- * them, generated $0. The truth is SolarFinance, and that is what this reads.
+ * them, generated $0. The truth is SolarFinance, and that is what this reads
+ * — until the customer signs. From then on the watts, base price and battery
+ * count frozen at signing are what the rates multiply (`commission-pricing.ts`).
  */
-
-/** Everything the payout needs, in one read. Null when the deal isn't priced yet. */
-async function loadSolarDeal(db: Db, companyId: string, leadId: string) {
-  const [finance, design] = await Promise.all([
-    db.solarFinance.findUnique({
-      where: { leadId },
-      select: {
-        product: true, grossPpwCents: true, dealerFeePct: true,
-        adderTotalCents: true, onTopAdderTotalCents: true, contractPriceCents: true,
-        stickerPricePerBatteryCents: true,
-        // Which price the partner's figure fixes is the quoted programme's to
-        // say. No programme quoted reads as `final`, the rule as it always was.
-        lenderProduct: {
-          select: {
-            ppwBasis: true,
-            batteryPriceBasis: true,
-          },
-        },
-      },
-    }),
-    db.solarDesign.findUnique({
-      where: { leadId },
-      // The partner's ceiling comes with its pay mode: a capped lender funds
-      // one number whatever was typed, and a commission measured on the typed
-      // figure pays on money that never arrives.
-      select: {
-        systemSizeKwDc: true,
-        systemType: true,
-        batteryQty: true,
-        // The catalogue price of the storage, because it is on the contract an
-        // override is a percentage OF. See `batteryChargeCents`.
-        battery: { select: { priceCents: true } },
-        lender: {
-          select: {
-            repPayMode: true,
-            batteryPayMode: true,
-            maxFinalPpwCents: true,
-            finalPpwMode: true,
-            maxFinalPricePerBatteryCents: true,
-            finalBatteryPriceMode: true,
-          },
-        },
-      },
-    }),
-  ]);
-  if (!finance || !design) return null;
-
-  // A storage deal has no array and never will. Asking it for one is how a
-  // whole category of deal silently stops generating commissions -- so the two
-  // kinds ask the row the question that applies to them.
-  const isStorage = design.systemType === "storage";
-  if (isStorage) {
-    if (!(design.batteryQty > 0)) return null; // no batteries: nothing to pay on
-  } else if (!(design.systemSizeKwDc > 0)) {
-    return null; // no array drawn: nothing to pay on
-  }
-
-  // Cash and loan are priced per watt; lease and PPA sell electricity and have
-  // no system price at all, so their base is zero and only a per-watt basis can
-  // reach them. `pricePurchase` already refuses to apply a dealer fee to cash.
-  //
-  // HELD TO THE PARTNER'S CEILING, like every other screen that prices a saved
-  // deal. On a capped lender the stored sticker is what the rep typed, not what
-  // the bank funds — Amos at $5.50/W and a 65% fee leaves $1.93/W however
-  // confidently $3.00 was entered — so paying a redline overage or an override
-  // percentage on the uncapped figure pays out of money nobody is ever sent.
-  // Kept as an inline comparison in both branches below rather than hoisted to
-  // a boolean: a boolean does not narrow `finance.product`, and the cast that
-  // would paper over that is a cast that survives the day a fifth product is
-  // added.
-  // Storage prices per battery, held to the partner's per-battery ceiling for
-  // exactly the reason the array is held to its per-watt one: the stored
-  // sticker is only as capped as the lender was on the day it was saved, and
-  // paying a redline overage on an uncapped figure pays out of money nobody is
-  // ever sent.
-  const storagePurchase =
-    isStorage && (finance.product === "cash" || finance.product === "loan")
-      ? priceStorageStored({
-          product: finance.product,
-          batteryQty: design.batteryQty,
-          stickerPricePerBatteryCents: finance.stickerPricePerBatteryCents,
-          dealerFeePct: finance.dealerFeePct,
-          adderTotalCents: finance.adderTotalCents,
-          onTopAdderTotalCents: finance.onTopAdderTotalCents,
-          maxFinalPricePerBatteryCents: design.lender?.maxFinalPricePerBatteryCents ?? null,
-          finalBatteryPriceMode: design.lender?.finalBatteryPriceMode,
-          batteryPriceBasis: finance.lenderProduct?.batteryPriceBasis,
-        }).breakdown
-      : null;
-
-  const purchase =
-    !isStorage && (finance.product === "cash" || finance.product === "loan")
-      ? priceStoredPurchase({
-          product: finance.product,
-          systemSizeKwDc: design.systemSizeKwDc,
-          stickerPpwCents: finance.grossPpwCents,
-          dealerFeePct: finance.dealerFeePct,
-          adderTotalCents: finance.adderTotalCents,
-          onTopAdderTotalCents: finance.onTopAdderTotalCents,
-          // ON THE CONTRACT, OUT OF THE BASE. A manager's override is a
-          // percentage of what the household signs, and they signed for the
-          // battery; a rep's redline is measured on `basePriceCents`, which the
-          // battery deliberately stays out of — it is priced from the catalogue
-          // to cover its own cost, exactly like an adder.
-          batteryPriceCents: batteryChargeCents({
-            systemType: design.systemType,
-            batteryQty: design.batteryQty,
-            dealPerBatteryCents: finance.stickerPricePerBatteryCents,
-            cataloguePerBatteryCents: design.battery?.priceCents ?? null,
-          }),
-          maxFinalPpwCents: design.lender?.maxFinalPpwCents ?? null,
-          finalPpwMode: design.lender?.finalPpwMode,
-          ppwBasis: finance.lenderProduct?.ppwBasis,
-        }).breakdown
-      : null;
-
-  const priced = purchase ?? storagePurchase;
-
-  return {
-    product: finance.product,
-    systemType: design.systemType,
-    lenderPayMode: design.lender?.repPayMode ?? null,
-
-    // Zero on a storage deal, and zero is the truth there rather than a
-    // conversion that did not happen.
-    systemWatts: isStorage ? 0 : (purchase?.systemWatts ?? Math.round(design.systemSizeKwDc * 1000)),
-    batteryQty: design.batteryQty,
-    basePriceCents: priced?.basePriceCents ?? 0,
-    /**
-     * What the customer signs. The basis every override is a percentage of.
-     *
-     * DERIVED, not the stored column: `SolarFinance.contractPriceCents` is only
-     * as fresh as the last save, and a deal priced before adders were pulled
-     * inside the dealer fee carries a figure several thousand dollars light. An
-     * override is a percentage of what the customer actually signs.
-     */
-    contractPriceCents: priced?.contractPriceCents ?? finance.contractPriceCents,
-  };
-}
 
 /**
  * The terms frozen when the customer signed, if this deal has them.
@@ -349,7 +216,7 @@ export async function computeSolarCommissionsForProject(
   // Null when the deal has no design or no priced finance yet. Deliberately not
   // an early return: a FLAT override does not need a price, and refusing to pay
   // one because a design row is missing would be another silent zero.
-  const deal = await loadSolarDeal(db, companyId, project.leadId);
+  const deal = await loadCommissionDeal(db, companyId, project.leadId);
 
   let created = 0;
   const repId = project.assignedRepId;
@@ -379,8 +246,16 @@ export async function computeSolarCommissionsForProject(
       companyLeadTakePct: true,
       companyLeadFlatCents: true,
       needsReview: true,
+      ...FROZEN_MEASURE_SELECT,
     },
   });
+
+  /**
+   * WHAT THE RATES MULTIPLY: the watts, base price and battery count frozen when
+   * the customer signed, or the live deal before then. Never a credit, so no
+   * credit can move a commission. See `commission-pricing.ts`.
+   */
+  const measure = commissionMeasure(deal, dealComp);
 
   /**
    * A SIGNED deal whose terms could not be resolved must FAIL SAFE.
@@ -417,7 +292,7 @@ export async function computeSolarCommissionsForProject(
    */
   let repNetCents = 0;
 
-  if (repId && deal) {
+  if (repId && measure) {
     // The rep's own configuration is read by `resolveDealPayTerms`, and only on
     // the branch that may use it — an unsigned deal. It is deliberately NOT
     // read here any more: having it in scope is what made it easy to reach for
@@ -466,8 +341,8 @@ export async function computeSolarCommissionsForProject(
 
     // LOCKED terms: an existing line keeps the redline it was sold against, so
     // raising a rep's redline never re-prices a deal already in the pipeline.
-    // Only watts and price refresh — a design that grows before install should
-    // move the number, exactly as job costs move a roofing pool.
+    // Watts and price refresh only until the customer signs; from then on the
+    // measure frozen at signing is what the terms multiply (`measure` above).
     /**
      * Precedence, earliest wins:
      *   1. the terms agreed at SIGNING (`SolarDealComp`)
@@ -494,7 +369,7 @@ export async function computeSolarCommissionsForProject(
       refusals.push({ projectId: project.id, userId: repId, reason: resolution.reason });
     } else if (resolution.kind === "terms") {
       const terms = resolution.terms;
-      const pay = solarRepPayCents(terms, deal);
+      const pay = solarRepPayCents(terms, measure);
       // The company's cut on a company-provided lead. `companyProvidedLead` is
       // NULL until M1 finalises it, and null is deliberately treated as "not
       // company-provided": taking money off a rep on a classification nobody has
@@ -513,7 +388,7 @@ export async function computeSolarCommissionsForProject(
         // what a payroll cron is. The department is not in doubt here: this
         // function only ever runs on a solar project.
         vertical: "solar" as const,
-        label: solarPayLabel(terms, deal.systemWatts, pay),
+        label: solarPayLabel(terms, measure.systemWatts, pay),
         baseAmount: pay.basisCents,
         // The NET figure. `solarGrossAmount` keeps what the basis produced, so a
         // pay stub can show a rep both numbers and the rate between them.
@@ -596,7 +471,7 @@ export async function computeSolarCommissionsForProject(
       }
       const result = managerOverrideCents(
         { type: o.type, percent: o.percent, flatAmount: o.flatAmount, perWattMills: o.perWattMills },
-        { systemWatts: deal?.systemWatts ?? 0, repNetCents }
+        { systemWatts: measure?.systemWatts ?? 0, repNetCents }
       );
       const basisCents = result.basisCents;
       const amount = result.amountCents;
@@ -635,7 +510,8 @@ export async function computeSolarCommissionsForProject(
  * payroll says $9,500, and both are true.
  *
  * PRECEDENCE, identical to `computeSolarCommissionsForProject` and deliberately
- * sharing `loadSolarDeal` with it so the screen and the payout cannot drift:
+ * sharing `loadCommissionDeal` and `commissionMeasure` with it so the screen and
+ * the payout cannot drift:
  *   • SIGNED   → the frozen snapshot, always. Never the rep's profile today,
  *                because the sale closed under different terms and repricing it
  *                on screen would show a rep a number payroll will not pay.
@@ -663,14 +539,16 @@ export async function estimatedSolarCommission(
         redlinePerBatteryCents: true, perBatteryFlatCents: true,
         needsReview: true, companyProvidedLead: true,
         leadAdjustMode: true, companyLeadTakePct: true, companyLeadFlatCents: true,
+        ...FROZEN_MEASURE_SELECT,
       },
     }),
-    loadSolarDeal(db, companyId, leadId),
+    loadCommissionDeal(db, companyId, leadId),
     db.lead.findFirst({ where: { id: leadId, companyId }, select: { assignedRepId: true } }),
   ]);
 
   if (comp?.needsReview) return { state: "needs_review" };
-  if (!deal) return { state: "unavailable", reason: "This deal is not designed and priced yet." };
+  const measure = commissionMeasure(deal, comp);
+  if (!measure) return { state: "unavailable", reason: "This deal is not designed and priced yet." };
 
   /**
    * THE SAME PRECEDENCE PAYROLL USES, through the same function.
@@ -728,7 +606,7 @@ export async function estimatedSolarCommission(
   // rep's profile today — the deal page labels the two differently.
   const fromSnapshot = comp != null && snapshotFromDealComp(comp) != null;
 
-  const pay = solarRepPayCents(terms, deal);
+  const pay = solarRepPayCents(terms, measure);
   const payout = applyCompanyLeadTake(pay.amountCents, {
     companyProvided: comp?.companyProvidedLead === true,
     mode: comp?.leadAdjustMode ?? "none",

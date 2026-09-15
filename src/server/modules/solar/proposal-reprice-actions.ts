@@ -6,17 +6,10 @@ import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { leadAccessible } from "@/server/rbac/lead-access";
-import { getSolarSettings } from "./settings";
-import {
-  dealLenderId,
-  lenderAdderRules,
-  lineFromCatalogue,
-  resolveAdderTotal,
-} from "./adders";
+import { dealLenderId, lenderAdderRules, lineFromCatalogue } from "./adders";
 import { recomputeDesignFigures } from "./recompute";
 import { generateProposalVersion } from "./proposal-generate";
-import { financeRowForProduct } from "@/lib/solar-finance-row";
-import { LENDER_TERMS_SELECT, toLenderProductTerms } from "./lender-terms";
+import { dealMoneyColumns } from "./deal-money";
 import { annualUsageFromBill, effectiveUsageKwh, monthlyBillFromUsage } from "@/lib/solar-energy";
 import { basePpwFromSticker, offsetPct, underBaseFloor } from "@/lib/solar-money";
 import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
@@ -255,15 +248,13 @@ export async function repriceProposalAction(
   const design = await prisma.solarDesign.findUnique({
     where: { leadId },
     select: {
-      systemSizeKwDc: true,
+      systemType: true,
       lenderId: true,
-      lender: { select: { minBasePpwCents: true } },
+      lender: { select: { minBasePpwCents: true, minBasePricePerBatteryCents: true } },
     },
   });
   const finance = await prisma.solarFinance.findUnique({ where: { leadId } });
   if (!design || !finance) return fail("Complete the system design and financing first.");
-
-  const assumptions = await getSolarSettings(user.companyId);
 
   if (
     d.grossPpwCents !== undefined ||
@@ -283,40 +274,41 @@ export async function repriceProposalAction(
             companyId: user.companyId,
             ...(design.lenderId ? { lenderId: design.lenderId } : {}),
           },
-          select: LENDER_TERMS_SELECT,
+          select: { product: true },
         })
       : null;
     if (lenderProductId && !lenderProduct) return fail("That financing programme is not available.");
 
-    const adders = await resolveAdderTotal(user.companyId, leadId);
-
-    const row = financeRowForProduct(
-      {
-        // The PRODUCT never changes here. Moving a deal between cash, a loan
-        // and a lease changes which columns mean anything and which equipment
-        // is even sellable; that belongs in the builder, with the validation
-        // that goes with it.
-        product: lenderProduct?.product ?? finance.product,
-        grossPpwCents: d.grossPpwCents ?? finance.grossPpwCents,
-        dealerFeePct: finance.dealerFeePct,
-        ...adders,
-        rateMillsPerKwh: finance.rateMillsPerKwh,
-        monthlyPaymentCents: finance.monthlyPaymentCents,
-        escalatorPct: finance.escalatorPct,
-        termYears: finance.termYears,
-        aprPct: finance.aprPct,
-        loanTermMonths: finance.loanTermMonths,
-        downPaymentCents: finance.downPaymentCents,
-        loanMonthlyPaymentCents: finance.loanMonthlyPaymentCents,
-        lenderProductId,
-      },
-      {
-        systemSizeKwDc: design.systemSizeKwDc,
-        assumptions,
-        lenderProduct: toLenderProductTerms(lenderProduct),
-        targetNetPpwCents: assumptions.targetNetPpwCents,
-      }
-    );
+    /**
+     * PRICED BY THE ONE DERIVATION: `dealMoneyColumns`, the code the financing
+     * step's save and every recompute already run. It reads the programme's
+     * terms, the adders and the storage off the deal itself.
+     *
+     * This used to call `financeRowForProduct` directly, and the copy had
+     * fallen behind. It never passed the battery and had no storage branch, so
+     * a live re-price wrote a contract with the storage taken off it. Generation
+     * put the battery back a moment later — but when generation was refused, the
+     * short row is what stayed on the deal.
+     */
+    const row = await dealMoneyColumns(user.companyId, leadId, {
+      // The PRODUCT never changes here. Moving a deal between cash, a loan
+      // and a lease changes which columns mean anything and which equipment
+      // is even sellable; that belongs in the builder, with the validation
+      // that goes with it.
+      product: lenderProduct?.product ?? finance.product,
+      grossPpwCents: d.grossPpwCents ?? finance.grossPpwCents,
+      dealerFeePct: finance.dealerFeePct,
+      rateMillsPerKwh: finance.rateMillsPerKwh,
+      monthlyPaymentCents: finance.monthlyPaymentCents,
+      escalatorPct: finance.escalatorPct,
+      termYears: finance.termYears,
+      aprPct: finance.aprPct,
+      loanTermMonths: finance.loanTermMonths,
+      downPaymentCents: finance.downPaymentCents,
+      loanMonthlyPaymentCents: finance.loanMonthlyPaymentCents,
+      lenderProductId,
+      stickerPricePerBatteryCents: finance.stickerPricePerBatteryCents,
+    });
 
     // ── The guard rails ───────────────────────────────────────────────────
     // Asked of the PRICED ROW, not of what arrived from the browser, and asked
@@ -328,7 +320,20 @@ export async function repriceProposalAction(
     // and re-pricing is the one path where a rejection after the update leaves
     // the deal changed and only the document refused.
     const isPurchase = row.product === "cash" || row.product === "loan";
-    if (isPurchase) {
+    if (isPurchase && design.systemType === "storage") {
+      // A storage job has no watts, so its row prices at $0/W and every per-watt
+      // floor would refuse it. Its floor is per battery — the same one the
+      // readiness check asks, asked here before the write for the reason above.
+      if (
+        underBaseFloor(
+          row.stickerPricePerBatteryCents,
+          row.dealerFeePct,
+          design.lender?.minBasePricePerBatteryCents
+        )
+      ) {
+        return fail("That price leaves less per battery than this lender allows.");
+      }
+    } else if (isPurchase) {
       // ONE margin rule, and it belongs to the LENDER. The company-wide Min/Max
       // $/W band that used to be asked here as well went on 2026-09-02 — what a
       // deal may price at is a property of the loan product, not of the app.

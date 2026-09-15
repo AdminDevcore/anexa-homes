@@ -1,6 +1,6 @@
 import type { FinanceProduct } from "@prisma/client";
 import { financeRowForProduct } from "./solar-finance-row";
-import { lenderProductLabel } from "./solar-lender-product";
+import { customerProductLabel } from "./solar-lender-product";
 import type { SignTodayMode } from "./solar-sign-today";
 import type { ProposalAlternative, ProposalFinanceInput } from "./solar-proposal";
 import {
@@ -219,12 +219,30 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
     ? basePpwFromSticker(storage.stickerPricePerBatteryCents, input.quoted.dealerFeePct)
     : 0;
 
+  /**
+   * THE SAME RULE PER WATT: what the company keeps per watt out of the sticker
+   * this deal was quoted at. Every other programme on the menu is re-grossed
+   * from it by its own fee.
+   *
+   * The menu used to price every other programme with no sticker at all, so
+   * each fell to the company's target net — or, with none set, the default
+   * sticker — whatever the rep had actually sold. A household comparing lenders
+   * was comparing different prices for one system (L15 in PRICING_LOGIC.md).
+   *
+   * Null when the quoted option has no per-watt price to take a base from — a
+   * lease, a PPA, a storage job — and those keep the old derivation.
+   */
+  const dealBasePpwCents =
+    !storageDeal && input.quoted.grossPpwCents > 0
+      ? basePpwFromSticker(input.quoted.grossPpwCents, input.quoted.dealerFeePct)
+      : null;
+
   // ── Cash, first among the alternatives ────────────────────────────────────
   // The one option every household understands, and the one a financed quote
-  // never shows. Priced at what the company actually needs to keep — NOT at the
-  // loan's sticker, which carries a lender's fee for money nobody is borrowing.
-  // Quoting cash at the financed price is how a customer who offered to write a
-  // cheque ends up paying the bank's cut anyway.
+  // never shows. Priced at this deal's base — NOT at the loan's sticker, which
+  // carries a lender's fee for money nobody is borrowing. Quoting cash at the
+  // financed price is how a customer who offered to write a cheque ends up
+  // paying the bank's cut anyway.
   if (input.quoted.product !== "cash") {
     out.push({
       key: "cash",
@@ -300,6 +318,16 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
     const row = financeRowForProduct(
       {
         product: p.product,
+        // THIS DEAL'S BASE, grossed up by this programme's own fee — see
+        // `dealBasePpwCents`. The partner's ceiling still applies to it below.
+        // Absent, the row falls back to the target net or the default sticker.
+        grossPpwCents:
+          dealBasePpwCents != null && p.product === "loan"
+            ? (grossPpwFromNet(
+                dealBasePpwCents,
+                p.dealerFeePct ?? input.assumptions.defaultDealerFeePct
+              ) ?? undefined)
+            : undefined,
         adderTotalCents: input.adderTotalCents,
         onTopAdderTotalCents: input.onTopAdderTotalCents,
       },
@@ -349,11 +377,12 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
 
     out.push({
       key: `${p.product}:${p.id}`,
-      label: `${p.lender.name} · ${lenderProductLabel(p)}`,
+      // Without the dealer fee: the menu is printed on the customer's document.
+      label: `${p.lender.name} · ${customerProductLabel(p)}`,
       lender: p.lender.name,
       lenderLogoUrl: p.lender.logoUrl,
       lenderApplyUrl: p.lender.applyUrl,
-      lenderProductLabel: lenderProductLabel(p),
+      lenderProductLabel: customerProductLabel(p),
       // THIS partner's closing credit, not the deal partner's. A menu row is
       // an offer from whoever publishes it.
       signTodayRule: {
@@ -409,24 +438,26 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
 }
 
 /**
- * What cash is priced at.
+ * What cash is priced at: this deal's base per watt.
  *
- * The company's own target net rate when one is set — that is exactly what the
- * figure means: what has to be kept per watt once the lender is out of the
- * picture, and on cash the lender is out of the picture. Otherwise the deal's
- * sticker with its dealer fee taken back out, which is the same number arrived
- * at from the other end.
+ * The quoted sticker with its dealer fee taken back out. Cash has no lender and
+ * no fee, so the base IS the cash price.
+ *
+ * The company's target net used to win whenever one was set, which priced
+ * cash at $2.50/W on a deal the rep had sold at $3.10 (L15). It is now only the
+ * fallback for a quote with no per-watt price to start from — a lease or a PPA.
  */
 export function cashPpwCents(input: {
   quoted: { product: FinanceProduct; grossPpwCents: number; dealerFeePct: number };
   targetNetPpwCents: number | null;
 }): number {
+  if (input.quoted.grossPpwCents > 0) {
+    return basePpwFromSticker(input.quoted.grossPpwCents, input.quoted.dealerFeePct);
+  }
   if (input.targetNetPpwCents != null && input.targetNetPpwCents > 0) {
     return input.targetNetPpwCents;
   }
-  const f = input.quoted.dealerFeePct;
-  const fee = Number.isFinite(f) && f > 0 && f < 100 ? f / 100 : 0;
-  return Math.round(input.quoted.grossPpwCents * (1 - fee));
+  return 0;
 }
 
 function lenderIsApproved(lenderId: string, approved: string[] | null): boolean {

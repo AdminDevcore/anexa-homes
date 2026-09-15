@@ -5236,6 +5236,35 @@ model SolarDealComp {
   /// When the customer signed — the moment these terms stopped being editable.
   signedAt DateTime
 
+  /// ── What the commission is measured on, frozen at signing ──────────────
+  /// The deal's size and base price as payroll priced them when the customer
+  /// signed. Payroll and the deal page's estimate read THESE once set, not the
+  /// live design and finance rows: rates frozen against a price that can still
+  /// move are only half a snapshot. Re-frozen on each later signature (a
+  /// change order); the rates above are not.
+  ///
+  /// No credit state. Commission is measured before any credit, so nothing
+  /// here moves when a credit is applied or taken off.
+  ///
+  /// Null on a row frozen before these columns existed, until
+  /// `scripts/backfill-deal-comp-pricing.ts` sets them. Null means "read the
+  /// live deal", which is what payroll did before.
+  systemWatts    Int?
+  /// The BASE price, cents: after the lender's cut, before adders and storage.
+  /// What a redline is measured against. Payroll's `basePriceCents`.
+  basePriceCents Int?
+  batteryQty     Int?
+  pricedAt       DateTime?
+  /// "signature" or "backfill".
+  pricedFrom     String?
+  /// The signed proposal the frozen price was checked against.
+  pricedProposalId String?
+  /// Whether the live price at freezing matched that signed document: the final
+  /// price, and the watts and battery count where the document carries them.
+  /// False is logged on the deal for review and does not block pay. Null when
+  /// there was no signed document to compare with.
+  pricingMatchesSignedDocument Boolean?
+
   /// ── Lead origin, finalised at M1 ────────────────────────────────────────
   /// NULL until M1 finalises it. Null is not "self-generated": it means nobody
   /// has decided yet, and the engine pays as self-generated in the meantime

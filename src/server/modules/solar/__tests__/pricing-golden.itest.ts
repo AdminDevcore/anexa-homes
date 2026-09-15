@@ -23,7 +23,12 @@ import { ASSUMPTIONS, DEALS, STORAGE_DEAL, optionFigures } from "@/lib/__tests__
  *
  * The live re-price is not pinned here. It re-derives the system size from the
  * drawn roof layout before it prices, and this fixture has no drawing, so it
- * would pin a 0 kW deal. Stage 1 pins it with the battery fix.
+ * would pin a 0 kW deal. Stage 1 pins it, with the battery fix, in
+ * pricing-stage1.itest.ts.
+ *
+ * Stage 1 moved these snapshots: every menu alternative is priced from the
+ * deal's own base instead of the default sticker (L15), and the dealer fee is
+ * off the customer's programme labels.
  *
  * Characterization, not specification. A figure changes only in the stage
  * approved to change it, and that commit updates the snapshot and says why.
