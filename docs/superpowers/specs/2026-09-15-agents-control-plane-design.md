@@ -1,7 +1,7 @@
 # Agents: a control plane for back-office automation
 
 Date: 2026-09-15
-Status: approved 2026-09-15, with amendments (decisions 8–13). Open questions 1 and 3 are decided later and do not block this build.
+Status: approved 2026-09-15, with amendments (decisions 8–14). Open questions 1 and 3 are decided later and do not block this build.
 Branch: `feat/agents-control-plane` (worktree `~/Desktop/anexa-agents-wt`, off `origin/main` at `c0a1a7e`)
 
 ## Problem
@@ -96,6 +96,7 @@ Verified against `origin/main` and against production on 2026-09-15.
 | 11 | Stage flags: Solar's six "Action Required" stages are flagged; Roofing's Supplement Needed is flagged; three new roofing action-required stages are added — Claim Denied, QC Failed, Payment Issue. Nothing waiting on a carrier or homeowner, and nothing on the forward path, is flagged. |
 | 12 | Built on `main` as it stands: with no stage-requirement check there, the gate has no "blocked" outcome. |
 | 13 | Advance and the progress count use main-line stages only — not `isLost`, not `isActionRequired` — in both Roofing and Solar, including the change to Solar's Advance. Side-states stay reachable from the Move menu. Confirmed 2026-09-15. |
+| 14 | Two deploys. First the agents control plane, the Hello Agent and the Advance change (invisible while production has no action-required stage). Then the stage migration alone, after the roofing and solar teams have been told. Open question 3: option A approved as the stopgap. Decided at build approval, 2026-09-15. |
 
 ## Data model
 
@@ -736,9 +737,12 @@ not `isActionRequired`:
   them.
 
 This also changes Solar once its six stages are flagged: from NTP Submitted,
-Advance offers NTP Approved rather than NTP Action Required. It ships in the
-same deploy as the stage migration, so no deal page ever offers a side-state as
-the next step. Confirmed 2026-09-15 (decision 13).
+Advance offers NTP Approved rather than NTP Action Required. It ships one deploy
+before the stage migration (decision 14): the production build applies
+migrations before it compiles, so in a single deploy the old Advance would serve
+beside the new stages for as long as the build ran. With no action-required
+stage in production, the new Advance changes nothing until the migration lands.
+Confirmed 2026-09-15 (decision 13).
 
 ## Migrations and rollout
 
@@ -752,7 +756,9 @@ transaction that adds it:
 3. `action_required_stages` — the solar and roofing flags and the three new
    roofing stages.
 
-All are additive and ship with the deploy through `prod-migrate`. One new
+1 and 2 ship with the agents build; 3 ships alone in a later deploy, once the
+roofing and solar teams have been told (decision 14). Its folder is timestamped
+after 2, so it sorts last. All are additive and ship through `prod-migrate`. One new
 dependency, `croner` 10.0.1, parses and validates cron expressions. The
 per-minute cron entry needs a Vercel plan that allows sub-daily crons; the
 existing `*/15` entries show this project's plan does.
@@ -886,6 +892,9 @@ count, in both verticals, including Solar's Advance. Side-states stay reachable
 from the Move menu.
 
 ### 3. Runs about deals a manager can't open — decide before the first gated agent
+
+**Stopgap approved 2026-09-15: option A**, with the Apply-refusal test locked in.
+The lasting decision is still due before the first gated agent.
 
 Not decided, and not blocking: the Hello Agent requests no changes, so nothing
 is ever held. It must be decided before the first agent that returns changes

@@ -12,6 +12,12 @@
 
 **Since approval:** decision 13 — Advance and the progress count use main-line stages only, in both verticals — is confirmed. Open questions 1 (portal credentials) and 3 (runs about deals a manager can't open) stay open; this plan decides neither. See *What this plan assumes* at the end.
 
+**Amended at build approval (2026-09-15):**
+- **Two deploys.** Deploy 1 is everything except Task 9: the agents control plane, the Hello Agent, and Task 8's Advance change. The Advance change alters nothing while production has no action-required stage. Deploy 2 is Task 9 alone — the three roofing stages and the seven flags — pushed after the user has told the roofing and solar teams. Advance goes first because the production build applies migrations before it compiles. In a single deploy, the old Advance would serve beside the new stages for as long as the build ran, and indefinitely if it failed.
+- **Order of work:** Tasks 0–8, 10–22, 23, 24, Task 25 for deploy 1; then Task 9, Tasks 23 and 24 again, and Task 25 for deploy 2. Task 9's migration is `20260915120300_action_required_stages`, so it sorts after the other two.
+- **Before each push**, the user gets a plain-language paragraph for a roofing rep and one for a solar coordinator on what they will see differently, and gives the go.
+- **Open question 3:** option A is approved as the stopgap. The Apply-refusal test in Task 18 stays.
+
 ---
 
 ## Ground rules for this worktree
@@ -73,8 +79,8 @@
 | `src/app/portal/agents/runs/page.tsx` | Run feed, with the needs-a-human queue first. |
 | `src/components/portal/agents/` | `href`, `agent-tabs`, `filter-chips`, `pagination`, `local-time`, `auto-refresh`, `run-status-pill`, `change-list`, `resolve-run`, `run-list`, `needs-human-card`, `run-now-button`, `agent-enabled-switch`, `agent-config-form`, `agents-access-card`, `product-choices`. |
 | `prisma/migrations/20260915120000_agents_control_plane/` | Enums, tables, notification event values (generated). |
-| `prisma/migrations/20260915120100_action_required_stages/` | Stage flags and three roofing stages. |
 | `prisma/migrations/20260915120200_agents_seed_rows/` | Hello Agent and starter notification rules. |
+| `prisma/migrations/20260915120300_action_required_stages/` | Stage flags and three roofing stages. Deploy 2. |
 | `e2e/agents.spec.ts` | Browser coverage. |
 
 **Tests created**
@@ -2589,8 +2595,10 @@ git commit -m "feat(pipeline): Advance and step counts skip action-required side
 
 ## Task 9: Action-required stages: the migration, the seeds, and a test against production's shape
 
+> Built after deploy 1 (see *Amended at build approval*). Nothing in Tasks 10–22 depends on it.
+
 **Files:**
-- Create: `prisma/migrations/20260915120100_action_required_stages/migration.sql`
+- Create: `prisma/migrations/20260915120300_action_required_stages/migration.sql`
 - Modify: `prisma/seed.ts` (STAGES, lines 9–26; roofing loop, lines ~186–203)
 - Modify: `prisma/seed-clean.ts` (STAGES, lines 29–46; roofing loop, lines ~175–192)
 - Test: `src/server/modules/pipeline/__tests__/action-required-stages.itest.ts`
@@ -2617,7 +2625,7 @@ import { TEST_DATABASE_URL } from "@/server/vertical/__tests__/global-setup";
 
 const MIGRATION = join(
   __dirname,
-  "../../../../../prisma/migrations/20260915120100_action_required_stages/migration.sql"
+  "../../../../../prisma/migrations/20260915120300_action_required_stages/migration.sql"
 );
 
 const db = new PrismaClient({ datasources: { db: { url: TEST_DATABASE_URL } } });
@@ -2722,7 +2730,7 @@ afterAll(async () => {
   await db.$disconnect();
 });
 
-describe("20260915120100_action_required_stages", () => {
+describe("20260915120300_action_required_stages", () => {
   it("flags the six solar Action Required stages and nothing else", async () => {
     expect(await flaggedOf(solarId)).toEqual([
       "ntp_action_required_10",
@@ -2794,12 +2802,12 @@ VERTICAL_TEST_DATABASE_URL="postgresql://anexa:anexa@127.0.0.1:5544/anexa?schema
   pnpm exec vitest run --config vitest.integration.config.ts src/server/modules/pipeline/__tests__/action-required-stages.itest.ts 2>&1 | tail -6
 ```
 
-Expected: FAIL in `beforeAll` — psql: `could not open file ".../20260915120100_action_required_stages/migration.sql"`.
+Expected: FAIL in `beforeAll` — psql: `could not open file ".../20260915120300_action_required_stages/migration.sql"`.
 
 - [ ] **Step 3: Write the migration**
 
 ```sql
--- prisma/migrations/20260915120100_action_required_stages/migration.sql
+-- prisma/migrations/20260915120300_action_required_stages/migration.sql
 --
 -- Action-required stages: side-states a deal waits in while somebody clears a
 -- problem. A gated agent may move a deal INTO one of these and nowhere else, and
@@ -2903,7 +2911,7 @@ const STAGES = [
   // Side-states (isActionRequired): a deal waits in one while somebody clears a
   // problem, then rejoins the line. Advance and "step N of M" skip them
   // (src/lib/stage-progress.ts), and a gated agent may move a deal into one and
-  // nowhere else. Same rows as migration 20260915120100_action_required_stages.
+  // nowhere else. Same rows as migration 20260915120300_action_required_stages.
   { key: "claim_denied", name: "Claim Denied — Action Required", color: "#EF4444", isActionRequired: true },
   { key: "scope_received", name: "Scope Received", color: "#C084FC" },
   { key: "supplement_needed", name: "Supplement Needed", color: "#F472B6", isActionRequired: true },
@@ -2971,13 +2979,13 @@ psql "postgresql://anexa:anexa@127.0.0.1:5544/anexa" -qAt -c "SET search_path TO
 pnpm -s typecheck; echo "typecheck exit=$?"
 ```
 
-Expected: `Applying migration `20260915120100_action_required_stages``; `✅ Seed complete.`; 20 rows `0|new_lead|f` … `19|cancelled|f`, with `t` on exactly `claim_denied` (5), `supplement_needed` (7), `qc_failed` (13) and `payment_issue` (16); `typecheck exit=0`.
+Expected: `Applying migration `20260915120300_action_required_stages``; `✅ Seed complete.`; 20 rows `0|new_lead|f` … `19|cancelled|f`, with `t` on exactly `claim_denied` (5), `supplement_needed` (7), `qc_failed` (13) and `payment_issue` (16); `typecheck exit=0`.
 
 - [ ] **Step 7: Commit**
 
 ```bash
 cd /Users/mustafajoulani/Desktop/anexa-agents-wt
-git add prisma/migrations/20260915120100_action_required_stages/migration.sql src/server/modules/pipeline/__tests__/action-required-stages.itest.ts prisma/seed.ts prisma/seed-clean.ts
+git add prisma/migrations/20260915120300_action_required_stages/migration.sql src/server/modules/pipeline/__tests__/action-required-stages.itest.ts prisma/seed.ts prisma/seed-clean.ts
 git commit -m "feat(pipeline): flag action-required stages; add Claim Denied, QC Failed and Payment Issue to roofing" -m "Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ```
 
@@ -9101,6 +9109,8 @@ Expected: the SQL succeeds; `git status --short` prints nothing.
 
 ## Task 25: Ship
 
+> Run this task once per deploy. **Deploy 1** runs after Tasks 23 and 24 pass on a branch without Task 9. **Deploy 2** runs after Task 9 and a second pass of Tasks 23 and 24. Before Step 6 (the push) each time, send the user the roofing-rep and solar-coordinator paragraphs and wait for their go. Step 8's stage checks apply to deploy 2 only; after deploy 1, expect no action-required stages and 22 roofing stages.
+
 Deploying is a standing instruction for this repository: verified work is pushed to `origin/main`, and Vercel deploys it. The production build applies the three migrations before `next build` runs, so **a failed build has still changed production's database**. All three are additive.
 
 - [ ] **Step 1: See what `main` did while this was built**
@@ -9126,7 +9136,7 @@ Expected: all three print nothing.
 If any prints something, **stop and tell the user**, quoting what printed:
 - `solarStageRequirementError` on `main`: the spec's merge-time check applies. The applier must call it before applying, with a failing check becoming a `held` change.
 - `stage-entry-data.ts` on `main`: Task 7's extraction collides with it, and the two copies must become one.
-- A new migration touching `pipeline_stages`: the positions `20260915120100_action_required_stages` inserts at, and its itest fixture, must be re-checked against it.
+- A new migration touching `pipeline_stages`: the positions `20260915120300_action_required_stages` inserts at, and its itest fixture, must be re-checked against it.
 
 - [ ] **Step 3: Rebase**
 
