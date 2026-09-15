@@ -49,6 +49,14 @@ export async function GET(req: Request) {
   if (denied) return denied;
 
   /**
+   * `?proposalId=` narrows the sweep to one document. Signing calls this the
+   * moment a customer signs (proposal-sign-action.ts), so the PDF is filed as
+   * part of signing rather than at the next scheduled run. Same secret, same
+   * idempotent filer, same re-check; the schedule remains the guarantee.
+   */
+  const only = new URL(req.url).searchParams.get("proposalId");
+
+  /**
    * Unscoped: this crosses every company and has no workspace of its own. The
    * `vertical` filter is explicit for the same reason payroll's is — a cron has
    * no async-local context for the isolation extension to read.
@@ -59,6 +67,7 @@ export async function GET(req: Request) {
       prisma.solarProposal.findMany({
         where: {
           vertical: "solar",
+          ...(only ? { id: only } : {}),
           approvedAt: { not: null },
           signedAt: { not: null },
           OR: [{ approvedFileId: null }, { approvedParFileId: null }],

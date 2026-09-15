@@ -146,7 +146,7 @@ function consentTimestamp(claimedMs: number | null, now: Date): Date {
 export async function acceptSolarProposal(
   token: string,
   meta: AcceptInput
-): Promise<{ ok: boolean; error?: string; certificate?: ProposalCertificate }> {
+): Promise<{ ok: boolean; error?: string; certificate?: ProposalCertificate; proposalId?: string }> {
   // getPublicSolarProposal already refuses anything not sent, so acceptance is
   // unreachable for a draft or an internally-generated preview.
   const proposal = await getPublicSolarProposal(token);
@@ -260,7 +260,10 @@ export async function acceptSolarProposal(
    * just written. Returning the record means the document has everything it
    * needs without asking, and the trail says only what actually happened.
    */
-  return { ok: true, certificate: (await certificateFor(proposal.id)) ?? undefined };
+  //
+  // `proposalId` is for the server action that called this, which files the
+  // signed PDF once the response is sent; it strips the id before replying.
+  return { ok: true, certificate: (await certificateFor(proposal.id)) ?? undefined, proposalId: proposal.id };
 }
 
 /**

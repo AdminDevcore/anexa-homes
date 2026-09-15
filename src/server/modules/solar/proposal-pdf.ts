@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { selfBaseUrl } from "@/server/app-url";
 import type { Browser } from "puppeteer-core";
 import { mintPrintSignature } from "./print-signature";
 
@@ -29,12 +30,7 @@ const NAV_TIMEOUT_MS = 45_000;
  * action already relies on for customer links; VERCEL_URL is the per-deployment
  * fallback for a preview build that has no custom domain configured.
  */
-function baseUrl(): string {
-  const configured = (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
-  if (configured) return configured;
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  return "http://127.0.0.1:3000";
-}
+const baseUrl = selfBaseUrl;
 
 /** Are we inside a serverless runtime with no Chrome of its own? */
 function isServerless(): boolean {
