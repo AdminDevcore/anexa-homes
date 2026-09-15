@@ -1,17 +1,19 @@
 import type { Vertical } from "@prisma/client";
-import type { ActiveVertical } from "@/lib/vertical";
+import { isActiveVertical, type ActiveVertical } from "@/lib/vertical";
 
 /**
  * Where an agent runs. A "both" agent (vertical NULL) runs once per live
  * workspace; a scoped agent runs only in its own, and not at all when that
- * workspace is switched off or retired.
+ * workspace is switched off or retired (including the legacy `others` value,
+ * which `isActiveVertical` never accepts).
  */
 export function agentRunVerticals(
   agentVertical: Vertical | null,
   live: readonly ActiveVertical[]
 ): ActiveVertical[] {
   if (agentVertical === null) return [...live];
-  return (live as readonly string[]).includes(agentVertical) ? [agentVertical as ActiveVertical] : [];
+  if (!isActiveVertical(agentVertical)) return [];
+  return live.includes(agentVertical) ? [agentVertical] : [];
 }
 
 /** Run now: the same, narrowed to the workspaces the viewer holds. */
@@ -24,5 +26,6 @@ export function viewerRunVerticals(
 }
 
 export function agentVisibleTo(agentVertical: Vertical | null, held: readonly ActiveVertical[]): boolean {
-  return agentVertical === null || (held as readonly string[]).includes(agentVertical);
+  if (agentVertical === null) return true;
+  return isActiveVertical(agentVertical) && held.includes(agentVertical);
 }

@@ -19,7 +19,14 @@ export const MIN_START_MS = 5_000;
 export const MIN_TIMEOUT_SECONDS = 5;
 export const MAX_TIMEOUT_SECONDS = 240;
 
-/** How long this handler may run: its own timeout, cut short by the tick. */
+/**
+ * How long this handler may run: its own timeout, cut short by the tick.
+ *
+ * `capMs` caps the returned handler deadline only — it must never itself feed
+ * `canStart`. The runner (Task 12) applies its own `maxHandlerMs` cap AFTER
+ * calling `canStart` on the uncapped deadline, so a start decision always
+ * reflects what is actually left in the tick, not a handler's own ceiling.
+ */
 export function handlerDeadlineMs(
   timeoutSeconds: number,
   anchorMs: number,

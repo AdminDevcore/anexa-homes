@@ -4,8 +4,20 @@ import { agentRunVerticals, agentVisibleTo, viewerRunVerticals } from "../vertic
 import type { RequestedChange, ResolvedChange, TargetStage } from "../types";
 
 const LEAD = "0b8f5a8e-2f1e-4d7c-9a6b-1c2d3e4f5a6b";
+const LEAD2 = "1c2d3e4f-5a6b-4d7c-9a6b-2f1e0b8f5a8e";
 const change: RequestedChange = { type: "move_stage", leadId: LEAD, toStageKey: "to", reason: "why" };
+const changeBack: RequestedChange = { type: "move_stage", leadId: LEAD, toStageKey: "from", reason: "why" };
+const change2: RequestedChange = { type: "move_stage", leadId: LEAD2, toStageKey: "to", reason: "why" };
 const from = { id: "s1", key: "from", name: "NTP Submitted" };
+const fromAsTarget: TargetStage = {
+  id: "s1",
+  key: "from",
+  name: "NTP Submitted",
+  position: 1,
+  isActionRequired: false,
+  defaultBlocker: null,
+  stageType: "internally_owned",
+};
 const target = (over: Partial<TargetStage> = {}): TargetStage => ({
   id: "s2",
   key: "to",
@@ -70,7 +82,7 @@ describe("planChanges", () => {
     const planned = planChanges(
       [
         resolved({ contractRefusal: "This deal has no signed proposal and completed contract on file." }),
-        resolved(),
+        resolved({ change: change2, lead: { id: LEAD2, label: "James Carter · 4 Oak Ave" } }),
       ],
       false
     );
@@ -113,6 +125,39 @@ describe("planChanges", () => {
       true
     );
     expect(c.outcome).toBe("noop");
+  });
+
+  // Code review (2026-09-15): two changes for one deal in one run.
+
+  it("moves a deal only once per run: the same deal to the same stage twice makes the second invalid, and the first is discarded", () => {
+    const planned = planChanges([resolved(), resolved()], false);
+    expect(planned.map((c) => c.outcome)).toEqual(["discarded", "invalid"]);
+    expect(planned[1].note).toBe("An agent may move a deal once per run; this deal was already asked to move.");
+    expect(finalStatus("success", planned)).toBe("failed");
+  });
+
+  it("a move away and back for the same deal: the second is invalid, the first discarded, and the run failed", () => {
+    const planned = planChanges(
+      [resolved(), resolved({ change: changeBack, toStage: fromAsTarget })],
+      false
+    );
+    expect(planned.map((c) => c.outcome)).toEqual(["discarded", "invalid"]);
+    expect(planned[1].note).toBe("An agent may move a deal once per run; this deal was already asked to move.");
+    expect(finalStatus("success", planned)).toBe("failed");
+  });
+
+  it("discards a held change too, when another change in the run is invalid", () => {
+    const held = resolved({ toStage: target({ isActionRequired: false, name: "NTP Approved" }) });
+    const invalid = resolved({ change: change2, lead: null });
+    const planned = planChanges([held, invalid], true);
+    expect(planned[0]).toMatchObject({ outcome: "discarded", note: "Not applied: another change in this run was invalid." });
+    expect(planned[1].outcome).toBe("invalid");
+  });
+
+  it("two different deals in one run are unaffected, both applied", () => {
+    const other = resolved({ change: change2, lead: { id: LEAD2, label: "James Carter · 4 Oak Ave" } });
+    const planned = planChanges([resolved(), other], false);
+    expect(planned.map((c) => c.outcome)).toEqual(["applied", "applied"]);
   });
 });
 
