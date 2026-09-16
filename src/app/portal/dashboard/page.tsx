@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import {
   Users,
   FolderKanban,
@@ -15,6 +16,7 @@ import {
   Hourglass,
 } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
+import { can } from "@/server/rbac/guards";
 import {
   getDashboardStats,
   getRecentLeads,
@@ -34,6 +36,23 @@ export const metadata = { title: "Dashboard" };
 export default async function DashboardPage() {
   const fmt = await currentFormatters();
   const user = await requireUser();
+
+  /**
+   * The sidebar has always said this page needs `Project:read` — PORTAL_NAV
+   * gates the Dashboard item on it — and this page said nothing, so the two
+   * disagreed. Every role held that grant, so the disagreement cost nothing.
+   *
+   * `accountant_readonly` is the first role that does not, and it is the one
+   * role every books and reports denial redirects HERE. The outside accountant
+   * has no Dashboard link, cannot be shown a deal-flow figure that means
+   * anything to them (listScope denies them leads and projects, so the cards
+   * read zero), and would land on a page of zeros as the answer to "you may not
+   * open that". Sending them to the books instead is both the honest answer and
+   * the page they actually came for.
+   */
+  if (!can(user, "read", "Project")) {
+    redirect(can(user, "read", "Bookkeeping") ? "/portal/books" : "/portal/notifications");
+  }
 
   const vertical = await getActiveVertical(user);
   // Managers have no Report grant, so /portal/reports bounces them back here —

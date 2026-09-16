@@ -44,3 +44,45 @@ describe("dashboard project scope", () => {
     expect(mentions(where, "solar")).toBe(true);
   });
 });
+
+/**
+ * THE OUTSIDE CPA ON THE DASHBOARD.
+ *
+ * `accountant_readonly` holds no `Lead` and no `Project` grant, so `listScope`
+ * drops it into its deny-by-default branch. That matters more than it looks:
+ * the dashboard page itself has no `can()` gate, and every books and reports
+ * route denies with `redirect("/portal/dashboard")` — so this filter is the ONLY
+ * thing standing between an outside accountant and six customers' names on
+ * `getRecentLeads`.
+ *
+ * Asserted by execution rather than read off the comment at policies.ts:112,
+ * because "sees nothing by default" is a claim about a returned expression and
+ * a company-wide fallthrough would look identical in prose.
+ */
+describe("the outside CPA's dashboard scope", () => {
+  const CPA = u("accountant_readonly", "cpa-1");
+
+  it("is not scoped to the company on leads — it is denied", () => {
+    const where = dashboardLeadWhere(CPA, "solar");
+    // The tell for a leak: a filter that names ONLY the company, which would
+    // return every lead in it.
+    expect(mentions(where, "cpa-1"), "a deny filter must not be an ownership filter").toBe(false);
+    expect(JSON.stringify(where)).not.toBe(
+      JSON.stringify({ AND: [{ companyId: "co-1" }, { vertical: "solar" }] })
+    );
+  });
+
+  it("is denied on projects too", () => {
+    const where = dashboardProjectWhere(CPA, "solar");
+    expect(JSON.stringify(where)).not.toBe(
+      JSON.stringify({ AND: [{ companyId: "co-1" }, { lead: { is: { vertical: "solar" } } }] })
+    );
+  });
+
+  /** Accounting IS company-wide here, and stays that way — the CPA is the exception. */
+  it("does not disturb the in-house bookkeeper", () => {
+    const where = dashboardLeadWhere(u("accounting"), "solar");
+    expect(mentions(where, "co-1")).toBe(true);
+    expect(mentions(where, "solar")).toBe(true);
+  });
+});

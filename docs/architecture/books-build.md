@@ -501,6 +501,62 @@ against the fixture, and `docs/plaid-security-answers.md` lists what the owner
 must supply. **File import needs none of this** and is a complete path into the
 books today.
 
+## Phase 3 decisions — the CPA role, and what `Report` actually means (2026-09-16)
+
+**`Report` is not the financial-statements permission, and granting it to the
+outside CPA was a real hole.** The role shipped with
+`Report: ["read", "export"]` on the reasonable-sounding grounds that an
+accountant needs reports. But `Report` is the gate on the reports HUB, and the
+hub is mostly the sales floor: Funnel, Lead Sources, Canvassing, Rep Scorecard,
+Delinquency, Claims, A/R Aging, Production. Customer names, addresses, per-rep
+performance — the exact exposure that refusing `Project: ["read"]` was meant to
+prevent, re-opened by a side door.
+
+Hiding the hub cards would not have closed it. **Every report page gates itself
+on `can(user, "read", "Report")` independently** — ten pages and twenty
+export/PDF routes — so the URLs stay openable with an empty hub, and each one is
+a place a future page can forget. Withholding the resource denies all of them at
+once, including routes nobody has written yet. The statements an accountant
+actually needs are bookkeeping artifacts and already live under `Bookkeeping`,
+which the role keeps; `/portal/books`, `/portal/banking` and
+`/portal/bookkeeping` all gate on that, so the role still reaches everything it
+exists for.
+
+Two further guards, because the resource gate rests on an assumption:
+
+- `allowedReportTypes` seeds EVERY role with `"operations"`. That was harmless
+  only because a role without a `Report` grant never got past the gate — an
+  assumption, not a guarantee. The CPA is now excluded explicitly as well.
+- `getScopeOptions` treated anything that was not a rep, canvasser or manager as
+  "finance / leadership" and offered **every rep and every manager by name** — a
+  staff roster — while `resolveScope` would then honour a hand-typed `rep:` or
+  `team:` value from the query string. Both now pin the CPA to company totals.
+
+**The dashboard now enforces what the sidebar always claimed.** `PORTAL_NAV`
+gates the Dashboard item on `Project:read`; the page itself checked nothing. That
+cost nothing while every role held that grant. `accountant_readonly` is the first
+that does not — and is the role every books and reports denial redirects *to*.
+`listScope` already denied it leads and projects outright
+(`{ ...base, id: "__none__" }`, policies.ts:116 and :140), so no customer name
+was ever exposed; the page simply answered "you may not open that" with a screen
+of zeros. It now sends them to the books instead.
+
+**How this was found, because the method mattered more than the fix.** The
+ratchet test was written first, asserting the intended behaviour, and run
+expecting red. It also corrected a wrong reading of my own: `admin` holds no
+`Report` grant at all and sees only the `jobs` card, gated on `Commission`.
+There had been **no test anywhere** pinning who sees which report card, which is
+why granting one role one resource could quietly widen eight reports. The card
+list is now asserted as an exact list, so adding a card fails
+`cpa-report-visibility.test.ts` until somebody decides whether the CPA gets it.
+
+A prior session had already anticipated the constraint from the other side:
+`row-scope-boundary.test.ts` permits `postManualEntryAction` to take an
+unchecked `projectId` and notes *"IF `accountant_readonly` (Phase 3) IS EVER
+GRANTED `Bookkeeping:create`, this entry stops being true — that role exists to
+change nothing, so it must hold read/export only."* The grant is read/export
+only, so that entry still holds.
+
 ---
 
 ## Not decided yet
