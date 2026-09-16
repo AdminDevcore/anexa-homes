@@ -557,6 +557,88 @@ GRANTED `Bookkeeping:create`, this entry stops being true — that role exists t
 change nothing, so it must hold read/export only."* The grant is read/export
 only, so that entry still holds.
 
+### The statements, and what Phase 3 shipped
+
+Four statements at `/portal/books/statements/<slug>` — trial balance, profit and
+loss, balance sheet, general ledger — each with a CSV and a PDF route, all gated
+on `Bookkeeping`.
+
+**Cents, and why the house formatter could not be reused.** `makeMoney` uses
+`maximumFractionDigits: 0` and every `usd()` in the reports modules is
+`Math.round(cents / 100)`. That is right for a sales funnel and wrong for a
+trial balance, whose entire purpose is that debits equal credits EXACTLY.
+Rounded to dollars, a ledger that balances can print as though it does not —
+and one that is out by a few cents can print as though it does. `money()` in
+`statements.ts` is cent-exact and never divides, so no floating-point error can
+reach the page.
+
+**Cash basis is a derivation, and its limit is stated.** An entry counts when it
+touched a cash account (subtype `bank` or `undeposited_funds`). A credit card is
+deliberately NOT cash — paying by card is borrowing, not spending money you
+have. The known limit: an entry that both settles an old payable and books a new
+expense lands whole in the pay period, because the ENTRY is the unit. Keeping a
+second ledger would be exact, and would also mean two things to keep in
+agreement.
+
+**Basis applies to the P&L only.** A cash-basis balance sheet is not well
+defined: drop the receivables and payables the cash basis excludes and it stops
+balancing, which is the one property a balance sheet has. The trial balance
+takes no basis argument at all, so a caller cannot ask for something
+meaningless.
+
+**One reading of the request.** The reports under `/portal/reports` each parse
+their parameters three times — page, export route, pdf route. With one `scope`
+that is harmless duplication; a statement carries five (basis, comparison,
+department, period, account), and three hand-kept copies guarantee the CSV will
+eventually disagree with the screen. `statement-request.ts` resolves once, and
+`buildStatement` is the only way to turn a request into a report, so the export
+matches by construction rather than by care. It also normalises empty
+parameters, after they diverged: a page's `searchParams` omits an unset key
+while `URLSearchParams.get` returns `""`, so the same URL gave `preset: "ytd"`
+on the page and `""` in the route — and preset feeds the download link.
+
+**The year-end close is an entry, not a flag.** A real balanced journal entry
+dated 31 December, idempotent on `("year_end_close", "close:<year>")`. So it
+appears in the register and in each account's ledger, and it is undone by
+reversal like anything else; a boolean on the company would have let the ledger
+and the "closed" state disagree. Closing **leaves total equity exactly where it
+was** — the balance sheet already reports current-year profit as its own equity
+line, so the close moves a figure between equity lines. If total equity moves
+when a year is closed, the close is double-counting, and the test asserts that
+directly. Balances are not assumed positive: an income account can end a year
+negative (more refunded than sold), which is how a naive close posts a negative
+debit and is rejected.
+
+Gates at the end of Phase 3: tsc 0 errors; lint 0 errors on the changed files
+(53 pre-existing errors elsewhere, unchanged from `main`); unit 170 files /
+2545 tests; integration 77 files / **1005** tests, 0 failures, 0 deadlocks
+(Phase 2 closed at 75 / 981).
+
+### XLSX — NOT shipped, and why not
+
+The brief asked for CSV, XLSX and PDF. CSV and PDF are done. XLSX is not, and
+the reason is worth recording rather than leaving as a gap.
+
+There is no zip library in this repo (`pdf-lib` and `pdfjs-dist` only), and an
+`.xlsx` is a zip of XML parts. But that is the smaller obstacle. The real one is
+that `RenderableReport` rows are **formatted display strings** — the convention
+every existing report follows, and what `RenderableReportView` prints verbatim.
+An XLSX built on that would be a spreadsheet full of text, no more useful than
+the CSV, while looking like it had solved the problem.
+
+Doing it honestly needs one of:
+
+1. a numeric channel through `ReportTable` (e.g. a parallel `values` array of
+   raw cents) plus a small hand-written zip writer — no dependency, perhaps
+   150 lines, and it changes a type shared by every report; or
+2. a dependency (`exceljs`), which is a real addition to the bundle and to the
+   supply chain, for one export format.
+
+**Recommendation: (1), as its own slice, after Phases 4 and 5.** The statements
+are usable today through CSV and PDF, and a CPA who wants to compute in a
+spreadsheet can open the CSV. Shipping a text-only `.xlsx` would be worse than
+shipping none.
+
 ---
 
 ## Not decided yet
