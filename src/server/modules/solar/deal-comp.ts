@@ -185,14 +185,29 @@ async function freezeSignedMeasure(args: {
     pricedFrom: "signature",
     now: args.signedAt,
   });
+  // A document with no priced figures on it — generated before the snapshot
+  // carried them. The measure falls back to the deal, and says so.
+  if (outcome.status === "frozen" && outcome.basis === "live_deal") {
+    await prisma.activityLog.create({
+      data: {
+        companyId: args.companyId,
+        type: "system",
+        message:
+          "Commission measure frozen from the deal itself: the signed proposal carries no priced " +
+          "figures for it to be read from.",
+        leadId: args.leadId,
+      },
+    });
+  }
   if (outcome.status === "frozen" && outcome.matches === false) {
     await prisma.activityLog.create({
       data: {
         companyId: args.companyId,
         type: "system",
         message:
-          `Commission measure frozen at signing does not match signed proposal v${outcome.proposalVersion}: ` +
-          `${outcome.differences.join("; ")}. Payroll pays on the deal as it stood at signing — review it before this deal pays.`,
+          `The deal does not match signed proposal v${outcome.proposalVersion}, which this deal's ` +
+          `commission measure is frozen from: ${outcome.differences.join("; ")}. Payroll pays on the ` +
+          `signed document — review this before the deal pays.`,
         leadId: args.leadId,
       },
     });

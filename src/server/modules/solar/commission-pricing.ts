@@ -1,3 +1,4 @@
+import type { FinanceProduct } from "@prisma/client";
 import type { Db } from "@/server/db/types";
 import { priceStoredPurchase, priceStorageStored, batteryChargeCents } from "@/lib/solar-money";
 
@@ -148,6 +149,13 @@ export async function loadCommissionDeal(db: Db, companyId: string, leadId: stri
     systemType: design.systemType,
     lenderPayMode: design.lender?.repPayMode ?? null,
 
+    /**
+     * The fee this deal carries. Read here because the signed document never
+     * prints it — it is a term between the company and the lender — so the base
+     * a commission is measured on cannot be taken off the document alone.
+     */
+    dealerFeePct: finance.dealerFeePct,
+
     // Zero on a storage deal, and zero is the truth there rather than a
     // conversion that did not happen.
     systemWatts: isStorage ? 0 : (purchase?.systemWatts ?? Math.round(design.systemSizeKwDc * 1000)),
@@ -277,10 +285,70 @@ export function compareWithSignedDocument(
   return { matches: differences.length === 0, differences };
 }
 
+/** A number a snapshot carries, or null where it carries none. */
+function snapshotNumber(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+/**
+ * THE MEASURE, READ OFF THE DOCUMENT THE CUSTOMER SIGNED.
+ *
+ * The signed proposal is what the household agreed to, so it is what the
+ * commission is measured on — not the deal as it stood that afternoon. The
+ * document carries the system size, the base at sticker and the battery count.
+ *
+ * It deliberately does NOT carry the dealer fee, which is a term between the
+ * company and the lender and is never printed for a customer. So the fee comes
+ * off the deal row and turns the base at sticker into the base the company
+ * keeps: the same subtraction `priceUnits` makes when it prices the deal.
+ *
+ * Null when the document carries no priced figures — a version generated before
+ * the snapshot recorded them, or a lease or PPA, which has no system price.
+ */
+export function measureFromSignedDocument(
+  snapshot: unknown,
+  deal: {
+    product: FinanceProduct;
+    dealerFeePct: number;
+    systemType: "pv" | "pv_storage" | "storage";
+  }
+): Omit<CommissionMeasure, "frozen"> | null {
+  const s = (snapshot ?? {}) as {
+    financing?: { basePriceCents?: unknown; batteryQty?: unknown };
+    system?: { sizeKwDc?: unknown };
+    storage?: { batteryQty?: unknown };
+  };
+  const baseStickerCents = snapshotNumber(s.financing?.basePriceCents);
+  if (baseStickerCents == null) return null;
+
+  // The guard `priceUnits` applies, applied identically: cash carries no fee,
+  // and a fee that cannot be grossed is stood down rather than made nonsense of.
+  const raw = deal.product === "cash" ? 0 : deal.dealerFeePct;
+  const f = Number.isFinite(raw) && raw > 0 && raw < 100 ? raw / 100 : 0;
+
+  return {
+    systemWatts:
+      deal.systemType === "storage"
+        ? 0
+        : Math.round((snapshotNumber(s.system?.sizeKwDc) ?? 0) * 1000),
+    basePriceCents: baseStickerCents - Math.round(baseStickerCents * f),
+    batteryQty: snapshotNumber(s.financing?.batteryQty) ?? snapshotNumber(s.storage?.batteryQty) ?? 0,
+  };
+}
+
 export type FreezeOutcome =
   | {
       status: "frozen" | "would_freeze";
       measure: Omit<CommissionMeasure, "frozen">;
+      /** Where those numbers came from. The document, unless it carries none. */
+      basis: "signed_document" | "live_deal";
+      /**
+       * What the LIVE deal would have been measured on. Reported so a caller
+       * that must not move an existing commission — the backfill — can see that
+       * it would, and stop. See `backfillCommissionMeasure`.
+       */
+      live: Omit<CommissionMeasure, "frozen">;
+      /** The live deal's own final price, which the comparison below reports on. */
       finalPriceCents: number;
       proposalId: string | null;
       proposalVersion: number | null;
@@ -290,12 +358,17 @@ export type FreezeOutcome =
   | { status: "skipped"; reason: string };
 
 /**
- * Freeze what this deal's commission is measured on.
+ * Freeze what this deal's commission is measured on, FROM THE SIGNED PROPOSAL.
  *
- * Takes the live measure — what payroll would read today — and checks it
- * against the signed document: the one named, or the latest signed one. A
- * disagreement is recorded on the row (`pricingMatchesSignedDocument`) and
- * returned; it never blocks, because this runs inside a customer's signature.
+ * The document is what the customer agreed to; the deal row is what the office
+ * has since. Where the two disagree the document wins, and the disagreement is
+ * recorded — on the row (`pricingMatchesSignedDocument`) and on the deal's
+ * history — so that a person looks at it. It never blocks: this runs inside a
+ * customer's signature.
+ *
+ * The live deal is still read, for two things it alone knows: the dealer fee,
+ * which the document does not print, and what the deal says today, for the
+ * comparison.
  *
  * `apply: false` reports what would be written and writes nothing.
  */
@@ -305,7 +378,7 @@ export async function freezeCommissionMeasure(
     companyId: string;
     leadId: string;
     proposalId?: string | null;
-    pricedFrom: "signature" | "backfill";
+    pricedFrom: "signature" | "backfill" | "refreeze";
     now: Date;
     apply?: boolean;
   }
@@ -329,15 +402,28 @@ export async function freezeCommissionMeasure(
     orderBy: [{ signedAt: "desc" }, { version: "desc" }],
     select: { id: true, version: true, snapshot: true },
   });
-  const check = document
-    ? compareWithSignedDocument(live, document.snapshot)
-    : { matches: null, differences: [] };
 
-  const measure = {
+  const liveMeasure = {
     systemWatts: live.systemWatts,
     basePriceCents: live.basePriceCents,
     batteryQty: live.batteryQty,
   };
+  const fromDocument = document ? measureFromSignedDocument(document.snapshot, live) : null;
+  const measure = fromDocument ?? liveMeasure;
+  const basis: "signed_document" | "live_deal" = fromDocument ? "signed_document" : "live_deal";
+
+  const check = document
+    ? compareWithSignedDocument(live, document.snapshot)
+    : { matches: null, differences: [] };
+  const differences = [...check.differences];
+  // The figure the money actually turns on, reported beside the rest.
+  if (fromDocument && fromDocument.basePriceCents !== live.basePriceCents) {
+    differences.push(
+      `base price ${usd(live.basePriceCents)} on the deal, ${usd(fromDocument.basePriceCents)} on the signed document`
+    );
+  }
+  const matches = check.matches == null && fromDocument == null ? null : differences.length === 0;
+
   const apply = args.apply !== false;
   if (apply) {
     await db.solarDealComp.update({
@@ -346,8 +432,9 @@ export async function freezeCommissionMeasure(
         ...measure,
         pricedAt: args.now,
         pricedFrom: args.pricedFrom,
+        pricedBasis: basis,
         pricedProposalId: document?.id ?? null,
-        pricingMatchesSignedDocument: check.matches,
+        pricingMatchesSignedDocument: matches,
       },
     });
   }
@@ -355,25 +442,44 @@ export async function freezeCommissionMeasure(
   return {
     status: apply ? "frozen" : "would_freeze",
     measure,
+    basis,
+    live: liveMeasure,
     finalPriceCents: live.finalPriceCents,
     proposalId: document?.id ?? null,
     proposalVersion: document?.version ?? null,
-    matches: check.matches,
-    differences: check.differences,
+    matches,
+    differences,
   };
+}
+
+/** Do two measures pay the same? */
+function sameMeasure(a: Omit<CommissionMeasure, "frozen">, b: Omit<CommissionMeasure, "frozen">) {
+  return (
+    a.systemWatts === b.systemWatts &&
+    a.basePriceCents === b.basePriceCents &&
+    a.batteryQty === b.batteryQty
+  );
 }
 
 /**
  * Freeze the measure on every deal whose terms were frozen before the measure
  * was. See `scripts/backfill-deal-comp-pricing.ts`.
  *
- * Payroll reads the live deal on these rows today, and this freezes that same
- * live figure, so no commission moves on the day it runs. What it stops is the
- * figure moving afterwards.
+ * ── IT WILL NOT MOVE AN EXISTING COMMISSION BY ITSELF ───────────────────────
+ * Payroll reads the LIVE deal on these rows today. Every signature from now on
+ * freezes the measure from the signed document instead, and on an old row those
+ * two can differ by thousands of dollars — a deal re-priced after it was signed
+ * has drifted from the document ever since, and nobody has been paid on the
+ * document. Backfilling it silently would be a pay change wearing the clothes
+ * of a data migration.
+ *
+ * So a row whose document does not agree with the deal is REPORTED and SKIPPED,
+ * and only `allowMoves` writes it. That is a decision for whoever runs the
+ * script, made with the dollar figure in front of them, not a default.
  */
 export async function backfillCommissionMeasure(
   db: Db,
-  opts: { apply: boolean; now: Date; companyId?: string }
+  opts: { apply: boolean; now: Date; companyId?: string; allowMoves?: boolean }
 ) {
   const comps = await db.solarDealComp.findMany({
     where: { pricedAt: null, ...(opts.companyId ? { companyId: opts.companyId } : {}) },
@@ -382,14 +488,27 @@ export async function backfillCommissionMeasure(
   });
   const rows = [];
   for (const c of comps) {
-    const outcome = await freezeCommissionMeasure(db, {
+    // Always priced first without writing, so the decision below is made on
+    // the same figures the report prints.
+    const preview = await freezeCommissionMeasure(db, {
       companyId: c.companyId,
       leadId: c.leadId,
       pricedFrom: "backfill",
       now: opts.now,
-      apply: opts.apply,
+      apply: false,
     });
-    rows.push({ ...c, outcome });
+    const movesPay = preview.status !== "skipped" && !sameMeasure(preview.measure, preview.live);
+    const held = opts.apply && movesPay && !opts.allowMoves;
+    const outcome =
+      opts.apply && !held
+        ? await freezeCommissionMeasure(db, {
+            companyId: c.companyId,
+            leadId: c.leadId,
+            pricedFrom: "backfill",
+            now: opts.now,
+          })
+        : preview;
+    rows.push({ ...c, outcome, movesPay, held });
   }
   return rows;
 }

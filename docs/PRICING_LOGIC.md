@@ -1135,20 +1135,23 @@ Under the naming rule, each price field also carries its credit state. Exact spe
 | `CompareRow.netPpwCents` | `grossPpwCents` |
 | dead ladder fields (`shortfallCents`, `incentiveCents`, …) | deleted |
 
-### 8.9 Stage 1: what landed (awaiting approval)
+### 8.9 Stage 1: what landed (APPROVED 2026-09-15)
 
-Branch `feat/pricing-rework`, one local commit on top of Stage 0. Not pushed.
+Branch `feat/pricing-rework`, two local commits on top of Stage 0. Not pushed. The second
+commit is the §8.12 rework: the measure is frozen from the signed proposal, and a super
+admin can re-freeze it by hand.
 
 **Tests:**
-- Unit: 2,475 passing (2,458 at Stage 0).
-- Integration: 781 passing. The 7 failures are the existing baseline on `ed3b832`: `retention.itest.ts` ×6 and `visit-crew.itest.ts` ×1.
-- Typecheck and lint are clean.
+- Unit: 2,480 passing (2,458 at Stage 0).
+- Integration: 784 passing. The 7 failures are the existing baseline on `ed3b832`: `retention.itest.ts` ×6 and `visit-crew.itest.ts` ×1.
+- Typecheck is clean. Every file this rework touches lints clean. The repo's own lint baseline — 53 errors and 1,614 warnings, all of them in files this rework does not open — is unchanged. (§8.9 previously said "lint is clean"; that was the scoped result, not the repo's.)
 
 | Change | Where | Pinned by |
 |---|---|---|
 | **The re-price keeps the battery.** The live re-price prices through `dealMoneyColumns` (the derivation the save and every recompute run) instead of its own `financeRowForProduct` call. That also gives it the storage branch. A storage deal's floor is now asked per battery: the per-watt floor refused every storage re-price on a lender that had one. | `proposal-reprice-actions.ts` | `pricing-stage1.itest.ts`. Three of its four re-price tests fail on the old code; the success path passed before too, because generation wrote the battery back. |
-| **The commission measure is frozen at signature.** Seven additive, nullable columns on `solar_deal_comp`: `systemWatts`, `basePriceCents`, `batteryQty`, `pricedAt`, `pricedFrom`, `pricedProposalId`, `pricingMatchesSignedDocument`.<br>Every signature freezes the live measure and checks it against the signed version. A mismatch is logged on the deal and does not block pay.<br>The rates stay the first signature's; the measure re-freezes on a later signature.<br>Payroll and the estimate read the frozen copy once it exists, and the live deal before then.<br>`loadSolarDeal` moved to `commission-pricing.ts` as `loadCommissionDeal`. It is unchanged except that its final price is named `finalPriceCents`. | migration `20260915200000_solar_deal_comp_pricing`; `commission-pricing.ts`; `deal-comp.ts`; `proposal-public.ts`; `payroll/solar-engine.ts` | `commission-pricing.test.ts`; `pricing-stage1.itest.ts` |
-| **Backfill.** `scripts/backfill-deal-comp-pricing.ts` only reports unless run with `--apply`. It freezes the same live figure payroll reads today, so no commission moves on the day it runs. Production has **1** deal-comp row (signed 2026-09-09). **Not run against production.** | script; `backfillCommissionMeasure` | `pricing-stage1.itest.ts` |
+| **The commission measure is frozen at signature, FROM THE SIGNED PROPOSAL (§8.12).** Eight additive, nullable columns on `solar_deal_comp`: `systemWatts`, `basePriceCents`, `batteryQty`, `pricedAt`, `pricedFrom`, `pricedBasis`, `pricedProposalId`, `pricingMatchesSignedDocument`.<br>**The document is the source.** `measureFromSignedDocument` reads the size and the base at sticker off the snapshot the customer signed. The one figure it cannot read is the dealer fee, which is a term between the company and the lender and is never printed for a customer, so the fee comes off the deal row and turns the base at sticker into the base the company keeps — the same subtraction `priceUnits` makes.<br>**The live deal is still compared**, and every difference is logged on the deal (`pricedBasis: "signed_document"`, `pricingMatchesSignedDocument: false`). It never blocks: this runs inside a customer's signature.<br>**Fallback:** a document with no priced figures (generated before the snapshot carried them, or a lease or PPA, which has no system price) freezes the live deal instead, records `pricedBasis: "live_deal"`, and says so on the deal's history.<br>The rates stay the first signature's; the measure re-freezes on a later signature.<br>Payroll and the estimate read the frozen copy once it exists, and the live deal before then.<br>`loadSolarDeal` moved to `commission-pricing.ts` as `loadCommissionDeal`, unchanged except that its final price is named `finalPriceCents` and it now also returns `dealerFeePct`. | migrations `20260915200000_solar_deal_comp_pricing` and `20260915210000_solar_deal_comp_priced_basis`; `commission-pricing.ts`; `deal-comp.ts`; `proposal-public.ts`; `payroll/solar-engine.ts` | `commission-pricing.test.ts`; `pricing-stage1.itest.ts` |
+| **A super admin can re-freeze the measure by hand (§8.12).** `refreezeCommissionMeasureAction`: super-admin only (checked on the server, not just in the screen), a reason of at least 8 characters required, refused on a deal nobody has signed, and written to the deal's activity log with the person's name, the figures it wrote, the reason, and any remaining difference from the live deal. It re-reads the same signed document.<br>**Never automatic on an unlock.** Reopening a contract is permission to correct something; it is not a decision to pay a rep differently. The ordinary way a change order moves pay is still that the household signs the new version.<br>The control sits beside the unlock control on the signed-contract card, which now also states what this deal's commission is measured on. | `commission-measure-actions.ts`; `signed-contract-lock.tsx`; `solar-proposal/page.tsx` | `pricing-stage1.itest.ts` |
+| **Backfill, and its guard.** `scripts/backfill-deal-comp-pricing.ts` only reports unless run with `--apply`. It freezes from the signed document, like every signature does.<br>**It will not move an existing commission by itself.** Stage 1 first said "no commission moves on the day it runs"; that stopped being true the moment the measure moved to the document, because an old row's document and its live deal can disagree by thousands of dollars, and payroll has been paying the live figure. A row that would pay differently is now printed with both figures and **held**; `--apply` writes every other row, and writing a held row needs `--allow-moves` as well. Production has **1** deal-comp row (signed 2026-09-09). **Not run against production.** | script; `backfillCommissionMeasure` | `pricing-stage1.itest.ts` |
 | **Credits never change a commission.** No code change was needed; this is now pinned. It covers unsigned and signed deals, across ITC, EC and DC, a typed sign-today credit and a lender's above-cap rule. The test also checks that each document's net price really moved. | — | `pricing-stage1.itest.ts` |
 | **The dealer fee is off customer documents.** Generation freezes `customerProductLabel` (the label without "fee N%") into `financing.lenderProductLabel` and every menu label. The Pay chapter and payment menu strip a fee from labels frozen earlier. Rep screens keep the fee; D10 gates them. | `solar-lender-product.ts`; `proposal-generate.ts`; `solar-proposal-options.ts`; `pay.tsx`; `payment-menu.tsx` | `solar-lender-product-customer.test.ts`; the goldens |
 | **The menu is priced from the deal's base (L15), moved up from Stage 4.** Every other programme takes the quoted sticker's base, re-grossed by its own fee, then capped. Cash is priced at that base. The target net is only the fallback for a quote with no per-watt price (a lease or PPA). D5 later replaces this sticker-derived base with the stored sold base. | `solar-proposal-options.ts` | `solar-proposal-options-build.test.ts`; the goldens |
@@ -1212,6 +1215,27 @@ Nothing in this section is in the code. The current text stays everywhere until 
    - Either the agreement or the model has to change. **This is a legal and business decision.**
 2. **No storage-only deal can be submitted to a lender, and none exists in production (L17).** Any would be refused by the preflight, and Amos's API slug is for its 30-year solar product.
 3. **The fee label had not reached a customer yet.** No frozen production proposal carries "fee N%". It would have appeared on the next menu that offered Credit Humen.
-4. **Freezing from the live deal or from the signed document is the owner's call.** At signing, the measure is frozen from the live deal and only *checked* against the signed version. If the two disagree (the deal changed between generating and signing), payroll pays on the live figure and the deal log records the difference. The alternative is to freeze from the signed document.
-5. **A super-admin unlock no longer moves commission.** Editing a signed deal after an unlock changes the live deal, but not the frozen measure, until a new version is signed. If an unlocked edit should move pay without a new signature, a "re-freeze" action is needed; it is not built.
+4. **DECIDED (§8.12), and reworked: the measure is frozen from the SIGNED PROPOSAL.** Where the document and the deal disagree, the document wins and the difference is logged. The fee still comes off the deal row, because no customer document prints it.
+5. **DECIDED (§8.12), and built: a manual re-freeze.** A super-admin unlock still moves no commission by itself. Where a correction is agreed but not re-signed, a super admin re-freezes the measure by hand and says why. Never automatic on unlock.
 6. The D8 and D9 notes are in §8.2 and §8.4.
+
+### 8.12 Owner decisions on the Stage 1 findings (2026-09-15)
+
+**Stage 1 is APPROVED.**
+
+| Finding (§8.11) | Decision |
+|---|---|
+| #2 — freeze from the live deal or the signed document | **Freeze from the SIGNED PROPOSAL.** The document is what the customer agreed to. The comparison against the live deal stays, and a mismatch is still logged. **Reworked before Stage 2 starts.** |
+| #3 — nothing re-freezes after a super-admin unlock | **A re-freeze action is approved:** super-admin only, manual, a reason required, written to the activity log. **Never automatic on unlock.** |
+| #1 — the installation agreement contradicts the pricing model | **STAGE 5 BLOCKER.** See below. |
+| #4 — who owns the credits | **STAGE 5 BLOCKER.** See below. |
+
+**#1 and #4 are a Stage 5 blocker. Stage 5 does not start.** The CPE installation agreement (clause B.3) describes a different transaction than the app builds, and the credit-ownership question underneath it is unresolved. The owner is taking it to counsel. Until the structure is confirmed:
+
+- **do not ship D4 wording** (the draft in §8.10 stays a draft);
+- **do not move credits into the contract**;
+- **Stage 2 (renames) and Stage 3 (`priceDeal`, not connected) may proceed** — they change no numbers and no paperwork.
+
+The brief for counsel is `docs/legal/2026-09-15-credit-ownership-brief.md`: facts only, no recommendation on the legal question, with the production exposure counted.
+
+**Both reworks landed before Stage 2 started**, in the second commit on the branch. See the two new rows in §8.9 and findings #4 and #5 in §8.11.
