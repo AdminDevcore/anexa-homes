@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient, type AgentDepartment, type AgentRunStatus, type Prisma, type Vertical } from "@prisma/client";
 import { TEST_DATABASE_URL } from "@/server/vertical/__tests__/global-setup";
-import { countNeedsHuman, getAgent, listAgents, listRunsFeed, listRunsForAgent, needsHumanQueue, type Viewer } from "../queries";
+import { countNeedsHuman, getAgent, getRun, listAgents, listRunsFeed, listRunsForAgent, needsHumanQueue, type Viewer } from "../queries";
 
 /**
  * Agent and AgentRun are shared models, so the pages' workspace boundary lives
@@ -128,5 +128,97 @@ describe("agents pages queries", () => {
     expect(feed.pageCount).toBe(1);
     expect(feed.page).toBe(1);
     expect(feed.runs.length).toBe(4);
+  });
+});
+
+/**
+ * `detail` is `Json @default("{}")` and `error` is "full error text and stack".
+ * Neither is bounded by anything a LIST read can rely on: the runner caps each
+ * log LINE, not the blob, and `errorText` writes a whole stack. A feed page is
+ * 50 rows and the needs-a-human queue is 100, so carrying both into a list is
+ * tens of megabytes parsed and serialised to draw rows nobody has expanded.
+ *
+ * So the lists read neither, and one run at a time reads both. These fixtures
+ * are created in their OWN describe, after the ones above have run, because
+ * the counts asserted up there are exact.
+ */
+describe("a run's detail and error", () => {
+  let heavyAgentId = "";
+  let failedRunId = "";
+
+  const DETAIL = {
+    handlerKey: "system.hello",
+    configSnapshot: {},
+    gated: true,
+    durationMs: 1234,
+    log: ["hello", "goodbye"],
+    handler: { greeting: "hello" },
+    changes: [],
+    resolution: null,
+    lateResult: null,
+  };
+  const STACK = "Error: the portal dropped the connection\n    at poll (/var/task/poll.js:12:9)";
+  const solarAdmin = (): Viewer => ({ companyId, role: "admin", verticals: ["solar"] });
+  const elsewhere = (): Viewer => ({ companyId: otherId, role: "super_admin", verticals: [] });
+
+  beforeAll(async () => {
+    heavyAgentId = (
+      await db.agent.create({ data: { companyId, name: "Heavy Poller", handlerKey: "system.hello", vertical: "roofing", department: "operations" } })
+    ).id;
+    const mkRun = (status: AgentRunStatus, summary: string) =>
+      db.agentRun.create({
+        data: {
+          companyId,
+          agentId: heavyAgentId,
+          vertical: "roofing",
+          trigger: "manual",
+          status,
+          summary,
+          error: status === "failed" ? STACK : null,
+          detail: DETAIL as unknown as Prisma.InputJsonValue,
+        },
+      });
+    failedRunId = (await mkRun("failed", "Failed: the portal dropped the connection")).id;
+    await mkRun("needs_human", "Waiting on a person");
+  });
+
+  afterAll(async () => {
+    await db.agentRun.deleteMany({ where: { agentId: heavyAgentId } });
+    await db.agent.delete({ where: { id: heavyAgentId } });
+  });
+
+  it("never carries detail or error into a LIST read", async () => {
+    const lists = [
+      (await listRunsForAgent(owner(), heavyAgentId, 1)).runs,
+      (await listRunsFeed(owner(), { status: null, product: null, page: 1 })).runs,
+      await needsHumanQueue(owner()),
+    ];
+    for (const rows of lists) {
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) {
+        expect(row).not.toHaveProperty("detail");
+        expect(row).not.toHaveProperty("error");
+      }
+    }
+    // What a list still says about a failure: its status, and the summary the
+    // runner already wrote the first line of the failure into.
+    expect((await listRunsForAgent(owner(), heavyAgentId, 1)).runs.find((r) => r.id === failedRunId)).toMatchObject({
+      status: "failed",
+      summary: "Failed: the portal dropped the connection",
+    });
+  });
+
+  it("reads detail and error one run at a time, inside the same workspace boundary", async () => {
+    const one = await getRun(owner(), failedRunId);
+    expect(one?.error).toBe(STACK);
+    expect(one?.detail.handler).toEqual({ greeting: "hello" });
+    expect(one?.detail.log).toEqual(["hello", "goodbye"]);
+    expect(one?.detail.durationMs).toBe(1234);
+
+    // The single-run read is a page read like any other here, so it applies
+    // exactly the same scope: a workspace the viewer does not hold, and
+    // another company, are both simply not found.
+    expect(await getRun(solarAdmin(), failedRunId)).toBeNull();
+    expect(await getRun(elsewhere(), failedRunId)).toBeNull();
   });
 });

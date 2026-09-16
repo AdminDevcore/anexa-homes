@@ -15,7 +15,7 @@ import type { AgentFormValues } from "@/lib/agent-labels";
 import { agentCan, canEditAgentConfig } from "./access";
 import { moveDeal, runStageEnteredAutomations, TARGET_STAGE_SELECT, type StageMove } from "./apply-changes";
 import { missingHandlerMessage, readDetail } from "./detail";
-import { MAX_AGENTS } from "./queries";
+import { getRun, MAX_AGENTS } from "./queries";
 import { handlerFor } from "./registry";
 import { AGENT_SELECT, clean, cleanDeep, createRun, executeRun, firstLine, hasRunInFlight, writeMissingHandlerRun } from "./runner";
 import { nextRunAtFor } from "./schedule";
@@ -24,9 +24,13 @@ import { validateAgentInput } from "./validate-agent";
 import { agentVisibleTo, viewerRunVerticals } from "./verticals";
 
 /**
- * Every write the Agents pages make. Each export is a public endpoint, so each
- * asks access.ts first, re-reads what it acts on inside the caller's company
- * and workspaces, and trusts nothing it is sent.
+ * Every write the Agents pages make, and the one READ that no page can do for
+ * itself — `readAgentRunAction`, which fills in a run expanded in place, since
+ * a run list deliberately reads neither `detail` nor `error` (queries.ts).
+ *
+ * Each export is a public endpoint, so each asks access.ts first, re-reads what
+ * it acts on inside the caller's company and workspaces, and trusts nothing it
+ * is sent.
  */
 
 function fail(error: string) {
@@ -217,7 +221,30 @@ export async function runAgentNowAction(agentId: string, opts: { confirmDisabled
     });
   });
   revalidateAgents(agent.id);
-  return { ok: true as const, runIds };
+  // `skipped` is the workspace whose run could NOT be started, because one was
+  // already in flight there. For a "both workspaces" agent that is the whole
+  // difference between "started 2" and "started 1, the other was already
+  // running": the caller's intent is satisfied either way, which is why this
+  // is still `ok`, but the button is the one place a person sees which
+  // happened. Computed above and, until now, thrown away.
+  return { ok: true as const, runIds, skipped: racedVertical };
+}
+
+/**
+ * One run, opened — a read among the writes.
+ *
+ * A run list reads neither `detail` nor `error` (see RUN_LIST_SELECT), so a row
+ * expanded in place asks for that one run's changes, log and stack here.
+ * Opening a run costs one run, rather than every row on the page paying for a
+ * blob nobody opened.
+ */
+export async function readAgentRunAction(runId: string) {
+  const user = await requireUser();
+  if (!agentCan(user, "read")) return fail("You don't have permission to read agent runs.");
+  if (!idSchema.safeParse(runId).success) return fail("Run not found.");
+  const run = await getRun(user, runId);
+  if (!run) return fail("Run not found.");
+  return { ok: true as const, run };
 }
 
 const resolveSchema = z.object({

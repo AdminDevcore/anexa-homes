@@ -193,11 +193,29 @@ export async function getAgent(viewer: Viewer, agentId: string): Promise<AgentVi
 // Runs
 // ---------------------------------------------------------------------------
 
-// Named the same as runner.ts's own RUN_SELECT, which is a different shape
-// for a different purpose (claiming a run to execute it, not showing it on a
-// page) — the two never import from each other, so there's no collision, but
-// grepping for "RUN_SELECT" turns up both.
-const RUN_SELECT = {
+/**
+ * What a run LIST reads. `detail` and `error` are deliberately absent.
+ *
+ * `AgentRun.detail` is `Json @default("{}")`: the runner caps each log line and
+ * each handler result, but nothing caps what one row can accumulate overall.
+ * `AgentRun.error` holds full error text and stack — `errorText` writes
+ * `err.stack` into it, routinely kilobytes. A feed page is 50 rows and the
+ * needs-a-human queue is 100, so reading both into a list parses and
+ * serialises megabytes to draw rows nobody has expanded.
+ *
+ * A collapsed row shows the status and the summary, and `summary` IS bounded:
+ * every path that writes it goes through `truncateSummary` (SUMMARY_MAX, 280),
+ * and the runner already writes the first line of a failure into it. So a
+ * failed row still says what went wrong without its stack.
+ *
+ * A run's changes, log and stack are read one run at a time, by `getRun`.
+ *
+ * Named the same as runner.ts's own RUN_SELECT, which is a different shape for
+ * a different purpose (claiming a run to execute it, not showing it on a page)
+ * — the two never import from each other, so there's no collision, but
+ * grepping for "RUN_SELECT" turns up both.
+ */
+const RUN_LIST_SELECT = {
   id: true,
   agentId: true,
   vertical: true,
@@ -207,10 +225,8 @@ const RUN_SELECT = {
   startedAt: true,
   finishedAt: true,
   summary: true,
-  error: true,
   leadId: true,
   leadLabel: true,
-  detail: true,
   resolvedAt: true,
   resolution: true,
   resolutionNote: true,
@@ -219,10 +235,14 @@ const RUN_SELECT = {
   resolvedBy: { select: { firstName: true, lastName: true } },
 } satisfies Prisma.AgentRunSelect;
 
+/** The list shape plus the two unbounded columns. Only ever used for ONE run. */
+const RUN_SELECT = { ...RUN_LIST_SELECT, detail: true, error: true } satisfies Prisma.AgentRunSelect;
+
+type RunListRow = Prisma.AgentRunGetPayload<{ select: typeof RUN_LIST_SELECT }>;
 type RunRow = Prisma.AgentRunGetPayload<{ select: typeof RUN_SELECT }>;
 
-/** A run as the pages show it. Plain strings, so it crosses into client components. */
-export type RunView = {
+/** A run as a LIST shows it. Plain strings, so it crosses into client components. */
+export type RunListView = {
   id: string;
   agentId: string;
   agentName: string;
@@ -234,14 +254,15 @@ export type RunView = {
   startedAt: string | null;
   finishedAt: string | null;
   summary: string;
-  error: string | null;
   leadId: string | null;
   leadLabel: string | null;
-  detail: RunDetail;
   resolution: { by: string | null; at: string; how: AgentRunResolution; note: string | null } | null;
 };
 
-function toRunView(r: RunRow): RunView {
+/** One run, opened: the list shape plus the two columns a list leaves behind. */
+export type RunView = RunListView & { detail: RunDetail; error: string | null };
+
+function toRunListView(r: RunListRow): RunListView {
   return {
     id: r.id,
     agentId: r.agentId,
@@ -254,10 +275,8 @@ function toRunView(r: RunRow): RunView {
     startedAt: r.startedAt?.toISOString() ?? null,
     finishedAt: r.finishedAt?.toISOString() ?? null,
     summary: r.summary,
-    error: r.error,
     leadId: r.leadId,
     leadLabel: r.leadLabel,
-    detail: readDetail(r.detail),
     resolution:
       r.resolvedAt && r.resolution
         ? { by: fullName(r.resolvedBy), at: r.resolvedAt.toISOString(), how: r.resolution, note: r.resolutionNote }
@@ -265,7 +284,11 @@ function toRunView(r: RunRow): RunView {
   };
 }
 
-export type RunPage = { runs: RunView[]; page: number; pageCount: number; total: number };
+function toRunView(r: RunRow): RunView {
+  return { ...toRunListView(r), detail: readDetail(r.detail), error: r.error };
+}
+
+export type RunPage = { runs: RunListView[]; page: number; pageCount: number; total: number };
 
 async function runPage(where: Prisma.AgentRunWhereInput, page: number, size: number): Promise<RunPage> {
   const total = await prisma.agentRun.count({ where });
@@ -280,9 +303,9 @@ async function runPage(where: Prisma.AgentRunWhereInput, page: number, size: num
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     skip: (current - 1) * size,
     take: size,
-    select: RUN_SELECT,
+    select: RUN_LIST_SELECT,
   });
-  return { runs: rows.map(toRunView), page: current, pageCount, total };
+  return { runs: rows.map(toRunListView), page: current, pageCount, total };
 }
 
 export function listRunsForAgent(viewer: Viewer, agentId: string, page: number): Promise<RunPage> {
@@ -311,16 +334,32 @@ const unresolvedNeedsHuman = (viewer: Viewer): Prisma.AgentRunWhereInput => ({
 });
 
 /** Oldest first: the queue is worked from the top. */
-export async function needsHumanQueue(viewer: Viewer): Promise<RunView[]> {
+export async function needsHumanQueue(viewer: Viewer): Promise<RunListView[]> {
   const rows = await prisma.agentRun.findMany({
     where: unresolvedNeedsHuman(viewer),
     // Same tiebreaker as runPage, and for the same reason: same-millisecond
     // ties from the tick must sort the same way every time this is read.
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     take: QUEUE_LIMIT,
+    select: RUN_LIST_SELECT,
+  });
+  return rows.map(toRunListView);
+}
+
+/**
+ * One run, with its changes, its log and its error text. The ONLY read that
+ * carries `detail` and `error`, so a list stays a list and a person who opens
+ * a run pays for that run alone.
+ *
+ * Scoped exactly like every list above: a run in a workspace the viewer does
+ * not hold, or in another company, is simply not found.
+ */
+export async function getRun(viewer: Viewer, runId: string): Promise<RunView | null> {
+  const run = await prisma.agentRun.findFirst({
+    where: { AND: [visibleRuns(viewer), { id: runId }] },
     select: RUN_SELECT,
   });
-  return rows.map(toRunView);
+  return run ? toRunView(run) : null;
 }
 
 export function countNeedsHuman(viewer: Viewer): Promise<number> {

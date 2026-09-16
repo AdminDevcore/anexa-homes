@@ -81,3 +81,71 @@ test("the owner gives a manager Agents access, and the manager can then read Age
   await expect(page.getByRole("link", { name: "New agent" })).toHaveCount(0);
   await expect(page.getByTestId("agent-enabled")).toHaveCount(0);
 });
+
+/**
+ * The agent page itself. These log in as the admin and the accounting user, so
+ * they neither depend on nor disturb the grant the test above makes — but they
+ * stay AFTER it, because the afterAll that puts Priya back is written for the
+ * file as a whole.
+ */
+
+test("an admin runs the disabled Hello Agent, after confirming, and reads the run", async ({ page }) => {
+  await login(page, "admin@anexahomes.com");
+  await page.goto("/portal/agents");
+  await page.getByRole("link", { name: "Hello Agent" }).click();
+  await page.waitForURL(/\/portal\/agents\/[0-9a-f-]+$/, { timeout: 15000 });
+  await expect(page.getByRole("heading", { name: "Hello Agent", level: 1 })).toBeVisible();
+
+  await page.getByTestId("agent-run-now").click();
+  const confirm = page.getByRole("alertdialog");
+  await expect(confirm).toContainText("Run a disabled agent?");
+  await confirm.getByRole("button", { name: "Run anyway" }).click();
+
+  // The run is written queued and finishes inside after(). The page refreshes
+  // itself while anything is in flight; a reload is the fallback.
+  const done = page.getByTestId("agent-run").filter({ hasText: "Said hello" }).first();
+  await expect(async () => {
+    if (!(await done.isVisible())) await page.reload();
+    await expect(done).toHaveAttribute("data-status", "success", { timeout: 2000 });
+  }).toPass({ timeout: 45000 });
+
+  await done.getByRole("button", { name: /Said hello/ }).click();
+  const detail = done.getByTestId("agent-run-detail");
+  await expect(detail).toContainText('"greeting": "hello"');
+  await expect(detail).toContainText("Run now by Dana Hill");
+});
+
+test("an admin creates an agent — and a secret in its config is refused", async ({ page }) => {
+  await login(page, "admin@anexahomes.com");
+  await page.goto("/portal/agents");
+  await page.getByRole("link", { name: "New agent" }).click();
+  await page.waitForURL("**/portal/agents/new", { timeout: 15000 });
+
+  await page.getByLabel("Name", { exact: true }).fill("E2E Poller");
+  await page.getByRole("combobox", { name: "Schedule" }).click();
+  await page.getByRole("option", { name: "Every 15 minutes" }).click();
+  await expect(page.getByTestId("agent-upcoming-runs")).toBeVisible();
+
+  await page.getByLabel("Config (JSON)", { exact: true }).fill('{"password":"hunter2"}');
+  await page.getByRole("button", { name: "Create agent" }).click();
+  await expect(page.getByText(/config\.password looks like a secret/)).toBeVisible({ timeout: 10000 });
+
+  await page.getByLabel("Config (JSON)", { exact: true }).fill("{}");
+  await page.getByRole("button", { name: "Create agent" }).click();
+  await page.waitForURL(/\/portal\/agents\/[0-9a-f-]+$/, { timeout: 15000 });
+  await expect(page.getByRole("heading", { name: "E2E Poller", level: 1 })).toBeVisible();
+});
+
+test("accounting reads an agent and its config, with no Run now and nothing to edit", async ({ page }) => {
+  await login(page, "accounting@anexahomes.com");
+  await page.goto("/portal/agents");
+  await page.getByRole("link", { name: "Hello Agent" }).click();
+  await page.waitForURL(/\/portal\/agents\/[0-9a-f-]+$/, { timeout: 15000 });
+  await expect(page.getByTestId("agent-config-readonly")).toContainText("system.hello");
+  await expect(page.getByTestId("agent-run-now")).toHaveCount(0);
+  await expect(page.getByTestId("agent-enabled")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Save changes|Create agent/ })).toHaveCount(0);
+
+  await page.goto("/portal/agents/new");
+  await page.waitForURL(/\/portal\/agents$/, { timeout: 15000 });
+});
