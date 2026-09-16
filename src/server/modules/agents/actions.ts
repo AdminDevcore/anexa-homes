@@ -17,7 +17,7 @@ import { moveDeal, runStageEnteredAutomations, TARGET_STAGE_SELECT, type StageMo
 import { missingHandlerMessage, readDetail } from "./detail";
 import { getRun, MAX_AGENTS } from "./queries";
 import { handlerFor } from "./registry";
-import { AGENT_SELECT, clean, cleanDeep, createRun, executeRun, firstLine, hasRunInFlight, writeMissingHandlerRun } from "./runner";
+import { AGENT_SELECT, clean, cleanDeep, createRun, executeRun, hasRunInFlight, writeMissingHandlerRun } from "./runner";
 import { nextRunAtFor } from "./schedule";
 import type { ChangeRecord, TargetStage } from "./types";
 import { validateAgentInput } from "./validate-agent";
@@ -47,6 +47,43 @@ const idSchema = z.string().uuid();
 
 /** A failed move's note goes into a jsonb column and is rendered to a person: one line, and no longer than this. */
 const MAX_NOTE_CHARS = 500;
+
+/** Prisma names itself in its own first line: "Invalid `prisma.lead.updateMany()` invocation:". */
+const PRISMA_WORDING = /^Invalid `prisma\./;
+
+/** What a person is told when the driver, and not one of our own guards, refused the move. */
+const DRIVER_REFUSED = "the deal could not be updated. Try again, or open the deal.";
+
+/**
+ * The note a change carries when the move it asked for threw.
+ *
+ * OUR OWN thrown sentences pass through word for word. `moveDeal`'s "This deal
+ * has moved since the agent looked at it; nothing was changed." is the
+ * commonest failure on this path and the one sentence here that explains
+ * itself — it was written for whoever reads the run.
+ *
+ * PRISMA'S OWN WORDING DOES NOT. `ChangeList` renders this note verbatim on a
+ * portal page, and "Invalid `prisma.lead.updateMany()` invocation:" names one
+ * of our tables and a client method while telling the reader nothing they can
+ * act on. Substituted, never forwarded.
+ *
+ * Read from the first line that SAYS something rather than from `split("\n")[0]`:
+ * a PrismaClientKnownRequestError opens with a blank line, so reading the
+ * literal first line both missed the wording to substitute AND left a person
+ * a note reading "Not applied:" and then nothing at all.
+ *
+ * NUL-stripped and capped, as before and for the same reason — a Prisma
+ * failure is a multi-line block carrying a file path and an argument dump, and
+ * a NUL byte anywhere in it makes the jsonb write that records this throw
+ * AFTER these deals have already moved.
+ */
+function notAppliedNote(err: unknown): string {
+  const said = (err instanceof Error ? err.message : String(err))
+    .split("\n")
+    .map((line) => line.trim())
+    .find(Boolean);
+  return clean(`Not applied: ${!said || PRISMA_WORDING.test(said) ? DRIVER_REFUSED : said}`).slice(0, MAX_NOTE_CHARS);
+}
 
 /** One missing-handler run — and one alert to every switch holder — per agent, per workspace, per this long. */
 const MISSING_HANDLER_QUIET_MS = 10 * 60 * 1000;
@@ -377,12 +414,8 @@ export async function resolveAgentRunAction(input: z.input<typeof resolveSchema>
         });
         out.push({ ...change, toStage: stage, outcome: "applied", note: null });
       } catch (err) {
-        // firstLine, NUL-stripped, capped — the same three runner.ts applies
-        // to every piece of error text it writes. A Prisma failure is a
-        // multi-line block carrying a file path and an argument dump, and a
-        // NUL byte anywhere in it makes the jsonb write below throw AFTER
-        // these deals have already moved.
-        out.push({ ...change, outcome: "discarded", note: clean(`Not applied: ${firstLine(err)}`).slice(0, MAX_NOTE_CHARS) });
+        // One line, readable, and never the driver's own wording — see notAppliedNote.
+        out.push({ ...change, outcome: "discarded", note: notAppliedNote(err) });
       }
     }
     return out;

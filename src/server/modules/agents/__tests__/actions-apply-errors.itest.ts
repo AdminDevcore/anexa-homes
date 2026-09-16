@@ -144,6 +144,16 @@ afterAll(async () => {
   await db.$disconnect();
 });
 
+/** The note a change carries after an apply whose move threw. */
+async function noteAfterApply(): Promise<{ note: string; resolutionNote: string | null }> {
+  expect(await actions.resolveAgentRunAction({ runId, resolution: "applied" })).toEqual({ ok: true, failed: 1 });
+  const run = await db.agentRun.findUniqueOrThrow({ where: { id: runId } });
+  return { note: readDetail(run.detail).resolution?.changes[0]?.note ?? "", resolutionNote: run.resolutionNote };
+}
+
+/** What a person is told when the driver, and not one of our own guards, refused the move. */
+const DRIVER_NOTE = "Not applied: the deal could not be updated. Try again, or open the deal.";
+
 describe("a move that throws", () => {
   it("records one short, clean line — a NUL byte in the driver's message must not fail the write that records it", async () => {
     // What a Prisma failure really looks like: a first line, a NUL the jsonb
@@ -152,18 +162,61 @@ describe("a move that throws", () => {
       `Invalid \`prisma.lead.updateMany()\` invocation:\u0000 ${"x".repeat(900)}\n\n  argument dump\n  at moveDeal (/app/src/server/modules/agents/apply-changes.ts:142:31)`
     );
 
-    expect(await actions.resolveAgentRunAction({ runId, resolution: "applied" })).toEqual({ ok: true, failed: 1 });
-
-    const run = await db.agentRun.findUniqueOrThrow({ where: { id: runId } });
-    const note = readDetail(run.detail).resolution?.changes[0]?.note ?? "";
-    expect(note.startsWith("Not applied: Invalid `prisma.lead.updateMany()` invocation:")).toBe(true);
+    const { note, resolutionNote } = await noteAfterApply();
     expect(note).not.toContain("\u0000");
     expect(note).not.toContain("at moveDeal");
     expect(note).not.toContain("argument dump");
     expect(note.length).toBeLessThanOrEqual(500);
     // The deal never moved, and the run says so without anyone opening it.
     expect((await db.lead.findUniqueOrThrow({ where: { id: leadId } })).stageId).toBe(stage.from);
-    expect(run.resolutionNote).toBe("Applied 0 of 1 change.");
+    expect(resolutionNote).toBe("Applied 0 of 1 change.");
+  });
+
+  /**
+   * The note goes into `detail`, and `ChangeList` renders it word for word to
+   * whoever opens the run. Prisma's own first line names one of our tables and
+   * a client method, tells the reader nothing they can act on, and puts a piece
+   * of the schema on a portal page. It is substituted, never forwarded.
+   */
+  it("does not put Prisma's own wording in front of a person", async () => {
+    seam.moveError = new Error(
+      `Invalid \`prisma.lead.updateMany()\` invocation:\n\n  argument dump\n  at moveDeal (/app/src/server/modules/agents/apply-changes.ts:142:31)`
+    );
+
+    const { note } = await noteAfterApply();
+    expect(note).toBe(DRIVER_NOTE);
+    expect(note).not.toContain("Invalid `prisma.");
+    expect(note).not.toContain("lead.updateMany");
+  });
+
+  /**
+   * A real PrismaClientKnownRequestError opens with a NEWLINE, so the literal
+   * first line of its message is empty. Reading only the first line both misses
+   * the wording to substitute AND leaves the person a note that says "Not
+   * applied:" and then nothing at all.
+   */
+  it("substitutes Prisma's wording even when the message opens with a blank line", async () => {
+    seam.moveError = new Error(`\nInvalid \`prisma.activityLog.create()\` invocation:\n\nUnique constraint failed on the fields: (\`id\`)`);
+
+    const { note } = await noteAfterApply();
+    expect(note).toBe(DRIVER_NOTE);
+    expect(note).not.toContain("Invalid `prisma.");
+  });
+
+  /**
+   * The other half of the rule. `moveDeal`'s own refusal is written FOR the
+   * person reading the run — it is the commonest failure on this path, and the
+   * one sentence here that explains itself — so it must still arrive verbatim.
+   * Substituting it too would trade an unreadable note for one that says less
+   * than the truth. `actions.itest.ts` proves the same sentence end to end,
+   * with a real second move that a real first move made impossible; this states
+   * the rule where the rule now lives.
+   */
+  it("still passes our own thrown sentence through verbatim", async () => {
+    seam.moveError = new Error("This deal has moved since the agent looked at it; nothing was changed.");
+
+    const { note } = await noteAfterApply();
+    expect(note).toBe("Not applied: This deal has moved since the agent looked at it; nothing was changed.");
   });
 });
 

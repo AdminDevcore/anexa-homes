@@ -4,12 +4,12 @@ import * as React from "react";
 import Link from "next/link";
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import { formatRunDuration, PRODUCT_LABEL, productOf, TRIGGER_LABEL } from "@/lib/agent-labels";
-import { readAgentRunAction } from "@/server/modules/agents/actions";
 import type { RunListView, RunView } from "@/server/modules/agents/queries";
 import { ChangeList } from "./change-list";
 import { LocalTime } from "./local-time";
 import { ResolveRun } from "./resolve-run";
 import { RunStatusPill } from "./run-status-pill";
+import { useRunDetail } from "./use-run-detail";
 
 /**
  * Run history. Each row opens in place to everything the runner recorded — the
@@ -23,9 +23,11 @@ import { RunStatusPill } from "./run-status-pill";
  * nothing about the list waits on a fetch.
  *
  * Each row is its own component because each row owns a fetch, and a fetch
- * needs hooks: its own state, a request token, and the effect that re-reads a
- * run which finishes while someone is watching it. The same shape as
- * NeedsHumanCard, for the same reason.
+ * needs hooks. That fetch — the state, the request token, and the effect that
+ * re-reads a run which finishes while someone is watching it — lives in
+ * `useRunDetail`, shared with NeedsHumanCard. What is NOT shared is the markup:
+ * a row in a divide-y list with a status pill and a facts line is not a card in
+ * a two-column grid, and a `variant` prop would be worse than the duplication.
  */
 
 /** Start to finish. The handler's own figure lives in `detail`, which a list does not read. */
@@ -66,41 +68,13 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 const PRE = "max-h-72 overflow-auto rounded-lg border border-border bg-background p-3 font-mono text-xs";
 
-/** What one expanded row knows about its own run. */
-type Opened = { state: "loading" } | { state: "ready"; run: RunView } | { state: "error"; message: string };
-
 function RunRow({ run, canResolve, showAgent }: { run: RunListView; canResolve: boolean; showAgent: boolean }) {
   const [open, setOpen] = React.useState(false);
-  const [opened, setOpened] = React.useState<Opened | null>(null);
   const detailId = `agent-run-detail-${run.id}`;
 
   /**
-   * Which read owns this row. Two can be in the air at once — a run finishing
-   * while its panel is open, or a resolve landing on top of a slow read — and
-   * without a token the SLOWER one writes last: an error over a good answer, or
-   * a stale panel over a fresh one. Only the newest read may set state.
-   */
-  const token = React.useRef(0);
-
-  const load = React.useCallback(async () => {
-    token.current += 1;
-    const mine = token.current;
-    setOpened({ state: "loading" });
-    try {
-      const res = await readAgentRunAction(run.id);
-      if (token.current !== mine) return;
-      setOpened(res.ok ? { state: "ready", run: res.run } : { state: "error", message: res.error });
-    } catch {
-      // Every path out of here reaches a terminal state. A throw that left a
-      // row on "loading" for ever would look exactly like a slow server.
-      if (token.current !== mine) return;
-      setOpened({ state: "error", message: "Could not read this run. Try again." });
-    }
-  }, [run.id]);
-
-  /**
-   * Read while the row is open, and read AGAIN whenever the run's own terminal
-   * facts change. Without the second half, the page's headline workflow ends in
+   * WATCHED ON ITS OWN TERMINAL FACTS, because a row in this feed can show a
+   * run that is still going. Without that, the page's headline workflow ends in
    * a lie: press Run now, open the queued row to watch it, and when it finishes
    * AutoRefresh re-renders the server tree so the collapsed row's pill, summary
    * and finished time all update from the list read — while the panel below
@@ -108,24 +82,12 @@ function RunRow({ run, canResolve, showAgent }: { run: RunListView; canResolve: 
    * no spinner and no error. `status` and `finishedAt` are already on the list
    * row, so noticing the transition costs no read of its own, and a running row
    * re-reads once per transition rather than on every three-second poll.
-   *
-   * The ref is what keeps that true: a settled row is left alone, and closing
-   * it clears the ref so reopening is a fresh read.
    */
-  const terminal = `${run.status}|${run.finishedAt ?? ""}`;
-  const readFor = React.useRef<string | null>(null);
-  React.useEffect(() => {
-    if (!open) {
-      readFor.current = null;
-      return;
-    }
-    if (readFor.current === terminal) return;
-    readFor.current = terminal;
-    void load();
-  }, [open, terminal, load]);
+  const { opened, full, heldCount, reload } = useRunDetail(run.id, {
+    open,
+    watch: `${run.status}|${run.finishedAt ?? ""}`,
+  });
 
-  const full = opened?.state === "ready" ? opened.run : null;
-  const held = full ? full.detail.changes.filter((c) => c.outcome === "held").length : 0;
   const facts = [
     showAgent ? run.agentName : null,
     PRODUCT_LABEL[productOf(run.vertical)],
@@ -252,7 +214,7 @@ function RunRow({ run, canResolve, showAgent }: { run: RunListView; canResolve: 
               changes they have not been shown, and says so by staying visible
               and disabled rather than by vanishing. */}
           {!run.resolution && run.status === "needs_human" && canResolve && (
-            <ResolveRun runId={run.id} heldCount={full ? held : null} onResolved={() => void load()} />
+            <ResolveRun runId={run.id} heldCount={heldCount} onResolved={reload} />
           )}
         </div>
       )}
