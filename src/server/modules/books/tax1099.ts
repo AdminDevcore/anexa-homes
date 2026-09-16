@@ -125,10 +125,11 @@ export async function get1099Report(
 /**
  * Money attributed to each vendor in the year, keyed by vendor ID.
  *
- * VOID ENTRIES ARE EXCLUDED and their reversals are not: a voided payment
- * cancels arithmetically through its reversal, so counting the void original
- * as well would subtract it twice. Filtering on `entry.status = posted` is what
- * makes a voided cheque disappear from a 1099 rather than halving it.
+ * A VOID AND ITS REVERSAL BOTH COUNT, AND CANCEL. A voided cheque nets to zero
+ * through its reversing entry, so it leaves the 1099 on its own. Filtering
+ * `entry.status = posted` would drop the original while keeping the reversal
+ * and take the vendor NEGATIVE by the amount of the voided cheque — which is
+ * how a filing error gets made by a filter that reads like a safety check.
  */
 async function totalsByVendor(
   companyId: string,
@@ -164,7 +165,7 @@ async function totalsByVendor(
   const where: Prisma.JournalLineWhereInput = {
     companyId,
     vendorId: { not: null },
-    entry: { status: "posted", date: { gte: start, lt: end }, ...settled },
+    entry: { date: { gte: start, lt: end }, ...settled },
     ...(basis === "accrued"
       ? { account: { type: { in: ["cogs", "expense", "other_expense"] } } }
       : {}),
@@ -204,7 +205,7 @@ export async function vendor1099Detail(
     where: {
       companyId,
       vendorId,
-      entry: { status: "posted", date: { gte: start, lt: end } },
+      entry: { date: { gte: start, lt: end } },
     },
     orderBy: { entry: { date: "asc" } },
     select: {

@@ -12,11 +12,18 @@ import { normalBalance, statementOf } from "./chart";
  * screen saying it was incomplete (`bookkeeping/reports-db.ts` documents the
  * whole incident, and `pnl-truncation.itest.ts` pins the fix).
  *
- * ── VOID ENTRIES ARE EXCLUDED; THEIR REVERSALS ARE NOT ──────────────────────
- * A void writes a reversing entry, so the pair already nets to zero. Excluding
- * the original AND keeping the reversal would subtract it twice. Every query
- * here filters `entry.status = "posted"`, which is exactly what leaves a voided
- * entry showing in the general ledger while contributing nothing to a total.
+ * ── A VOID AND ITS REVERSAL BOTH COUNT, AND CANCEL ──────────────────────────
+ * Voiding writes a reversing entry with every debit and credit swapped, so the
+ * PAIR already nets to zero. Nothing here filters on status, and that is
+ * load-bearing: filtering `status = "posted"` drops the void original while
+ * keeping its reversal, which subtracts the amount TWICE. That is not a
+ * hypothetical — it is what the first version of this file did, and
+ * `reports.itest.ts` caught it as a $999 void moving income by $1,998.
+ *
+ * So `status` is PRESENTATIONAL here, not arithmetical: the general ledger
+ * marks a void so a reader can see the mistake and its correction, and every
+ * total simply includes both. `voidJournalEntry` writes the reversal in the
+ * same transaction as the status change, so the pair can never be half-present.
  *
  * ── THE BALANCE SHEET INCLUDES CURRENT-PERIOD NET INCOME ────────────────────
  * Income and expense accounts are not closed until year end, so equity as
@@ -80,7 +87,8 @@ export async function accountBalances(args: {
     by: ["accountId"],
     where: {
       companyId,
-      entry: { status: "posted", ...(date ? { date } : {}) },
+      // No status filter: see the header. A void and its reversal both count.
+      ...(date ? { entry: { date } } : {}),
       ...(vertical ? { vertical } : {}),
     },
     _sum: { debitCents: true, creditCents: true },
@@ -286,9 +294,11 @@ export type GeneralLedgerRow = {
  * The general ledger / account register: every line on one account, in order,
  * with a running balance. This is the drill-down behind every figure above.
  *
- * VOID entries appear here — that is the point of a ledger — and are marked, so
- * the reader can see both the mistake and its reversal. They are excluded from
- * the running balance for the same reason the statements exclude them.
+ * VOID entries appear here — that is the point of a ledger — and are MARKED so
+ * the reader can see both the mistake and its reversal. They are also counted:
+ * the running balance includes them, because the reversal immediately takes
+ * them back out and skipping the original would leave the column short by the
+ * amount of every correction ever made.
  */
 export async function generalLedger(args: {
   companyId: string;
@@ -302,7 +312,17 @@ export async function generalLedger(args: {
       accountId: args.accountId,
       ...(date ? { entry: { date } } : {}),
     },
-    orderBy: [{ entry: { date: "asc" } }, { position: "asc" }],
+    /**
+     * DETERMINISTIC, and the tiebreak is load-bearing.
+     *
+     * `position` orders lines WITHIN one entry, so on its own it cannot order
+     * two entries sharing a date — and a reversal deliberately carries its
+     * original's date, so a void and its correction always collide. Without
+     * `createdAt` the register could return them either way round, which makes
+     * the running-balance column mean nothing and lets the same report show
+     * different rows on two page loads.
+     */
+    orderBy: [{ entry: { date: "asc" } }, { entry: { createdAt: "asc" } }, { position: "asc" }],
     select: {
       debitCents: true,
       creditCents: true,
@@ -318,9 +338,7 @@ export async function generalLedger(args: {
   let running = 0;
   return lines.map((l) => {
     const credit = normalBalance(l.account.type) === "credit";
-    if (l.entry.status === "posted") {
-      running += credit ? l.creditCents - l.debitCents : l.debitCents - l.creditCents;
-    }
+    running += credit ? l.creditCents - l.debitCents : l.debitCents - l.creditCents;
     return {
       entryId: l.entry.id,
       date: l.entry.date.toISOString(),

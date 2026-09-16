@@ -249,10 +249,11 @@ export type BankAccountSummary = {
 /**
  * Every bank account with its book balance.
  *
- * The balance is computed in the DATABASE and excludes void entries, which is
- * the whole reason voiding writes a reversal rather than a flag: the reversal
- * cancels the original arithmetically, and excluding the void original as well
- * would subtract it twice.
+ * The balance is computed in the DATABASE and counts EVERY entry, void ones
+ * included. That is the whole reason voiding writes a reversal rather than
+ * setting a flag: the reversal cancels the original arithmetically, so
+ * excluding the void original as well would subtract it twice. See the header
+ * of reports.ts — the same filter was wrong there and cost a $999 void $1,998.
  */
 export async function listBankAccounts(companyId: string): Promise<BankAccountSummary[]> {
   const accounts = await prisma.bankAccount.findMany({
@@ -272,7 +273,6 @@ export async function listBankAccounts(companyId: string): Promise<BankAccountSu
     where: {
       companyId,
       accountId: { in: accounts.map((a) => a.ledgerAccountId) },
-      entry: { status: "posted" },
     },
     _sum: { debitCents: true, creditCents: true },
   });
