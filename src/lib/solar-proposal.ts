@@ -4,9 +4,6 @@ import { resolveUtilityRateMills } from "./solar-energy";
 import { withoutDealerFee } from "./solar-lender-product";
 import {
   apportionCents,
-  pricePurchase,
-  priceStoragePurchase,
-  purchaseFromUnits,
   priceThirdParty,
   productionInYear,
   loanPaymentCents,
@@ -15,6 +12,7 @@ import {
   type PurchaseBreakdown,
   type ThirdPartyBreakdown,
 } from "./solar-money";
+import { priceDeal } from "./solar-price-deal";
 import { resolveSignToday, type SignTodayRule } from "@/lib/solar-sign-today";
 import {
   buildCreditLadder,
@@ -1628,31 +1626,34 @@ function priceOption(args: {
   const isPurchase = finance.product === "cash" || finance.product === "loan";
   const isStorage = args.systemType === "storage";
 
-  const purchase = !isPurchase
+  /**
+   * THE ONE PRICED DEAL THIS DOCUMENT IS BUILT FROM.
+   *
+   * `priceDeal()` rather than the two primitives this called before: one
+   * function for the array and for the batteries, so a storage document and a
+   * PV one climb the same ladder and cannot round differently from each other.
+   *
+   * NO PARTNER RULE IS PASSED, and that is deliberate. The ceiling was applied
+   * upstream in `proposal-generate.ts`, which caps and WRITES BACK, so the
+   * sticker arriving here is already the capped one. Handing the rule to
+   * `priceDeal` would solve the cap a second time against a figure that has
+   * already had it applied. `solar-no-rule-equivalence.test.ts` pins that a
+   * no-rule price is identical to what `pricePurchase` returned here before.
+   */
+  const deal = !isPurchase
     ? undefined
-    : isStorage
-      ? // Same ladder, counted in batteries. `purchaseFromUnits` renames the
-        // answer so everything downstream — the savings model, the menu, the
-        // customer's own breakdown — reads it exactly as it reads a PV one.
-        purchaseFromUnits(
-          priceStoragePurchase({
-            product: finance.product as "cash" | "loan",
-            batteryQty: design.batteryQty,
-            stickerPricePerBatteryCents: finance.stickerPricePerBatteryCents ?? 0,
-            dealerFeePct: finance.dealerFeePct,
-            adderTotalCents: finance.adderTotalCents,
-            onTopAdderTotalCents: finance.onTopAdderTotalCents ?? 0,
-          })
-        )
-      : pricePurchase({
-          product: finance.product as "cash" | "loan",
-          systemSizeKwDc: design.systemSizeKwDc,
-          stickerPpwCents: finance.grossPpwCents,
-          dealerFeePct: finance.dealerFeePct,
-          adderTotalCents: finance.adderTotalCents,
-          onTopAdderTotalCents: finance.onTopAdderTotalCents ?? 0,
-          batteryPriceCents: finance.batteryPriceCents ?? 0,
-        });
+    : priceDeal({
+        product: finance.product,
+        systemType: args.systemType,
+        systemSizeKwDc: design.systemSizeKwDc,
+        baseFinalPpwCents: finance.grossPpwCents,
+        baseFinalPerBatteryCents: finance.stickerPricePerBatteryCents ?? 0,
+        batteryQty: design.batteryQty,
+        dealerFeePct: finance.dealerFeePct,
+        addersInsideRuleCents: finance.adderTotalCents,
+        addersOutsideRuleCents: finance.onTopAdderTotalCents ?? 0,
+        equipmentChargesCents: finance.batteryPriceCents ?? 0,
+      });
 
   const thirdParty = !isPurchase
     ? priceThirdParty(
@@ -1678,7 +1679,7 @@ function priceOption(args: {
    * is the only defence against the failure this codebase keeps re-learning:
    * two numbers on one page that do not divide into each other.
    */
-  const documentPriceCents = purchase?.contractPriceCents ?? 0;
+  const documentPriceCents = deal?.finalPriceCents ?? 0;
 
   /**
    * What a payment factor gets applied to: the price above, less anything the
@@ -1706,12 +1707,12 @@ function priceOption(args: {
    */
   const signToday = resolveSignToday({
     rule: args.signTodayRule,
-    systemPriceCents: purchase?.baseStickerCents ?? 0,
+    systemPriceCents: deal?.baseFinalCents ?? 0,
     // The storage as the household signs for it — with the partner's fee on it
     // where the partner takes one — so the cap is measured over it too. See
     // `solar-sign-today`.
-    batteryPriceCents: purchase?.batteryStickerCents ?? 0,
-    systemWatts: purchase?.systemWatts ?? 0,
+    batteryPriceCents: deal?.equipmentFinalCents ?? 0,
+    systemWatts: deal?.systemWatts ?? 0,
     // The same percentages and the same tick-boxes the ladder below is built
     // from, so the rung and the net cost it lands on cannot disagree.
     creditRates: args.creditRates ?? CREDIT_RATES_DEFAULT,
@@ -1719,7 +1720,7 @@ function priceOption(args: {
     typedCents: args.signTodayTypedCents,
   });
 
-  const creditLadder: CreditLadder | null = purchase
+  const creditLadder: CreditLadder | null = deal
     ? buildCreditLadder({
         contractValueCents: documentPriceCents,
         quotedPriceCents: documentPriceCents,
@@ -1846,7 +1847,6 @@ function priceOption(args: {
       year1ProductionKwh: design.year1ProductionKwh,
       annualUsageKwh: design.annualUsageKwh,
       currentRateMillsPerKwh: args.currentRateMillsPerKwh,
-      purchase,
       thirdParty,
       ppaRateMills: finance.rateMillsPerKwh,
       leasePaymentCents: finance.monthlyPaymentCents,
@@ -1865,7 +1865,7 @@ function priceOption(args: {
       // The years bill the price the cost chapter prints — the partner's
       // contract value where there is one — and credit back whatever this
       // scenario says the household actually claims.
-      purchasePriceCents: purchase ? documentPriceCents : null,
+      purchasePriceCents: deal ? documentPriceCents : null,
       creditReliefCents: scenario.reliefCents,
       // A financed system is paid for monthly, so the years carry the payments
       // rather than the price. Both halves or neither — see `savingsModel`.
@@ -1947,16 +1947,16 @@ function priceOption(args: {
   const financing: SnapshotFinancing = {
     product: finance.product,
     // THE PRICE THE DOCUMENT QUOTES.
-    finalPriceCents: purchase ? documentPriceCents : null,
+    finalPriceCents: deal ? documentPriceCents : null,
     // Null on storage rather than the row's zero: there are no installed watts
     // for a rate to be per, and a renderer handed 0 prints "$0.00/W".
-    baseFinalPpwCents: purchase && !isStorage ? finance.grossPpwCents : null,
+    baseFinalPpwCents: deal && !isStorage ? finance.grossPpwCents : null,
     // The system AT STICKER — the dealer fee included — because these three
     // rows are read as arithmetic by a homeowner: system price, plus extra
     // work, equals total. Quoting the pre-fee figure here would leave the
     // customer's own breakdown several thousand dollars short of the total
     // printed under it.
-    baseFinalCents: purchase?.baseStickerCents ?? null,
+    baseFinalCents: deal?.baseFinalCents ?? null,
     // Likewise at sticker: the lender takes its percentage of the re-roof as
     // well as of the array, so the re-roof appears on the contract carrying
     // its share of the fee — unless it is financed ON TOP, in which case it
@@ -1965,7 +1965,7 @@ function priceOption(args: {
     // the row rather than printing an "Adders $0" line the customer has to
     // parse.
     addersFinalCents:
-      purchase && purchase.adderStickerCents > 0 ? purchase.adderStickerCents : null,
+      deal && deal.addersFinalCents > 0 ? deal.addersFinalCents : null,
     // Only lines that cost something, and only on a purchase. A lease or a
     // PPA has no system price for an adder to sit on top of, and a $0 line
     // is a row the customer has to read to learn nothing.
@@ -1990,11 +1990,11 @@ function priceOption(args: {
     // dealer fee is taken on the whole gross, so each line of work carries its
     // share of it; a line flagged on top used to print at its own amount, which
     // was the fee on that line given away.
-    ...(purchase && finance.adders?.some((x) => x.amountCents > 0)
+    ...(deal && finance.adders?.some((x) => x.amountCents > 0)
       ? (() => {
           const lines = finance.adders!.filter((x) => x.amountCents > 0);
           const grossed = apportionCents(
-            purchase.adderStickerCents,
+            deal.addersFinalCents,
             lines.map((x) => x.amountCents)
           );
           return {
@@ -2021,12 +2021,12 @@ function priceOption(args: {
      * line here: swapping the catalogue's default battery next month must not
      * rewrite what this household was quoted, or what for.
      */
-    ...(purchase && purchase.batteryPriceCents > 0
+    ...(deal && deal.equipmentChargesCents > 0
       ? {
           // What the HOUSEHOLD pays for it, so the rows on their breakdown —
           // system, work, battery — still add up to the total. The catalogue
           // price itself unless the partner takes its fee on the battery.
-          equipmentFinalCents: purchase.batteryStickerCents,
+          equipmentFinalCents: deal.equipmentFinalCents,
           batteryQty: design.batteryQty,
           ...(design.batteryLabel ? { batteryLabel: design.batteryLabel } : {}),
         }
@@ -2036,10 +2036,10 @@ function priceOption(args: {
     // which is the single failure this file has been bitten by most often —
     // see the cap-at-pricing note in solar-money.
     finalPpwCents:
-      purchase && !isStorage
+      deal && !isStorage
         ? design.systemSizeKwDc > 0
           ? Math.round(documentPriceCents / (design.systemSizeKwDc * 1000))
-          : Math.round(purchase.finalPpwCents)
+          : Math.round(deal.finalPpwCents)
         : null,
     // Lease/PPA carry no APR. Gating here as well as at the write means a
     // stale value left on the row by a product switch can never reach a
@@ -2088,7 +2088,7 @@ function priceOption(args: {
      * the number the customer's document prints under "Amount financed",
      * directly above a payment that has to divide into it.
      */
-    ...(purchase ? { financedAmountCents: loanPrincipalCents } : {}),
+    ...(deal ? { financedAmountCents: loanPrincipalCents } : {}),
     /**
      * THE ONE PAGE THAT SAYS WHAT THE HOUSEHOLD ACTUALLY PAYS, frozen.
      *

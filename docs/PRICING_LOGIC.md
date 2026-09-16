@@ -1880,3 +1880,71 @@ the blocker I had reported against site 5, and close the one real API gap
 mapping. Three sites should never be connected (they are readers, not price
 sites); five are conversions needing one call per menu row; one gap remains open
 (the capped sticker, for `solar-compare.ts`).
+
+## 8.29 Stage 4c, site 5 — the customer's document prices through `priceDeal()`
+
+The first of §8.5's twenty-five actually rewired, and deliberately the one with
+the most protection rather than the least: sixteen goldens and a byte-identical
+snapshot file sit under it, so a cent of drift is a red test.
+
+**What it did.** `solar-proposal.ts` called `pricePurchase` for an array and
+`purchaseFromUnits(priceStoragePurchase(…))` for batteries, then read eleven
+fields off the result across seventeen sites. It now calls `priceDeal()` once
+and reads `DealPrice`: `contractPriceCents → finalPriceCents`,
+`baseStickerCents → baseFinalCents`, `adderStickerCents → addersFinalCents`,
+`batteryStickerCents → equipmentFinalCents`,
+`batteryPriceCents → equipmentChargesCents`, with `systemWatts` and
+`finalPpwCents` unchanged.
+
+**No partner rule is passed, on purpose.** The ceiling was applied upstream in
+`proposal-generate.ts`, which caps and WRITES BACK, so the sticker arriving here
+has already had it. Passing the rule would solve the cap a second time against
+an already-capped figure.
+
+**That licence was earned first (§`solar-no-rule-equivalence.test.ts`).** The
+document called `pricePurchase`; `priceDeal()` routes through
+`priceStoredPurchase`, and storage through `priceStorageStored` rather than
+`priceStoragePurchase` — DIFFERENT FUNCTIONS whose split is deliberate. 50 cases
+now pin that with no rule they are identical. The specific doubt was `ppwBasis`,
+which defaults to `final` on the stored path even when the rule is null; it
+turns out `capStickerToFinalUnit` returns `uncapped` on `max == null` BEFORE the
+basis default is read.
+
+**`savingsModel`'s `purchase` argument is no longer passed.** `:533` reads
+`args.purchasePriceCents ?? args.purchase?.contractPriceCents`, and
+`purchasePriceCents` is already supplied on every purchase — so the fallback was
+already unreachable. Passing a `DealPrice` there is impossible in any case:
+it renames `contractPriceCents`, so it can never satisfy `PurchaseBreakdown`.
+The parameter is left on the signature; removing it is not this request's scope.
+
+**A claimed behaviour difference, RETRACTED.** This section first stated that
+`priceDeal` forces the fee to zero on cash while `pricePurchase` has only the
+generic `0 < pct < 100` guard, so a cash deal carrying a stray fee "prices
+differently now" — a real change the goldens could not catch.
+
+**That was false.** `priceUnits` zeroes the fee on cash at exactly the same
+point (`solar-money.ts:401`):
+
+```ts
+const rawPct = input.product === "cash" ? 0 : input.dealerFeePct;
+```
+
+The two paths agree on cash to the cent. The claim came from reading
+`pricePurchase`'s signature and inferring the mechanism instead of measuring it;
+the test written to pin the "difference" falsified it on its first run
+(`expected 4000000 not to be 4000000`). The test is kept, inverted, so the
+question has a measured answer.
+
+Recorded rather than quietly deleted because it is the third claim in this
+document to fail the same way — see §8.25's DDL proof and §8.28's savingsModel
+blocker. All three asserted a mechanism read off a fragment. **The rule this
+earns: a claim about how code behaves gets a test or a line reference before it
+gets written down.**
+
+**Results.** tsc 0. Unit 171 files / 2,593 passing. Goldens 16/16 and the
+snapshot file byte-identical in git. Lint clean.
+
+**Remaining in 4c:** 24 of 25 sites. Three should never be connected (readers,
+not price sites); five are per-programme conversions needing one call per menu
+row; `solar-compare.ts` still needs a capped-sticker accessor `priceDeal()` does
+not expose.
