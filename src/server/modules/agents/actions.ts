@@ -1,0 +1,305 @@
+"use server";
+
+import { after } from "next/server";
+import { revalidatePath } from "next/cache";
+import type { Prisma } from "@prisma/client";
+import { z } from "zod";
+import { prisma } from "@/server/db/client";
+import { requireUser } from "@/server/auth/session";
+import { companyVerticals, userVerticals } from "@/server/auth/vertical";
+import { leadAccessible } from "@/server/rbac/lead-access";
+import { stageMoveError } from "@/server/modules/pipeline/stage-guard";
+import { asActiveVertical, runInVertical } from "@/server/vertical/context";
+import { VERTICAL_LABEL, type ActiveVertical } from "@/lib/vertical";
+import type { AgentFormValues } from "@/lib/agent-labels";
+import { agentCan, canEditAgentConfig } from "./access";
+import { moveDeal, runStageEnteredAutomations, TARGET_STAGE_SELECT, type StageMove } from "./apply-changes";
+import { missingHandlerMessage, readDetail } from "./detail";
+import { handlerFor } from "./registry";
+import { AGENT_SELECT, createRun, executeRun, hasRunInFlight, writeMissingHandlerRun } from "./runner";
+import { nextRunAtFor } from "./schedule";
+import type { ChangeRecord, TargetStage } from "./types";
+import { validateAgentInput } from "./validate-agent";
+import { agentVisibleTo, viewerRunVerticals } from "./verticals";
+
+/**
+ * Every write the Agents pages make. Each export is a public endpoint, so each
+ * asks access.ts first, re-reads what it acts on inside the caller's company
+ * and workspaces, and trusts nothing it is sent.
+ */
+
+function fail(error: string) {
+  return { ok: false as const, error };
+}
+
+function revalidateAgents(agentId?: string) {
+  revalidatePath("/portal/agents");
+  revalidatePath("/portal/agents/runs");
+  if (agentId) revalidatePath(`/portal/agents/${agentId}`);
+}
+
+const idSchema = z.string().uuid();
+
+export async function createAgentAction(input: AgentFormValues) {
+  const user = await requireUser();
+  if (!canEditAgentConfig(user)) return fail("Only an owner or admin can create agents.");
+  const v = validateAgentInput(input);
+  if (!v.ok) return fail(v.error);
+  if (!agentVisibleTo(v.value.vertical, userVerticals(user))) return fail("You don't have access to that product.");
+
+  const taken = await prisma.agent.findFirst({ where: { companyId: user.companyId, name: v.value.name }, select: { id: true } });
+  if (taken) return fail("An agent with that name already exists.");
+
+  const row = await prisma.agent.create({
+    data: {
+      companyId: user.companyId,
+      ...v.value,
+      config: v.value.config as Prisma.InputJsonValue,
+      nextRunAt: nextRunAtFor(v.value, new Date()),
+      updatedById: user.userId,
+    },
+    select: { id: true },
+  });
+  revalidateAgents(row.id);
+  return { ok: true as const, id: row.id };
+}
+
+export async function updateAgentAction(agentId: string, input: AgentFormValues) {
+  const user = await requireUser();
+  if (!canEditAgentConfig(user)) return fail("Only an owner or admin can edit agents.");
+  if (!idSchema.safeParse(agentId).success) return fail("Agent not found.");
+
+  const existing = await prisma.agent.findFirst({
+    where: { id: agentId, companyId: user.companyId },
+    select: { id: true, vertical: true, handlerKey: true, enabled: true, schedule: true, nextRunAt: true },
+  });
+  if (!existing || !agentVisibleTo(existing.vertical, userVerticals(user))) return fail("Agent not found.");
+
+  // `enabled` belongs to the switch in the page header, not to this form.
+  const v = validateAgentInput({ ...input, enabled: existing.enabled }, { keepHandlerKey: existing.handlerKey });
+  if (!v.ok) return fail(v.error);
+  if (!agentVisibleTo(v.value.vertical, userVerticals(user))) return fail("You don't have access to that product.");
+
+  const taken = await prisma.agent.findFirst({
+    where: { companyId: user.companyId, name: v.value.name, id: { not: agentId } },
+    select: { id: true },
+  });
+  if (taken) return fail("An agent with that name already exists.");
+
+  // A save that leaves the schedule alone must not skip a run that is already due.
+  const nextRunAt = v.value.schedule === existing.schedule ? existing.nextRunAt : nextRunAtFor(v.value, new Date());
+  await prisma.agent.update({
+    where: { id: agentId },
+    data: { ...v.value, config: v.value.config as Prisma.InputJsonValue, nextRunAt, updatedById: user.userId },
+  });
+  revalidateAgents(agentId);
+  return { ok: true as const };
+}
+
+export async function setAgentEnabledAction(agentId: string, enabled: boolean) {
+  const user = await requireUser();
+  if (!canEditAgentConfig(user)) return fail("Only an owner or admin can turn agents on or off.");
+  if (!idSchema.safeParse(agentId).success || typeof enabled !== "boolean") return fail("Agent not found.");
+
+  const agent = await prisma.agent.findFirst({
+    where: { id: agentId, companyId: user.companyId },
+    select: { id: true, vertical: true, handlerKey: true, schedule: true },
+  });
+  if (!agent || !agentVisibleTo(agent.vertical, userVerticals(user))) return fail("Agent not found.");
+  if (enabled && !handlerFor(agent.handlerKey)) return fail(missingHandlerMessage(agent.handlerKey));
+
+  await prisma.agent.update({
+    where: { id: agentId },
+    data: { enabled, nextRunAt: nextRunAtFor({ enabled, schedule: agent.schedule }, new Date()), updatedById: user.userId },
+  });
+  revalidateAgents(agentId);
+  return { ok: true as const };
+}
+
+export async function runAgentNowAction(agentId: string, opts: { confirmDisabled?: boolean } = {}) {
+  const user = await requireUser();
+  if (!agentCan(user, "run")) return fail("You don't have permission to run agents.");
+  if (!idSchema.safeParse(agentId).success) return fail("Agent not found.");
+
+  const held = userVerticals(user);
+  const agent = await prisma.agent.findFirst({
+    where: { id: agentId, companyId: user.companyId },
+    select: { ...AGENT_SELECT, vertical: true, enabled: true },
+  });
+  if (!agent || !agentVisibleTo(agent.vertical, held)) return fail("Agent not found.");
+
+  // The page asks first. This is what stops a stale page or a direct call from skipping the question.
+  if (!agent.enabled && opts.confirmDisabled !== true) {
+    return { ok: false as const, needsConfirm: true as const, error: "This agent is turned off. Confirm to run it anyway." };
+  }
+
+  const targets = viewerRunVerticals(agent.vertical, companyVerticals(), held);
+  if (targets.length === 0) return fail("This agent does not run in any workspace you have access to.");
+
+  if (!handlerFor(agent.handlerKey)) {
+    for (const vertical of targets) {
+      await writeMissingHandlerRun({ agent, vertical, trigger: "manual", triggeredById: user.userId });
+    }
+    revalidateAgents(agent.id);
+    return fail(missingHandlerMessage(agent.handlerKey));
+  }
+
+  const alreadyRunningMessage = (vertical: ActiveVertical) =>
+    targets.length > 1
+      ? `This agent already has a run in progress in ${VERTICAL_LABEL[vertical]}. Wait for it to finish.`
+      : "This agent already has a run in progress. Wait for it to finish.";
+
+  for (const vertical of targets) {
+    if (await hasRunInFlight(agent.id, vertical)) {
+      return fail(alreadyRunningMessage(vertical));
+    }
+  }
+
+  // The time budget starts at the click. after() runs within the page's
+  // maxDuration (300); anything it does not start, the tick starts.
+  const anchorMs = Date.now();
+  const runIds: string[] = [];
+  let racedVertical: ActiveVertical | null = null;
+  for (const vertical of targets) {
+    // createRun returns null when a tick started a run for this agent in this
+    // workspace between the hasRunInFlight check above and this insert — the
+    // partial unique index refused the row rather than racing it. Run now
+    // starts only the runs it actually created, and fails only if it created
+    // none: one workspace racing must not stop the other from starting.
+    const created = await createRun({ agent, vertical, trigger: "manual", status: "queued", triggeredById: user.userId });
+    if (created) runIds.push(created.id);
+    else racedVertical ??= vertical;
+  }
+  if (runIds.length === 0) {
+    return fail(alreadyRunningMessage(racedVertical ?? targets[0]));
+  }
+  after(async () => {
+    await Promise.allSettled(runIds.map((id) => executeRun(id, { anchorMs })));
+  });
+  revalidateAgents(agent.id);
+  return { ok: true as const, runIds };
+}
+
+const resolveSchema = z.object({
+  runId: z.string().uuid(),
+  resolution: z.enum(["applied", "closed"]),
+  note: z.string().trim().max(2000).optional().default(""),
+});
+
+type ReadyChange = { change: ChangeRecord; stage: TargetStage };
+
+export async function resolveAgentRunAction(input: z.input<typeof resolveSchema>) {
+  const user = await requireUser();
+  if (!agentCan(user, "approve")) return fail("You don't have permission to resolve agent runs.");
+  const parsed = resolveSchema.safeParse(input);
+  if (!parsed.success) return fail("Invalid request.");
+  const { runId, resolution, note } = parsed.data;
+
+  const run = await prisma.agentRun.findFirst({
+    where: { id: runId, companyId: user.companyId },
+    select: { id: true, agentId: true, vertical: true, status: true, resolvedAt: true, detail: true, agent: { select: { name: true } } },
+  });
+  if (!run || !(userVerticals(user) as string[]).includes(run.vertical)) return fail("Run not found.");
+  if (run.status !== "needs_human") return fail("Only a run that needs a human can be resolved.");
+  if (run.resolvedAt) return fail("This run has already been resolved.");
+
+  const detail = readDetail(run.detail);
+  const held = detail.changes.filter((c) => c.outcome === "held");
+
+  if (resolution === "closed") {
+    if (!note) return fail("Add a note saying why it is closed without applying.");
+    const closed = await prisma.agentRun.updateMany({
+      where: { id: run.id, resolvedAt: null },
+      data: { resolution: "closed", resolvedById: user.userId, resolvedAt: new Date(), resolutionNote: note },
+    });
+    if (closed.count === 0) return fail("This run has already been resolved.");
+    revalidateAgents(run.agentId);
+    return { ok: true as const, failed: 0 };
+  }
+
+  if (held.length === 0) return fail("Nothing was held on this run, so there is nothing to apply. Close it instead.");
+
+  const vertical = asActiveVertical(run.vertical);
+
+  // Re-check every change before applying any: the viewer can open the deal,
+  // the deal is still where the agent saw it, the target stage still exists,
+  // and — main's stage rules — neither M1 Funding nor Contract Signed refuses
+  // the move. Funding is asked with the APPROVING person's own authority, not
+  // the agent's: an admin may certify it themselves; a manager holding
+  // Agents access may not, whatever the run itself was allowed to hold.
+  const checked = await runInVertical(vertical, async (): Promise<{ error: string } | { ready: ReadyChange[] }> => {
+    const ready: ReadyChange[] = [];
+    for (const change of held) {
+      const lead = await leadAccessible(user, change.leadId);
+      if (!lead) {
+        return { error: `You can't open ${change.dealLabel ?? "this deal"}, so you can't apply this change. Close the run instead, or ask an admin.` };
+      }
+      const now = await prisma.lead.findFirst({
+        where: { id: lead.id },
+        select: { stageId: true, pipelineId: true, stage: { select: { name: true } } },
+      });
+      if ((now?.stageId ?? null) !== (change.fromStage?.id ?? null)) {
+        return { error: `${change.dealLabel ?? "This deal"} has moved since the agent looked (now in ${now?.stage?.name ?? "no stage"}). Close this run instead.` };
+      }
+      const stage =
+        change.toStage && now?.pipelineId
+          ? await prisma.pipelineStage.findFirst({ where: { id: change.toStage.id, pipelineId: now.pipelineId }, select: TARGET_STAGE_SELECT })
+          : null;
+      if (!stage) return { error: `The stage ${change.toStage?.name ?? change.toStageKey} no longer exists. Close this run instead.` };
+
+      const refusal = await stageMoveError({
+        companyId: user.companyId,
+        actor: user,
+        lead: { id: lead.id, vertical: lead.vertical, stageId: now?.stageId ?? null },
+        targetStageId: stage.id,
+      });
+      if (refusal) {
+        return { error: `${change.dealLabel ?? "This deal"}: ${refusal}` };
+      }
+
+      ready.push({ change, stage });
+    }
+    return { ready };
+  });
+  if ("error" in checked) return fail(checked.error);
+
+  // Claim the resolution before touching a deal, so two people pressing Apply cannot both move it.
+  const claimed = await prisma.agentRun.updateMany({
+    where: { id: run.id, resolvedAt: null },
+    data: { resolution: "applied", resolvedById: user.userId, resolvedAt: new Date(), resolutionNote: note || null },
+  });
+  if (claimed.count === 0) return fail("This run has already been resolved.");
+
+  const records = await runInVertical(vertical, async () => {
+    const out: ChangeRecord[] = [];
+    for (const { change, stage } of checked.ready) {
+      try {
+        // Conditional on the stage the caller just saw above: a person can
+        // still move (or cancel) the deal in the gap between that check and
+        // this write. moveDeal writes only while the deal is still there, and
+        // throws otherwise — nothing is overwritten, and the change below is
+        // recorded discarded rather than applied.
+        await moveDeal(user.companyId, change.leadId, change.fromStage?.id ?? null, stage, {
+          kind: "person",
+          userId: user.userId,
+          fullName: user.fullName,
+          agentName: run.agent.name,
+        });
+        out.push({ ...change, toStage: stage, outcome: "applied", note: null });
+      } catch (err) {
+        out.push({ ...change, outcome: "discarded", note: `Not applied: ${err instanceof Error ? err.message : String(err)}` });
+      }
+    }
+    return out;
+  });
+
+  const moves: StageMove[] = records.flatMap((c) => (c.outcome === "applied" && c.toStage ? [{ leadId: c.leadId, stageId: c.toStage.id }] : []));
+  await runStageEnteredAutomations(user.companyId, vertical, moves);
+
+  detail.resolution = { byUserId: user.userId, at: new Date().toISOString(), changes: records };
+  await prisma.agentRun.update({ where: { id: run.id }, data: { detail: detail as unknown as Prisma.InputJsonValue } });
+
+  revalidateAgents(run.agentId);
+  for (const move of moves) revalidatePath(`/portal/leads/${move.leadId}`);
+  return { ok: true as const, failed: records.filter((c) => c.outcome !== "applied").length };
+}
