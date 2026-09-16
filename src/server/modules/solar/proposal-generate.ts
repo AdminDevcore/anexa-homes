@@ -7,6 +7,7 @@ import { resolveVppCredits } from "@/server/modules/solar/vpp-credits";
 import { resolveLayoutAsset } from "./layout-asset";
 import { getSolarSettings } from "./settings";
 import { resolveDealerFee } from "@/lib/solar-dealer-fee";
+import { priceDeal } from "@/lib/solar-price-deal";
 import { dealSignedAt } from "./signed-lock";
 import { readSolarReadiness } from "./readiness";
 import {
@@ -22,10 +23,6 @@ import { customerProductLabel } from "@/lib/solar-lender-product";
 import { canGenerate, type ValidationIssue } from "@/lib/solar-validation";
 import { adderAmountCents } from "@/lib/solar-adders";
 import {
-  capStickerToFinalPpw,
-  capStickerToFinalUnit,
-  pricePurchase,
-  priceStoragePurchase,
   batteryChargeCents,
 } from "@/lib/solar-money";
 import { monthlyReconciles } from "@/lib/solar-loan";
@@ -496,17 +493,6 @@ export async function generateProposalVersion(
     });
   }
 
-  const capped = capStickerToFinalPpw({
-    stickerPpwCents: finance.baseFinalPpwCents,
-    maxFinalPpwCents: dealLender?.priceRulePpwCents ?? null,
-    mode: dealLender?.priceRuleMode,
-    basis: quotedRow?.ppwBasis,
-    systemSizeKwDc: design.systemSizeKwDc,
-    dealerFeePct: dealerFee.pct,
-    // The adders the partner's figure is a price FOR. A roof financed on top
-    // rides above it and is added back by `pricePurchase` below.
-    adderTotalCents: finance.addersInsideRuleCents,
-  });
   /**
    * PRICED UNCONDITIONALLY, WRITTEN BACK WHEN SOMETHING MOVED.
    *
@@ -526,18 +512,31 @@ export async function generateProposalVersion(
     !isStorage &&
     (finance.product === "cash" || finance.product === "loan")
   ) {
-    const stickerPpwCents = capped.capped
-      ? capped.stickerPpwCents
-      : finance.baseFinalPpwCents;
-    const contractPriceCents = pricePurchase({
+    /**
+     * The ceiling and the price, solved together (Stage 4c).
+     *
+     * This was a `capStickerToFinalPpw` above the branch and a `pricePurchase`
+     * inside it, with the sticker picked by hand between them. `priceDeal()`
+     * does both, and hands back the rate it actually priced at —
+     * `stickerPerUnitCents` — which is the figure written to the row below.
+     */
+    const priced = priceDeal({
       product: finance.product,
+      systemType: design.systemType,
       systemSizeKwDc: design.systemSizeKwDc,
-      stickerPpwCents,
+      baseFinalPpwCents: finance.baseFinalPpwCents,
       dealerFeePct: dealerFee.pct,
-      adderTotalCents: finance.addersInsideRuleCents,
-      onTopAdderTotalCents: finance.addersOutsideRuleCents,
-      batteryPriceCents,
-    }).contractPriceCents;
+      // The adders the partner's figure is a price FOR. A roof financed on top
+      // rides above it and is added back inside the ladder.
+      addersInsideRuleCents: finance.addersInsideRuleCents,
+      addersOutsideRuleCents: finance.addersOutsideRuleCents,
+      equipmentChargesCents: batteryPriceCents,
+      priceRulePpwCents: dealLender?.priceRulePpwCents ?? null,
+      priceRuleMode: dealLender?.priceRuleMode,
+      ppwBasis: quotedRow?.ppwBasis,
+    });
+    const stickerPpwCents = priced.stickerPerUnitCents;
+    const contractPriceCents = priced.finalPriceCents;
 
     if (
       stickerPpwCents !== finance.baseFinalPpwCents ||
@@ -565,23 +564,21 @@ export async function generateProposalVersion(
    * a storage job has none, so it stands down and changes nothing.
    */
   if (isStorage && (finance.product === "cash" || finance.product === "loan")) {
-    const storageCap = capStickerToFinalUnit({
-      stickerPerUnitCents: finance.baseFinalPerBatteryCents,
-      maxFinalPerUnitCents: dealLender?.priceRulePerBatteryCents ?? null,
-      mode: dealLender?.priceRuleBatteryMode,
-      basis: quotedRow?.batteryPriceBasis,
-      units: design.batteryQty,
-      dealerFeePct: dealerFee.pct,
-      adderTotalCents: finance.addersInsideRuleCents,
-    });
-
-    const priced = priceStoragePurchase({
+    // The same ladder, counted in batteries — one call that holds the deal to
+    // the partner's per-battery rule and prices what is left.
+    const priced = priceDeal({
       product: finance.product,
+      systemType: design.systemType,
+      systemSizeKwDc: design.systemSizeKwDc,
+      baseFinalPpwCents: 0,
+      baseFinalPerBatteryCents: finance.baseFinalPerBatteryCents,
       batteryQty: design.batteryQty,
-      stickerPricePerBatteryCents: storageCap.stickerPerUnitCents,
       dealerFeePct: dealerFee.pct,
-      adderTotalCents: finance.addersInsideRuleCents,
-      onTopAdderTotalCents: finance.addersOutsideRuleCents,
+      addersInsideRuleCents: finance.addersInsideRuleCents,
+      addersOutsideRuleCents: finance.addersOutsideRuleCents,
+      priceRulePerBatteryCents: dealLender?.priceRulePerBatteryCents ?? null,
+      priceRuleBatteryMode: dealLender?.priceRuleBatteryMode,
+      batteryPriceBasis: quotedRow?.batteryPriceBasis,
     });
 
     // Written back for the same reason the per-watt block writes back: the deal
@@ -589,11 +586,11 @@ export async function generateProposalVersion(
     // something actually moved — an unconditional write would touch every row
     // on every generation for nothing.
     if (
-      storageCap.stickerPerUnitCents !== finance.baseFinalPerBatteryCents ||
-      priced.contractPriceCents !== finance.finalPriceCents
+      priced.stickerPerUnitCents !== finance.baseFinalPerBatteryCents ||
+      priced.finalPriceCents !== finance.finalPriceCents
     ) {
-      finance.baseFinalPerBatteryCents = storageCap.stickerPerUnitCents;
-      finance.finalPriceCents = priced.contractPriceCents;
+      finance.baseFinalPerBatteryCents = priced.stickerPerUnitCents;
+      finance.finalPriceCents = priced.finalPriceCents;
       await prisma.solarFinance.update({
         where: { leadId },
         data: {

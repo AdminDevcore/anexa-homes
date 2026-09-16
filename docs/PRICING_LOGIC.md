@@ -1987,3 +1987,62 @@ know which kind of deal it is holding.
 Five cases pin it: no rule, a cap that bites, storage where every per-watt
 figure is 0, a flat per-battery rule, and a lease (which sells electricity and
 has no unit to price).
+
+## 8.31 Stage 4c, site 3 — generation caps and prices in one call
+
+`proposal-generate.ts` solved the partner's ceiling in a `capStickerToFinalPpw`
+ABOVE the branch, picked the sticker by hand between the two, then priced with
+`pricePurchase` inside it — and did the same again per battery with
+`capStickerToFinalUnit` plus `priceStoragePurchase`. Both collapse to one
+`priceDeal()` call that caps and prices together.
+
+§8.30 made it possible: this site does not merely display the capped rate, it
+**writes it back** to `SolarFinance.baseFinalPpwCents` and
+`baseFinalPerBatteryCents`. Reusing `baseFinalPpwCents` would have written **0**
+on every storage deal. The standalone `capped` const goes too — it was computed
+above the branch and ran on storage deals that never read it.
+
+### The integration suite cannot be trusted on the shared schema
+
+Two consecutive runs of this change reported **22** then **20** failures across
+`automations`, `dashboard`, `projects`, `team`, `payroll`, `vertical/isolation`
+and `storage` — modules this file cannot reach — with errors like
+`vertical_test.companies does not exist` while `psql` showed that table present.
+
+**Another session shares this Postgres and migrates the same schema.**
+`vertical_test._prisma_migrations` holds **200** rows against this branch's
+**192** on disk, and all eight extras are a books/accounting workstream dated
+the same day:
+
+```
+20260916120000_books_double_entry_ledger   20260916150000_bank_feeds
+20260916130000_books_drop_fake_connection  20260916150000_bank_reconciliation
+20260916140000_journal_line_account_cascade 20260916160000_bank_rules
+20260916090000_payroll_items_commission_id_index
+20260916170000_accountant_readonly_role
+```
+
+Nothing on this branch is missing from it, so the schema is AHEAD, not behind.
+The tell that it was contention rather than a regression: **the failure set
+changed between two consecutive runs of identical code.** A regression is
+deterministic; a moving schema is not.
+
+**The recipe — use a private schema, which the config already supports:**
+
+```bash
+VERTICAL_TEST_DATABASE_URL="postgresql://anexa:anexa@127.0.0.1:5544/anexa?schema=vertical_stage4c" \
+  npx vitest run --config vitest.integration.config.ts
+```
+
+`globalSetup` migrates it from this branch's own 192 migrations. Result: **791
+passing, 7 failures — exactly the pre-Stage-4 baseline** (`retention` ×6,
+`visit-crew` ×1, both pre-existing).
+
+### A flaw in this session's own gate, fixed
+
+Three times a dead import survived because the occurrence count included the
+COMMENT that named it — `purchaseFromUnits` at site 5, then
+`capStickerToFinalPpw` and `pricePurchase` here. Worse, the commit gate tested
+`eslint` EXIT CODE only, and unused imports are **warnings**, which exit 0. So
+"lint clean" in earlier commit messages meant "no errors", not "no warnings".
+The gate now counts warnings, and occurrence counts blank comments first.
