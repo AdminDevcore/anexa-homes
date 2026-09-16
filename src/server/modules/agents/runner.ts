@@ -56,10 +56,10 @@ type NewRun = {
 };
 
 const json = (value: unknown) => value as Prisma.InputJsonValue;
-const firstLine = (err: unknown) => (err instanceof Error ? err.message : String(err)).split("\n")[0];
+export const firstLine = (err: unknown) => (err instanceof Error ? err.message : String(err)).split("\n")[0];
 
 /** Postgres `text` and `jsonb` reject a NUL byte outright; handler-controlled text must never carry one into a write. */
-function clean(s: string): string {
+export function clean(s: string): string {
   return s.replace(/\u0000/g, "");
 }
 
@@ -80,7 +80,7 @@ function clean(s: string): string {
  * becomes `null`, both `JSON.stringify`'s own behaviour and so, again, what
  * would have been written regardless.
  */
-function cleanDeep<T>(value: T): T {
+export function cleanDeep<T>(value: T): T {
   return JSON.parse(JSON.stringify(value, (_key, v: unknown) => (typeof v === "string" ? clean(v) : v)));
 }
 

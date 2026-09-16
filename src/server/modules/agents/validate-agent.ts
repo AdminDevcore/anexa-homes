@@ -1,5 +1,6 @@
 import type { AgentDepartment, Vertical } from "@prisma/client";
-import { DEPARTMENTS, PRODUCTS, type AgentFormValues } from "@/lib/agent-labels";
+import { z } from "zod";
+import { isDepartment, isProduct } from "@/lib/agent-labels";
 import { MAX_TIMEOUT_SECONDS, MIN_TIMEOUT_SECONDS } from "./budget";
 import { findSecretValues } from "./config-guard";
 import { handlerFor } from "./registry";
@@ -29,6 +30,26 @@ const fail = (error: string) => ({ ok: false as const, error });
 const MAX_CONFIG_CHARS = 30_000;
 
 /**
+ * The form's runtime shape — TYPES only, never which values are allowed: every
+ * refusal below stays written in words, where a person reads it. `enabled` and
+ * `requiresHumanGate` are optional because the checks below already read a
+ * missing one as false and true respectively; what this refuses is a string
+ * where the form puts a boolean, or nothing at all where it puts a string.
+ */
+const formSchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  handlerKey: z.string(),
+  product: z.string(),
+  department: z.string(),
+  enabled: z.boolean().optional(),
+  schedule: z.string(),
+  timeoutSeconds: z.union([z.string(), z.number()]),
+  requiresHumanGate: z.boolean().optional(),
+  config: z.string(),
+});
+
+/**
  * Everything saving an agent must refuse, before any write: a handler this
  * build does not contain, a schedule the tick cannot keep, a timeout outside
  * the tick budget, config that is not an object, config holding a secret, and
@@ -37,40 +58,50 @@ const MAX_CONFIG_CHARS = 30_000;
  * `keepHandlerKey`: an agent whose handler has since been removed can still
  * have its other fields saved. Its config cannot be checked by a handler that
  * is not there, and enabling it stays refused (setAgentEnabledAction).
+ *
+ * `input` is `unknown` on purpose: both callers are public server actions, and
+ * `AgentFormValues` is a type, gone by the time a payload arrives. The shape is
+ * checked first, so a payload missing a field — or holding a number where the
+ * form puts a string — is refused in a sentence rather than throwing a
+ * TypeError out of `.trim()` and landing a stack in the logs.
  */
 export function validateAgentInput(
-  input: AgentFormValues,
+  input: unknown,
   opts: { keepHandlerKey?: string } = {}
 ): { ok: true; value: ValidAgent } | { ok: false; error: string } {
-  const name = input.name.trim();
+  const parsed = formSchema.safeParse(input);
+  if (!parsed.success) return fail("That form could not be read. Reload and try again.");
+  const form = parsed.data;
+
+  const name = form.name.trim();
   if (!name) return fail("Give the agent a name.");
   if (name.length > 120) return fail("Keep the name under 120 characters.");
 
-  const description = input.description.trim();
+  const description = form.description.trim();
   if (description.length > 1000) return fail("Keep the description under 1,000 characters.");
 
-  const handler = handlerFor(input.handlerKey);
-  const keepingMissing = !handler && input.handlerKey === opts.keepHandlerKey;
+  const handler = handlerFor(form.handlerKey);
+  const keepingMissing = !handler && form.handlerKey === opts.keepHandlerKey;
   if (!handler && !keepingMissing) {
-    return fail(`No handler is registered for "${input.handlerKey}". Pick one from the list.`);
+    return fail(`No handler is registered for "${form.handlerKey}". Pick one from the list.`);
   }
 
-  if (!(PRODUCTS as readonly string[]).includes(input.product)) return fail("Pick Roofing, Solar or Both.");
-  if (!(DEPARTMENTS as readonly string[]).includes(input.department)) return fail("Pick a department.");
+  if (!isProduct(form.product)) return fail("Pick Roofing, Solar or Both.");
+  if (!isDepartment(form.department)) return fail("Pick a department.");
 
   let schedule: string | null = null;
-  if (input.schedule.trim()) {
-    const checked = validateSchedule(input.schedule);
+  if (form.schedule.trim()) {
+    const checked = validateSchedule(form.schedule);
     if (!checked.ok) return fail(checked.error);
     schedule = checked.schedule;
   }
 
-  const timeoutSeconds = Number(input.timeoutSeconds);
+  const timeoutSeconds = Number(form.timeoutSeconds);
   if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < MIN_TIMEOUT_SECONDS || timeoutSeconds > MAX_TIMEOUT_SECONDS) {
     return fail(`Timeout must be a whole number of seconds from ${MIN_TIMEOUT_SECONDS} to ${MAX_TIMEOUT_SECONDS}.`);
   }
 
-  const rawConfig = input.config.trim();
+  const rawConfig = form.config.trim();
   if (rawConfig.length > MAX_CONFIG_CHARS) {
     return fail("Keep config under 30,000 characters.");
   }
@@ -106,13 +137,13 @@ export function validateAgentInput(
     value: {
       name,
       description,
-      handlerKey: input.handlerKey,
-      vertical: input.product === "both" ? null : input.product,
-      department: input.department,
-      enabled: input.enabled === true,
+      handlerKey: form.handlerKey,
+      vertical: form.product === "both" ? null : form.product,
+      department: form.department,
+      enabled: form.enabled === true,
       schedule,
       timeoutSeconds,
-      requiresHumanGate: input.requiresHumanGate !== false,
+      requiresHumanGate: form.requiresHumanGate !== false,
       config: config as Record<string, unknown>,
     },
   };

@@ -16,7 +16,7 @@ import { agentCan, canEditAgentConfig } from "./access";
 import { moveDeal, runStageEnteredAutomations, TARGET_STAGE_SELECT, type StageMove } from "./apply-changes";
 import { missingHandlerMessage, readDetail } from "./detail";
 import { handlerFor } from "./registry";
-import { AGENT_SELECT, createRun, executeRun, hasRunInFlight, writeMissingHandlerRun } from "./runner";
+import { AGENT_SELECT, clean, cleanDeep, createRun, executeRun, firstLine, hasRunInFlight, writeMissingHandlerRun } from "./runner";
 import { nextRunAtFor } from "./schedule";
 import type { ChangeRecord, TargetStage } from "./types";
 import { validateAgentInput } from "./validate-agent";
@@ -39,6 +39,15 @@ function revalidateAgents(agentId?: string) {
 }
 
 const idSchema = z.string().uuid();
+
+/** A failed move's note goes into a jsonb column and is rendered to a person: one line, and no longer than this. */
+const MAX_NOTE_CHARS = 500;
+
+/** One missing-handler run — and one alert to every switch holder — per agent, per workspace, per this long. */
+const MISSING_HANDLER_QUIET_MS = 10 * 60 * 1000;
+
+/** What the claim records against each change it is about to attempt: nothing has happened to the deal yet. */
+const APPLYING_NOTE = "Applying: a person approved this, and what happened is not recorded yet.";
 
 export async function createAgentAction(input: AgentFormValues) {
   const user = await requireUser();
@@ -136,23 +145,38 @@ export async function runAgentNowAction(agentId: string, opts: { confirmDisabled
   const targets = viewerRunVerticals(agent.vertical, companyVerticals(), held);
   if (targets.length === 0) return fail("This agent does not run in any workspace you have access to.");
 
-  if (!handlerFor(agent.handlerKey)) {
-    for (const vertical of targets) {
-      await writeMissingHandlerRun({ agent, vertical, trigger: "manual", triggeredById: user.userId });
-    }
-    revalidateAgents(agent.id);
-    return fail(missingHandlerMessage(agent.handlerKey));
-  }
-
   const alreadyRunningMessage = (vertical: ActiveVertical) =>
     targets.length > 1
       ? `This agent already has a run in progress in ${VERTICAL_LABEL[vertical]}. Wait for it to finish.`
       : "This agent already has a run in progress. Wait for it to finish.";
 
+  // The in-flight check comes BEFORE the missing-handler write below, the way
+  // the tick orders the same two (tick.ts): that write costs a run row and an
+  // alert to every switch holder, and an agent that is already running needs
+  // neither.
   for (const vertical of targets) {
     if (await hasRunInFlight(agent.id, vertical)) {
       return fail(alreadyRunningMessage(vertical));
     }
+  }
+
+  if (!handlerFor(agent.handlerKey)) {
+    const message = missingHandlerMessage(agent.handlerKey);
+    // Whoever pressed the button always gets the sentence; what is throttled
+    // is the ROW and the ALERT behind it. Nothing else here stops a repeat —
+    // the tick has its own per-tick cap, this path has none — so twenty
+    // clicks on a broken agent would otherwise be forty notifications to
+    // every switch holder.
+    const since = new Date(Date.now() - MISSING_HANDLER_QUIET_MS);
+    for (const vertical of targets) {
+      const announced = await prisma.agentRun.findFirst({
+        where: { agentId: agent.id, vertical, status: "failed", error: message, createdAt: { gte: since } },
+        select: { id: true },
+      });
+      if (!announced) await writeMissingHandlerRun({ agent, vertical, trigger: "manual", triggeredById: user.userId });
+    }
+    revalidateAgents(agent.id);
+    return fail(message);
   }
 
   // The time budget starts at the click. after() runs within the page's
@@ -174,7 +198,15 @@ export async function runAgentNowAction(agentId: string, opts: { confirmDisabled
     return fail(alreadyRunningMessage(racedVertical ?? targets[0]));
   }
   after(async () => {
-    await Promise.allSettled(runIds.map((id) => executeRun(id, { anchorMs })));
+    const settled = await Promise.allSettled(runIds.map((id) => executeRun(id, { anchorMs })));
+    settled.forEach((outcome, i) => {
+      // executeRun rethrows when the reaper closed the run out from under it
+      // (runner.ts). Unlogged, that throw vanishes into after()'s floating
+      // promise — tick.ts logs the same rejection, for the same reason.
+      if (outcome.status === "rejected") {
+        console.error("[agents] a run crashed before it could finish; the reaper will close it", runIds[i], outcome.reason);
+      }
+    });
   });
   revalidateAgents(agent.id);
   return { ok: true as const, runIds };
@@ -184,7 +216,7 @@ const resolveSchema = z.object({
   runId: z.string().uuid(),
   resolution: z.enum(["applied", "closed"]),
   note: z.string().trim().max(2000).optional().default(""),
-});
+}).strict();
 
 type ReadyChange = { change: ChangeRecord; stage: TargetStage };
 
@@ -264,9 +296,32 @@ export async function resolveAgentRunAction(input: z.input<typeof resolveSchema>
   if ("error" in checked) return fail(checked.error);
 
   // Claim the resolution before touching a deal, so two people pressing Apply cannot both move it.
+  //
+  // The claim carries a PROVISIONAL record of what it is about to do. Without
+  // one, a failure between this write and the final write below — N moves and
+  // the automations in between — leaves a row reading "applied, by this
+  // person" whose own detail still says every change is waiting for a human,
+  // when some of those deals have really moved; nothing left behind could then
+  // tell anyone which. Each change is recorded `held` here because that is
+  // still true at this instant — the note is what says a person has taken it
+  // on. The final write replaces this with what actually happened.
+  const pending = cleanDeep({
+    ...detail,
+    resolution: {
+      byUserId: user.userId,
+      at: new Date().toISOString(),
+      changes: checked.ready.map(({ change, stage }) => ({ ...change, toStage: stage, outcome: "held" as const, note: APPLYING_NOTE })),
+    },
+  });
   const claimed = await prisma.agentRun.updateMany({
     where: { id: run.id, resolvedAt: null },
-    data: { resolution: "applied", resolvedById: user.userId, resolvedAt: new Date(), resolutionNote: note || null },
+    data: {
+      resolution: "applied",
+      resolvedById: user.userId,
+      resolvedAt: new Date(),
+      resolutionNote: note || null,
+      detail: pending as unknown as Prisma.InputJsonValue,
+    },
   });
   if (claimed.count === 0) return fail("This run has already been resolved.");
 
@@ -287,7 +342,12 @@ export async function resolveAgentRunAction(input: z.input<typeof resolveSchema>
         });
         out.push({ ...change, toStage: stage, outcome: "applied", note: null });
       } catch (err) {
-        out.push({ ...change, outcome: "discarded", note: `Not applied: ${err instanceof Error ? err.message : String(err)}` });
+        // firstLine, NUL-stripped, capped — the same three runner.ts applies
+        // to every piece of error text it writes. A Prisma failure is a
+        // multi-line block carrying a file path and an argument dump, and a
+        // NUL byte anywhere in it makes the jsonb write below throw AFTER
+        // these deals have already moved.
+        out.push({ ...change, outcome: "discarded", note: clean(`Not applied: ${firstLine(err)}`).slice(0, MAX_NOTE_CHARS) });
       }
     }
     return out;
@@ -296,10 +356,24 @@ export async function resolveAgentRunAction(input: z.input<typeof resolveSchema>
   const moves: StageMove[] = records.flatMap((c) => (c.outcome === "applied" && c.toStage ? [{ leadId: c.leadId, stageId: c.toStage.id }] : []));
   await runStageEnteredAutomations(user.companyId, vertical, moves);
 
+  const failed = records.filter((c) => c.outcome !== "applied").length;
+  // The list shows the resolution and its note, never the changes, so a run
+  // that applied nothing would still read "Applied" there. Say so in the note.
+  const finalNote =
+    failed > 0
+      ? `${note ? `${note} — ` : ""}Applied ${records.length - failed} of ${records.length} change${records.length === 1 ? "" : "s"}.`
+      : note || null;
+
   detail.resolution = { byUserId: user.userId, at: new Date().toISOString(), changes: records };
-  await prisma.agentRun.update({ where: { id: run.id }, data: { detail: detail as unknown as Prisma.InputJsonValue } });
+  // Read-modify-write of `detail` without a version check: only one caller can
+  // win the claim above, and `finalize` cannot re-run on a needs_human row, so
+  // nothing else writes this column between the read at the top and here.
+  await prisma.agentRun.update({
+    where: { id: run.id },
+    data: { detail: cleanDeep(detail) as unknown as Prisma.InputJsonValue, resolutionNote: finalNote },
+  });
 
   revalidateAgents(run.agentId);
   for (const move of moves) revalidatePath(`/portal/leads/${move.leadId}`);
-  return { ok: true as const, failed: records.filter((c) => c.outcome !== "applied").length };
+  return { ok: true as const, failed };
 }

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vitest";
 import { PrismaClient, type Prisma, type Role } from "@prisma/client";
 import { TEST_DATABASE_URL } from "@/server/vertical/__tests__/global-setup";
-import { NEW_AGENT_VALUES } from "@/lib/agent-labels";
+import { NEW_AGENT_VALUES, type AgentFormValues } from "@/lib/agent-labels";
 import { emptyDetail, readDetail } from "../detail";
 import type { ChangeRecord } from "../types";
 
@@ -394,5 +394,119 @@ describe("resolveAgentRunAction — main's stage rules (Contract Signed and M1 F
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toMatch(/Contract Signed needs both/);
     expect((await db.lead.findUniqueOrThrow({ where: { id: solarContractLeadId } })).stageId).toBe(solarStage.start);
+  });
+});
+
+/** A payload the form would never build: the actions take a TYPE, which is gone by the time one arrives. */
+const malformed = (over: Record<string, unknown>) => ({ ...NEW_AGENT_VALUES, ...over }) as unknown as AgentFormValues;
+
+describe("input the form never sends", () => {
+  it("refuses a config payload in a sentence, rather than throwing a TypeError out of the action", async () => {
+    as("admin");
+    const refusal = { ok: false, error: "That form could not be read. Reload and try again." };
+    expect(await actions.createAgentAction(malformed({ name: undefined }))).toEqual(refusal);
+    expect(await actions.createAgentAction(malformed({ name: 42 }))).toEqual(refusal);
+    expect(await actions.createAgentAction(malformed({ config: {} }))).toEqual(refusal);
+    expect(await actions.createAgentAction(null as unknown as AgentFormValues)).toEqual(refusal);
+    expect(await actions.updateAgentAction(helloId, malformed({ description: 7 }))).toEqual(refusal);
+    expect(await actions.updateAgentAction(helloId, malformed({ schedule: null }))).toEqual(refusal);
+  });
+
+  it("refuses a resolve payload carrying a key the action does not define", async () => {
+    as("admin");
+    const extra = { runId: heldRunId, resolution: "closed", note: "x", applyAnyway: true } as unknown as Parameters<
+      typeof actions.resolveAgentRunAction
+    >[0];
+    expect(await actions.resolveAgentRunAction(extra)).toEqual({ ok: false, error: "Invalid request." });
+    expect((await db.agentRun.findUniqueOrThrow({ where: { id: heldRunId } })).resolvedAt).toBeNull();
+  });
+});
+
+describe("updateAgentAction and the header switch", () => {
+  it("ignores `enabled` in the form, in both directions", async () => {
+    as("admin");
+    const agent = await db.agent.create({ data: { companyId, name: "Switch Me", handlerKey: "system.hello", department: "operations", enabled: false } });
+
+    expect((await actions.updateAgentAction(agent.id, { ...NEW_AGENT_VALUES, name: "Switch Me", enabled: true })).ok).toBe(true);
+    expect((await db.agent.findUniqueOrThrow({ where: { id: agent.id } })).enabled).toBe(false);
+
+    await db.agent.update({ where: { id: agent.id }, data: { enabled: true } });
+    expect((await actions.updateAgentAction(agent.id, { ...NEW_AGENT_VALUES, name: "Switch Me", enabled: false })).ok).toBe(true);
+    expect((await db.agent.findUniqueOrThrow({ where: { id: agent.id } })).enabled).toBe(true);
+  });
+});
+
+describe("runAgentNowAction — an agent whose handler is not deployed", () => {
+  let brokenId = "";
+  const message = 'No handler is registered for "bank.ntp_poll". Deploy the handler or disable this agent.';
+
+  beforeAll(async () => {
+    brokenId = (
+      await db.agent.create({ data: { companyId, name: "Quiet Broken", handlerKey: "bank.ntp_poll", department: "permit", vertical: "roofing", enabled: true } })
+    ).id;
+  });
+
+  it("answers every click, but writes one failed run and one alert rather than one per click", async () => {
+    as("admin");
+    for (let click = 0; click < 3; click++) {
+      expect(await actions.runAgentNowAction(brokenId)).toEqual({ ok: false, error: message });
+    }
+    expect(await db.agentRun.count({ where: { agentId: brokenId } })).toBe(1);
+  });
+
+  it("says a run is already in progress instead of writing another missing-handler run", async () => {
+    as("admin");
+    await db.agentRun.create({ data: { companyId, agentId: brokenId, vertical: "roofing", trigger: "manual", status: "running", startedAt: new Date() } });
+    expect(await actions.runAgentNowAction(brokenId)).toEqual({
+      ok: false,
+      error: "This agent already has a run in progress. Wait for it to finish.",
+    });
+    expect(await db.agentRun.count({ where: { agentId: brokenId, status: "failed" } })).toBe(0);
+  });
+});
+
+describe("resolveAgentRunAction — a change that cannot be applied", () => {
+  it("records the second of two changes on one deal as discarded, and says so on the run itself", async () => {
+    as("admin");
+    const base: ChangeRecord = {
+      type: "move_stage",
+      leadId,
+      toStageKey: "main",
+      reason: "Portal shows NTP approved",
+      dealLabel: "Maria Lopez · 12 Elm St",
+      fromStage: { id: stage.from, key: "from", name: "From" },
+      toStage: { id: stage.main, key: "main", name: "Main", position: 2, isActionRequired: false, defaultBlocker: null, stageType: "internally_owned" },
+      outcome: "held",
+      note: "Held: this agent is gated and Main is not an Action Required stage.",
+    };
+    // Both changes pass the read-only re-check — the deal is still in From for
+    // each of them — and then the first move makes the second one impossible.
+    const runId = (
+      await db.agentRun.create({
+        data: {
+          companyId,
+          agentId: pollerId,
+          vertical: "roofing",
+          trigger: "scheduled",
+          status: "needs_human",
+          summary: "NTP approved in the portal",
+          detail: {
+            ...emptyDetail({ handlerKey: "system.hello", config: {}, requiresHumanGate: true }),
+            changes: [base, { ...base, reason: "Portal still shows NTP approved" }],
+          } as unknown as Prisma.InputJsonValue,
+        },
+      })
+    ).id;
+
+    expect(await actions.resolveAgentRunAction({ runId, resolution: "applied", note: "Approved on the phone" })).toEqual({ ok: true, failed: 1 });
+
+    const run = await db.agentRun.findUniqueOrThrow({ where: { id: runId } });
+    const changes = readDetail(run.detail).resolution?.changes ?? [];
+    expect(changes.map((c) => c.outcome)).toEqual(["applied", "discarded"]);
+    expect(changes[1].note).toBe("Not applied: This deal has moved since the agent looked at it; nothing was changed.");
+    // The list shows the resolution and this note, never the changes: without
+    // the count it would read as a clean apply.
+    expect(run.resolutionNote).toBe("Approved on the phone — Applied 1 of 2 changes.");
+    expect((await db.lead.findUniqueOrThrow({ where: { id: leadId } })).stageId).toBe(stage.main);
   });
 });
