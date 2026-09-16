@@ -448,6 +448,128 @@ describe("every financial write is audited", () => {
   });
 });
 
+describe("a line may only tag THIS company's job and vendor", () => {
+  /**
+   * The id on a line comes from the caller. Before this check it was written
+   * straight through, so a bookkeeper at one company could cost a line to
+   * another company's job — and the entry would balance, post, and look
+   * entirely ordinary while the cost landed on a deal its owner cannot see.
+   */
+  async function foreignCompany() {
+    const other = await db.company.create({
+      data: { name: "Other Co", slug: `other-${process.pid}-${Date.now()}`, overheadPct: 0, paFeePct: 0 },
+    });
+    const pipeline = await db.pipeline.create({
+      data: { companyId: other.id, name: "Solar", vertical: "solar" },
+    });
+    const stage = await db.pipelineStage.create({
+      data: { pipelineId: pipeline.id, key: "m1", name: "M1", position: 10 },
+    });
+    const lead = await db.lead.create({
+      data: {
+        companyId: other.id, vertical: "solar", pipelineId: pipeline.id,
+        stageId: stage.id, firstName: "Not", lastName: "Ours",
+      },
+    });
+    const project = await db.project.create({
+      data: { companyId: other.id, vertical: "solar", leadId: lead.id, projectNumber: `OTH-${Date.now()}` },
+    });
+    const vendor = await db.bookkeepingVendor.create({
+      data: { companyId: other.id, name: "Their Supplier" },
+    });
+    return { projectId: project.id, vendorId: vendor.id };
+  }
+
+  it("refuses a job belonging to another company, and writes nothing", async () => {
+    const foreign = await foreignCompany();
+
+    const res = await postJournalEntry({
+      companyId, date: DAY, memo: "Costed to someone else's job",
+      sourceType: "manual", sourceId: null, actor: owner(),
+      lines: [
+        { accountId: materialsId, debitCents: 50_000, projectId: foreign.projectId },
+        { accountId: bankId, creditCents: 50_000 },
+      ],
+    });
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error).toMatch(/not on this company's books/i);
+      // The id is not echoed — the error must not confirm that a row exists
+      // somewhere else.
+      expect(res.error).not.toContain(foreign.projectId);
+    }
+    expect(await db.journalEntry.count({ where: { companyId } })).toBe(0);
+    expect(await db.journalLine.count({ where: { companyId } })).toBe(0);
+  });
+
+  it("refuses a vendor belonging to another company", async () => {
+    const foreign = await foreignCompany();
+
+    const res = await postJournalEntry({
+      companyId, date: DAY, memo: "Paid someone else's supplier",
+      sourceType: "manual", sourceId: null, actor: owner(),
+      lines: [
+        { accountId: materialsId, debitCents: 25_000, vendorId: foreign.vendorId },
+        { accountId: bankId, creditCents: 25_000 },
+      ],
+    });
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toMatch(/vendor is not on this company's books/i);
+    expect(await db.journalEntry.count({ where: { companyId } })).toBe(0);
+  });
+
+  it("still posts a job and vendor that DO belong to this company", async () => {
+    const res = await postJournalEntry({
+      companyId, date: DAY, memo: "Our own job",
+      sourceType: "manual", sourceId: null, actor: owner(),
+      lines: [
+        { accountId: materialsId, debitCents: 30_000, projectId, vendorId },
+        { accountId: bankId, creditCents: 30_000 },
+      ],
+    });
+
+    // The guard must not have made the ordinary case impossible.
+    expect(res.ok).toBe(true);
+    const line = await db.journalLine.findFirst({
+      where: { companyId, accountId: materialsId },
+      select: { projectId: true, vendorId: true },
+    });
+    expect(line).toMatchObject({ projectId, vendorId });
+  });
+
+  it("allows a job from a DIFFERENT vertical than the one posting", async () => {
+    /**
+     * The check is company tenancy, not workspace. One cheque may pay a roofing
+     * sub and a solar sub, which is why the department tag sits on the line —
+     * so a vertical filter here would reject a valid entry depending on which
+     * workspace the poster happened to have open.
+     */
+    const roofingLead = await db.lead.create({
+      data: {
+        companyId, vertical: "roofing",
+        firstName: "Roof", lastName: "Job",
+      },
+    });
+    const roofingProject = await db.project.create({
+      data: { companyId, vertical: "roofing", leadId: roofingLead.id, projectNumber: `ROOF-${Date.now()}` },
+    });
+
+    const res = await postJournalEntry({
+      companyId, date: DAY, memo: "Both departments on one cheque",
+      sourceType: "manual", sourceId: null, actor: owner(),
+      lines: [
+        { accountId: materialsId, debitCents: 10_000, projectId: roofingProject.id, vertical: "roofing" },
+        { accountId: materialsId, debitCents: 10_000, projectId, vertical: "solar" },
+        { accountId: bankId, creditCents: 20_000 },
+      ],
+    });
+
+    expect(res.ok).toBe(true);
+  });
+});
+
 describe("the department tag sits on the LINE", () => {
   it("lets one entry carry both verticals", async () => {
     // A single cheque paying a roofing sub and a solar sub. An entry-level tag

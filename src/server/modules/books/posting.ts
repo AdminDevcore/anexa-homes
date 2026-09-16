@@ -4,6 +4,7 @@
 import { Prisma } from "@prisma/client";
 import type { Vertical, Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
+import { runUnscoped } from "@/server/vertical/context";
 
 /**
  * THE ONLY DOOR INTO THE LEDGER.
@@ -168,6 +169,65 @@ async function checkPeriodLock(
   return { ok: true, override: reason.trim() };
 }
 
+/**
+ * A line may tag a JOB and a VENDOR, and both ids come from the caller.
+ *
+ * Neither was checked until now. An id supplied by a browser was written
+ * straight onto `journal_lines`, so a bookkeeper at one company could tag a
+ * line to another company's job — and nothing about the resulting entry would
+ * look wrong. It balances, it posts, and the cost appears against a deal its
+ * owner cannot see. Accounts were already resolved against the company by
+ * `resolveAccounts`; this closes the same gap for the other two ids.
+ *
+ * ── UNSCOPED BY VERTICAL, DELIBERATELY ──────────────────────────────────────
+ * `Project` is a SCOPED model, so an ordinary read here would be filtered to
+ * the active workspace. That would reject a perfectly valid roofing job merely
+ * because the poster happened to be in the solar workspace — and one entry may
+ * legitimately carry lines for both departments (a single cheque paying a
+ * roofing sub and a solar sub), which is the entire reason the tag sits on the
+ * LINE rather than the entry. Payroll accrual posts across both.
+ *
+ * The property being enforced here is TENANCY — does this row belong to this
+ * company — and it is checked explicitly, not inherited from an ambient filter.
+ * Per-VIEWER scoping is a different question and belongs at the action
+ * (`projectAccessible`), where there is a user to ask about.
+ */
+async function resolveReferences(
+  companyId: string,
+  lines: JournalLineInput[]
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const projectIds = [...new Set(lines.map((l) => l.projectId).filter((v): v is string => !!v))];
+  const vendorIds = [...new Set(lines.map((l) => l.vendorId).filter((v): v is string => !!v))];
+  if (projectIds.length === 0 && vendorIds.length === 0) return { ok: true };
+
+  return runUnscoped(
+    "journal posting: confirm a line's job and vendor belong to this company",
+    async () => {
+      if (projectIds.length > 0) {
+        const found = await prisma.project.findMany({
+          where: { companyId, id: { in: projectIds } },
+          select: { id: true },
+        });
+        if (found.length !== projectIds.length) {
+          // The id is never echoed: whether a row exists elsewhere is not
+          // something this error should confirm.
+          return { ok: false as const, error: "That job is not on this company's books." };
+        }
+      }
+      if (vendorIds.length > 0) {
+        const found = await prisma.bookkeepingVendor.findMany({
+          where: { companyId, id: { in: vendorIds } },
+          select: { id: true },
+        });
+        if (found.length !== vendorIds.length) {
+          return { ok: false as const, error: "That vendor is not on this company's books." };
+        }
+      }
+      return { ok: true as const };
+    }
+  );
+}
+
 /** Validate the lines on their own terms, before any database work. */
 function validateLines(lines: JournalLineInput[]): { ok: true } | { ok: false; error: string } {
   if (lines.length < 2) return { ok: false, error: "An entry needs at least two lines." };
@@ -222,6 +282,9 @@ export async function postJournalEntry(input: PostEntryInput): Promise<PostResul
 
   const accounts = await resolveAccounts(companyId, input.lines);
   if (!accounts.ok) return accounts;
+
+  const references = await resolveReferences(companyId, input.lines);
+  if (!references.ok) return references;
 
   const lock = await checkPeriodLock(companyId, date, actor, input.lockOverrideReason);
   if (!lock.ok) return lock;
