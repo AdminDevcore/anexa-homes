@@ -63,16 +63,19 @@ const OVERRIDABLE = new Set<string>(OVERRIDABLE_FIELDS);
 
 /**
  * Fields that must NEVER be per-vertical. Asserted by a test: this is one legal
- * entity, so splitting the ledger credentials or the role matrix in two would
- * be a data-integrity bug, not a feature.
+ * entity, so splitting the role matrix or the isolation levers in two would be
+ * a data-integrity bug, not a feature.
+ *
+ * `bookkeepingProvider` and `bookkeepingApiKey` were here and are gone with the
+ * columns themselves — a fake connection picker that no sync ever read. The
+ * books stay shared for a better reason than a credential: one legal entity has
+ * one general ledger, which is what `isolateBooks` is the documented lever for.
  */
 export const SHARED_ONLY_FIELDS = [
   "businessHours",
   "currencyCode",
   "locale",
   "rolePermissions",
-  "bookkeepingProvider",
-  "bookkeepingApiKey",
   "isolateBooks",
   "isolateTeam",
 ] as const;

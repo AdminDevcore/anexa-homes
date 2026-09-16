@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Plus, Loader2, Trash2, Pencil, Plug, TrendingUp, TrendingDown, Scale, Download, BookOpen, Building2, CheckCircle2, Sparkles, Paperclip, Upload, FileText, Wallet } from "lucide-react";
+import { Plus, Loader2, Trash2, Pencil, TrendingUp, TrendingDown, Scale, Download, BookOpen, Building2, CheckCircle2, Sparkles, Paperclip, Upload, FileText, Wallet } from "lucide-react";
 import { TransactionsExport } from "@/components/portal/transactions-export";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -27,7 +27,6 @@ import {
   createVendorAction,
   updateVendorAction,
   deleteVendorAction,
-  setBookkeepingConnectionAction,
   uploadTransactionAttachmentAction,
   deleteTransactionAttachmentAction,
   finishReconciliationAction,
@@ -486,7 +485,6 @@ export function BookkeepingClient({
 function ManagePanel({ data, canEdit, onChanged }: { data: BookkeepingData; canEdit: boolean; onChanged: () => void }) {
   const [catDialog, setCatDialog] = React.useState<{ open: boolean; cat?: { id: string; name: string; type: string } }>({ open: false });
   const [vendorDialog, setVendorDialog] = React.useState<{ open: boolean; vendor?: BkVendor }>({ open: false });
-  const [connOpen, setConnOpen] = React.useState(false);
   const [busyId, setBusyId] = React.useState<string | null>(null);
 
   async function removeCat(id: string, name: string) {
@@ -583,30 +581,6 @@ function ManagePanel({ data, canEdit, onChanged }: { data: BookkeepingData; canE
           </div>
         </div>
 
-        {/* Bank & sync */}
-        <div className="rounded-xl border border-border bg-card p-5">
-          <div className="flex items-center gap-2">
-            <Plug className="size-4 text-gold" />
-            <h3 className="font-semibold">Bank &amp; QuickBooks</h3>
-          </div>
-          <div className="mt-3 flex items-center justify-between gap-3">
-            {data.connected ? (
-              <span className="inline-flex items-center gap-1.5 rounded-full border chip-good px-2.5 py-1 text-xs font-medium">
-                <CheckCircle2 className="size-3.5" /> Connected · {data.provider}
-              </span>
-            ) : (
-              <span className="text-sm text-muted-foreground">Not connected — transactions are entered manually.</span>
-            )}
-            {canEdit && (
-              <Button size="sm" variant="outline" onClick={() => setConnOpen(true)}>
-                <Plug className="size-4" /> {data.connected ? "Manage" : "Connect"}
-              </Button>
-            )}
-          </div>
-          <p className="mt-3 text-[11px] leading-snug text-muted-foreground">
-            Connect a bank or QuickBooks to auto-import transactions; they arrive uncategorized for you to file against this chart of accounts.
-          </p>
-        </div>
       </div>
 
       {catDialog.open && (
@@ -615,7 +589,6 @@ function ManagePanel({ data, canEdit, onChanged }: { data: BookkeepingData; canE
       {vendorDialog.open && (
         <VendorDialog vendor={vendorDialog.vendor} onClose={() => setVendorDialog({ open: false })} onDone={() => { setVendorDialog({ open: false }); onChanged(); }} />
       )}
-      {connOpen && <ConnectDialog provider={data.provider} onClose={() => setConnOpen(false)} onDone={() => { setConnOpen(false); onChanged(); }} />}
     </div>
   );
 }
@@ -1269,46 +1242,6 @@ function CategoryDialog({ category, onClose, onDone }: { category?: { id: string
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button onClick={save} disabled={busy}>{busy && <Loader2 className="size-4 animate-spin" />} {category ? "Save" : "Add"}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function ConnectDialog({ provider, onClose, onDone }: { provider: string | null; onClose: () => void; onDone: () => void }) {
-  const [busy, setBusy] = React.useState(false);
-  const [prov, setProv] = React.useState(provider ?? "quickbooks");
-  const [key, setKey] = React.useState("");
-  async function save() {
-    setBusy(true);
-    const res = await setBookkeepingConnectionAction({ provider: prov as never, apiKey: key });
-    setBusy(false);
-    if (!res.ok) return toast.error(res.error);
-    toast.success("Connection saved");
-    onDone();
-  }
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-md">
-        <DialogHeader><DialogTitle>Connect bank / QuickBooks</DialogTitle></DialogHeader>
-        <div className="space-y-3">
-          <Field label="Provider">
-            <select value={prov} onChange={(e) => setProv(e.target.value)} className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm">
-              <option value="quickbooks">QuickBooks</option>
-              <option value="plaid">Bank (Plaid)</option>
-              <option value="manual">Manual only</option>
-            </select>
-          </Field>
-          <Field label="API key">
-            <Input type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder="Paste your integration key" />
-          </Field>
-          <p className="text-[11px] leading-snug text-muted-foreground">
-            The key is stored securely for the connector. Live transaction sync runs through the provider once the integration is enabled.
-          </p>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={save} disabled={busy}>{busy && <Loader2 className="size-4 animate-spin" />} Save</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

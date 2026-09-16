@@ -293,20 +293,19 @@ export async function deleteCategoryAction(id: string) {
   return { ok: true as const };
 }
 
-const connSchema = z.object({ provider: z.enum(["quickbooks", "plaid", "manual"]), apiKey: z.string().max(400).optional().or(z.literal("")) });
-/** Save the bank/QuickBooks connection key. Live sync is handled by the connector. */
-export async function setBookkeepingConnectionAction(input: z.infer<typeof connSchema>) {
-  const { user, denied } = await gate("update");
-  if (denied) return denied;
-  const parsed = connSchema.safeParse(input);
-  if (!parsed.success) return fail("Invalid connection.");
-  await prisma.companySettings.update({
-    where: { companyId: user!.companyId },
-    data: { bookkeepingProvider: parsed.data.provider, bookkeepingApiKey: parsed.data.apiKey || null },
-  });
-  revalidatePath("/portal/bookkeeping");
-  return { ok: true as const };
-}
+// The "Connect bank / QuickBooks" action is GONE, along with the dialog that
+// called it and the two CompanySettings columns it wrote.
+//
+// It was a picker between "quickbooks", "plaid" and "manual" plus a key field,
+// and nothing in the codebase ever read either value to do anything: no sync
+// ran, no request was signed, no transaction was ever fetched. What it did do
+// was tell an owner "Connected · plaid" on the bookkeeping page, which is worse
+// than an empty screen — it is a screen that says the books are being fed when
+// they are not.
+//
+// Real bank feeds arrive in Phase 2 behind `src/server/modules/bank-feeds/`,
+// with the access token encrypted under a versioned key and a BankConnection
+// row whose status reflects an actual connection.
 
 // ---- Transaction attachments (receipts / invoices) -------------------------
 
