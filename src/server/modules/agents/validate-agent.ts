@@ -21,6 +21,14 @@ export type ValidAgent = {
 const fail = (error: string) => ({ ok: false as const, error });
 
 /**
+ * A config this large has no business being handler settings — real ones are
+ * a handful of fields and secret references. The cap also keeps `findSecretValues`'s
+ * recursive walk, below, off huge flat inputs it would otherwise spend real
+ * time walking for no reason.
+ */
+const MAX_CONFIG_CHARS = 30_000;
+
+/**
  * Everything saving an agent must refuse, before any write: a handler this
  * build does not contain, a schedule the tick cannot keep, a timeout outside
  * the tick budget, config that is not an object, config holding a secret, and
@@ -62,16 +70,31 @@ export function validateAgentInput(
     return fail(`Timeout must be a whole number of seconds from ${MIN_TIMEOUT_SECONDS} to ${MAX_TIMEOUT_SECONDS}.`);
   }
 
+  const rawConfig = input.config.trim();
+  if (rawConfig.length > MAX_CONFIG_CHARS) {
+    return fail("Keep config under 30,000 characters.");
+  }
+
   let config: unknown;
   try {
-    config = JSON.parse(input.config.trim() || "{}");
+    config = JSON.parse(rawConfig || "{}");
   } catch {
     return fail("Config is not valid JSON.");
   }
   if (config === null || typeof config !== "object" || Array.isArray(config)) {
     return fail("Config must be a JSON object, like {}.");
   }
-  const secret = findSecretValues(config);
+
+  let secret: string | null;
+  try {
+    secret = findSecretValues(config);
+  } catch {
+    // findSecretValues walks config recursively. The size cap above stops
+    // most runaway inputs before they get here; this catches the rest — a
+    // config that is deep rather than long, which overflows the call stack
+    // with a raw RangeError instead of ever returning a string or null.
+    return fail("Config is nested too deeply to check. Simplify its structure.");
+  }
   if (secret) return fail(secret);
   if (handler) {
     const parsed = handler.parseConfig(config);

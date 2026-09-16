@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { NEW_AGENT_VALUES, type AgentFormValues } from "@/lib/agent-labels";
+import { findSecretValues } from "../config-guard";
 import { validateAgentInput } from "../validate-agent";
 
 const hello = (over: Partial<AgentFormValues> = {}): AgentFormValues => ({ ...NEW_AGENT_VALUES, name: "Hello Agent", ...over });
@@ -40,6 +41,7 @@ describe("validateAgentInput", () => {
     [{ config: "[]" }, /JSON object/],
     [{ config: '{"portalPassword":"hunter2"}' }, /config\.portalPassword looks like a secret/],
     [{ config: '{"greeting":"hi"}' }, /takes no settings/],
+    [{ department: "engineering" as never }, /department/],
   ])("refuses %o", (over, message) => {
     const r = validateAgentInput(hello(over));
     expect(r.ok).toBe(false);
@@ -50,5 +52,34 @@ describe("validateAgentInput", () => {
     const kept = { keepHandlerKey: "bank.ntp_poll" };
     expect(validateAgentInput(hello({ handlerKey: "bank.ntp_poll", config: '{"stages":["x"]}' }), kept).ok).toBe(true);
     expect(validateAgentInput(hello({ handlerKey: "bank.ntp_poll", config: '{"password":"x"}' }), kept).ok).toBe(false);
+  });
+
+  it("accepts a timeout of exactly 5 or exactly 240 — both ends of the range", () => {
+    expect(validateAgentInput(hello({ timeoutSeconds: "5" })).ok).toBe(true);
+    expect(validateAgentInput(hello({ timeoutSeconds: "240" })).ok).toBe(true);
+  });
+
+  it("refuses a config whose serialised size is far past the cap, cleanly rather than by luck", () => {
+    const huge = `{"blob":"${"x".repeat(200_000)}"}`;
+    const r = validateAgentInput(hello({ config: huge }));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/30,000 characters/);
+  });
+
+  it("shows the trap: the config-guard walk really does overflow the stack on a config nested thousands of levels deep", () => {
+    let deep: unknown = 1;
+    for (let i = 0; i < 12_000; i++) deep = [deep];
+    expect(() => findSecretValues(deep)).toThrow(RangeError);
+  });
+
+  it("refuses a config nested past the depth cap, without ever throwing out of validateAgentInput", () => {
+    const depth = 12_000;
+    const nested = `{"data":${"[".repeat(depth)}1${"]".repeat(depth)}}`;
+    let r: ReturnType<typeof validateAgentInput> | undefined;
+    expect(() => {
+      r = validateAgentInput(hello({ config: nested }));
+    }).not.toThrow();
+    expect(r?.ok).toBe(false);
+    if (r && !r.ok) expect(r.error).toMatch(/nested too deeply/);
   });
 });

@@ -5,10 +5,8 @@ import type { AgentDepartment, AgentRunStatus, AgentRunTrigger, Vertical } from 
  * server module, no database, no handler code.
  */
 
-export const DEPARTMENTS = ["permit", "operations", "accounting", "sales_escalation"] as const satisfies readonly AgentDepartment[];
 export const PRODUCTS = ["both", "roofing", "solar"] as const;
 export type Product = (typeof PRODUCTS)[number];
-export const RUN_STATUSES = ["queued", "running", "success", "failed", "needs_human"] as const satisfies readonly AgentRunStatus[];
 
 export const DEPARTMENT_LABEL: Record<AgentDepartment, string> = {
   permit: "Permit",
@@ -16,6 +14,14 @@ export const DEPARTMENT_LABEL: Record<AgentDepartment, string> = {
   accounting: "Accounting",
   sales_escalation: "Sales escalation",
 };
+
+/**
+ * Derived from DEPARTMENT_LABEL's keys rather than hand-listed: a `Record`
+ * fails the build the moment a new AgentDepartment enum member ships without
+ * a label, so this array can never go stale the way a separate `as const`
+ * list (which `satisfies` only checks one way) could.
+ */
+export const DEPARTMENTS = Object.keys(DEPARTMENT_LABEL) as readonly AgentDepartment[];
 
 export const PRODUCT_LABEL: Record<Product, string> = { both: "Both", roofing: "Roofing", solar: "Solar" };
 
@@ -26,6 +32,9 @@ export const STATUS_LABEL: Record<AgentRunStatus, string> = {
   failed: "Failed",
   needs_human: "Needs a human",
 };
+
+/** Derived from STATUS_LABEL's keys, for the same reason as DEPARTMENTS. */
+export const RUN_STATUSES = Object.keys(STATUS_LABEL) as readonly AgentRunStatus[];
 
 /** The chip-* tone classes from globals.css. */
 export const STATUS_CHIP: Record<AgentRunStatus, string> = {
