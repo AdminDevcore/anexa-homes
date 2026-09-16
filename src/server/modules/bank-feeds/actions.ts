@@ -17,6 +17,7 @@ import {
   undoDecision,
   suggestTransferPairs,
 } from "./review";
+import { settleFromFeed } from "./settle";
 import { importStatement } from "./import";
 import type { PostingActor } from "@/server/modules/books/posting";
 
@@ -210,6 +211,44 @@ export async function matchFeedTransactionAction(input: {
     feedTransactionId: input.feedTransactionId,
     journalEntryId: input.journalEntryId,
     actor: actor!,
+  });
+  if (!res.ok) return res;
+  revalidate();
+  return res;
+}
+
+const settleSchema = z.object({
+  feedTransactionId: z.string().min(1),
+  target: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("invoice"), invoiceId: z.string().min(1) }),
+    z.object({ kind: z.literal("bill"), billId: z.string().min(1) }),
+    z.object({ kind: z.literal("funding"), fundingId: z.string().min(1) }),
+  ]),
+  memo: z.string().max(300).nullish(),
+});
+
+/**
+ * Settle an open item from a bank row: collect an invoice, pay a bill, or
+ * recognise a lender funding.
+ *
+ * Gated on `create` rather than `update` because it brings a journal entry into
+ * existence, exactly as accepting a row does. The id it takes names an invoice,
+ * bill or funding — each looked up filtered by `companyId` inside the module
+ * that owns it, so an id from another tenant resolves to nothing rather than
+ * being settled.
+ */
+export async function settleFromFeedAction(input: z.infer<typeof settleSchema>) {
+  const { user, actor, denied } = await gate("create");
+  if (denied) return denied;
+  const parsed = settleSchema.safeParse(input);
+  if (!parsed.success) return fail("Choose what this transaction settles.");
+
+  const res = await settleFromFeed({
+    companyId: user!.companyId,
+    feedTransactionId: parsed.data.feedTransactionId,
+    target: parsed.data.target,
+    actor: actor!,
+    memo: parsed.data.memo ?? null,
   });
   if (!res.ok) return res;
   revalidate();

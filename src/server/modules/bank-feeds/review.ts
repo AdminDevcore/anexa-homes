@@ -74,7 +74,10 @@ type Decidable =
       defaultVertical: Vertical | null;
     };
 
-async function loadDecidable(companyId: string, feedTransactionId: string): Promise<Decidable> {
+export async function loadDecidable(
+  companyId: string,
+  feedTransactionId: string
+): Promise<Decidable> {
   const row = await prisma.bankFeedTransaction.findFirst({
     where: { id: feedTransactionId, companyId },
     select: {
