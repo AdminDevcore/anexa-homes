@@ -4633,6 +4633,13 @@ model SolarFinance {
   lenderProductId String?
   lenderProduct   SolarLenderProduct? @relation(fields: [lenderProductId], references: [id], onDelete: SetNull)
 
+  /// The ways to pay the rep ticked on the Financing step: "cash" and/or
+  /// rate-sheet row ids. The proposal's payment menu is built from exactly
+  /// these, beside the quoted option. Plain ids, not a relation: a retired row
+  /// simply stops being offered, and the documents already generated froze
+  /// their menus.
+  shortlistIds String[] @default([])
+
   // ── Cash / Loan ─────────────────────────────────────────────────────────
   /// Sticker price per watt, cents. Includes the dealer fee on a LOAN.
   grossPpwCents               Int   @default(0)

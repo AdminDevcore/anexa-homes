@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { LenderMark } from "@/components/ui/lender-mark";
 import { lenderProductLabel } from "@/lib/solar-lender-product";
 import { PRODUCT_LABEL } from "@/lib/solar-lender-product";
+import { MAX_PAYMENT_OPTIONS } from "@/lib/solar-proposal-options";
 import {
   basisGaps,
   CASH_OFFER_ID,
@@ -66,7 +67,8 @@ export type OfferLender = {
 /**
  * One programme on the shelf.
  *
- * Clicking the body shortlists it; that is the "check". Which one the deal is
+ * Clicking the body shortlists it; that is the "check", and a checked card is
+ * offered on the customer's proposal. Which one the deal is
  * actually QUOTED on is decided in the comparison below, deliberately — a card
  * that both shortlists and commits on one click is a card a rep re-prices a
  * deal with by accident.
@@ -699,6 +701,9 @@ export function FinanceOffers({
     .map((id) => priced.get(id))
     .filter((r): r is CompareRow => r != null);
 
+  // The proposal's menu stops at the cap; say so rather than drop a tick silently.
+  const offeredBesideQuote = shortlist.filter((id) => id !== quotedId).length;
+
   /**
    * Nothing on this shelf can be priced, and it is the DEAL that is missing.
    *
@@ -815,8 +820,8 @@ export function FinanceOffers({
             Ways to pay
           </h4>
           <p className="text-[11px] text-muted-foreground">
-            Tick any two to compare them. Cash pays the base price; each lender adds its own dealer
-            fee.
+            Ticked cards are compared below and offered on the proposal beside the quote. Cash pays
+            the base price; each lender adds its own dealer fee.
           </p>
         </header>
 
@@ -829,6 +834,13 @@ export function FinanceOffers({
           <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(15rem,1fr))]">
             {shelf.map((c) => cardFor(c))}
           </div>
+
+          {offeredBesideQuote > MAX_PAYMENT_OPTIONS - 1 && (
+            <p className="text-[11px] text-muted-foreground">
+              The proposal has room for the quote and {MAX_PAYMENT_OPTIONS - 1} more: cash first, then
+              lenders in their ranked order.
+            </p>
+          )}
 
           {lenders.length === 0 && (
             <p className="rounded-lg border border-amber-300/70 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">

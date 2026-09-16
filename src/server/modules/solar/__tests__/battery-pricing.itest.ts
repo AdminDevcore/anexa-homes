@@ -206,6 +206,8 @@ beforeAll(async () => {
       contractPriceCents: ARRAY_CENTS,
       aprPct: 0,
       loanTermMonths: 360,
+      // Cash ticked, so the menu has a column without a fee to compare against.
+      shortlistIds: ["cash"],
     },
   });
 });
