@@ -59,3 +59,7 @@ next-env.d.ts
 /.backups
 
 .superpowers/
+
+# The env TEMPLATE is placeholders only and must be committed: cron.ts refers
+# operators to it, and `.env*` above had been quietly making that impossible.
+!.env.example
