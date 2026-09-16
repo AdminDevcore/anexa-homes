@@ -1540,3 +1540,69 @@ spread.
 **Flagged for a later pass, not fixed here:** `grossPpwCents` still means
 pre-fee in `solar-money.ts` and the fee-inclusive sticker on `CompareRow`; and
 `financedOnTopFor` keeps a retired word in a function name.
+
+## 8.23 Stage 3 — `priceDeal()`, both credit states, connected to nothing
+
+One function, two readings of the same deal (§8.1). `src/lib/solar-price-deal.ts`.
+
+**Connected to nothing, verified rather than asserted:** `git grep` finds no
+importer of the module anywhere in `src/`, tests included. Stage 4 points the
+25 price sites (§8.5) at it; that is a separate, approved step.
+
+**The ladder is credit-independent and lives above both states.** Base, adders,
+equipment charges, gross, dealer fee and final are computed once; only the
+credit amount, net final, net gross, lender amount and revenue differ between
+states. That is what makes **"credits never move commission"** structural: there
+is no per-state base for a commission to read by accident. Pinned by a test that
+prices one deal with every credit claimed and with none and compares the
+redline basis.
+
+**Verified against §8.1, to the cent**, for a 10 kW deal quoted at $4.00/W:
+
+| | credits applied | credits not applied |
+|---|---|---|
+| final | $40,000 | $40,000 |
+| credit amount (30+10+10%) | $20,000 | $0 |
+| net final (signed, funded, paid on) | $20,000 | $40,000 |
+| net gross, at a 25% fee | $15,000 | $30,000 |
+| revenue, at a 50% payout | $25,000 | $30,000 |
+
+**D9 is proved two ways, not asserted once.** `creditDollarMarginPct` is
+compared against the revenue difference between the two states divided by the
+credit amount, so the flag and the arithmetic check each other:
+
+- 25% fee at a 50% payout — **loses** 25¢ per credit dollar
+- 18% fee — **loses** 32¢ (the owner's own figure)
+- 65% fee — **gains** 15¢
+
+**The naming rule is enforced by a test.** No field on a priced deal, in either
+state, carries the word "contract". `PurchaseBreakdown.contractPriceCents` still
+does and is MAPPED — not spread — at the boundary. Stage 2 established what a
+spread across a vocabulary boundary costs; this module does not repeat it.
+
+**Two deliberate deviations from §8.8's vocabulary, both forced:**
+
+1. §8.8 lists `basePriceCents` for the fee-removed base. That name lost its
+   argument during Stage 2: the owner ruled it out because the proposal snapshot
+   already uses it for the STICKER. The later ruling wins — the field is
+   `baseKeptCents` (§8.21).
+2. D9 makes `monetizerPayoutRate` a column with per-programme and per-deal
+   overrides. That is schema work and belongs to the model flip in **Stage 5,
+   which is not started**. So it is an ordinary input here, and
+   `revenueCents`/`losesMoneyOnCreditDollars` return **null** when it is absent
+   — "we cannot tell" is not "it is fine".
+
+**Also handled:** the sign-today credit is not a federal credit, so it reduces
+the net final in BOTH states and sits inside the lender amount (D2); it is
+clamped to what is left, so a rep typing $999,999 never produces a negative
+bottom line. A storage-only deal climbs the same ladder over batteries and
+reports every per-watt rate as zero rather than a $/W derived from a battery
+count. A lease or PPA has no system price and therefore no credit to apply, but
+still carries its real installed watts so a per-watt rule can pay on it.
+
+**Results.** `tsc` 0. 21 new tests, all passing. Unit suite 168 files / 2,527
+passing, 0 failing. Lint clean.
+
+**STOPPED HERE.** Stage 4 (rewire the 25 sites) and Stage 5 (the model flip: D1,
+D2, D3, D6, D9) are NOT started — credit ownership is with counsel and Stage 5
+depends on that answer.
