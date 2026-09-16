@@ -41,14 +41,26 @@ export function NeedsHumanCard({ run, canResolve }: { run: RunListView; canResol
   const [opened, setOpened] = React.useState<Opened | null>(null);
   const detailId = `needs-human-detail-${run.id}`;
 
+  /**
+   * Which read owns this card. Resolving re-reads, so a resolve landing on top
+   * of a slow open leaves two reads in the air, and without a token the SLOWER
+   * one writes last — an error over a good answer, or the pre-resolve run over
+   * the resolved one. Only the newest read may set state.
+   */
+  const token = React.useRef(0);
+
   const load = React.useCallback(async () => {
+    token.current += 1;
+    const mine = token.current;
     setOpened({ state: "loading" });
     try {
       const res = await readAgentRunAction(run.id);
+      if (token.current !== mine) return;
       setOpened(res.ok ? { state: "ready", run: res.run } : { state: "error", message: res.error });
     } catch {
       // Every path out of here reaches a terminal state. A throw that left the
       // card on "loading" for ever would look exactly like a slow server.
+      if (token.current !== mine) return;
       setOpened({ state: "error", message: "Could not read this run. Try again." });
     }
   }, [run.id]);
@@ -118,12 +130,21 @@ export function NeedsHumanCard({ run, canResolve }: { run: RunListView; canResol
                 <p className="text-xs text-muted-foreground">This run is holding no changes — it stopped to be looked at.</p>
               )}
               {full.error && <p className="text-xs text-muted-foreground">{full.error}</p>}
-              {canResolve ? (
-                <ResolveRun runId={run.id} heldCount={held.length} onResolved={() => void load()} />
-              ) : (
-                <p className="text-xs text-muted-foreground">An owner, an admin or someone with Agents access resolves this run.</p>
-              )}
             </>
+          )}
+
+          {/* Outside the `full` gate on purpose, and it matters more here than
+              anywhere: this queue exists to answer runs, so a read that fails
+              must not leave the card with nothing to press. Close is safe with
+              nothing read — the server re-reads the run itself — while Apply
+              stays visible and disabled until the changes it would apply are on
+              screen. The disclosure above it stays: drawing every card's
+              changes up front is the hundred-round-trip page this split
+              removed. */}
+          {canResolve ? (
+            <ResolveRun runId={run.id} heldCount={full ? held.length : null} onResolved={() => void load()} />
+          ) : (
+            <p className="text-xs text-muted-foreground">An owner, an admin or someone with Agents access resolves this run.</p>
           )}
         </div>
       )}

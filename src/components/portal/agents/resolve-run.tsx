@@ -25,14 +25,24 @@ import { resolveAgentRunAction } from "@/server/modules/agents/actions";
  * pressing it, and runs that stage's automations — so it asks first. Close
  * needs a sentence saying why, because that sentence is the only record of
  * the decision.
+ *
+ * `heldCount` is null while the run's changes have NOT been read, which is not
+ * the same fact as a run holding nothing. Callers render this control either
+ * way, because a transient read failure must not hide the one button that
+ * answers the run: Close works with nothing read — the server re-reads the run
+ * itself and requires it to still be waiting — while Apply stays visible and
+ * disabled, because nobody should apply changes they have not been shown.
  */
-export function ResolveRun({ runId, heldCount, onResolved }: { runId: string; heldCount: number; onResolved?: () => void }) {
+export function ResolveRun({ runId, heldCount, onResolved }: { runId: string; heldCount: number | null; onResolved?: () => void }) {
   const router = useRouter();
   const noteId = React.useId();
   const [confirmApply, setConfirmApply] = React.useState(false);
   const [closing, setClosing] = React.useState(false);
   const [note, setNote] = React.useState("");
   const [busy, setBusy] = React.useState(false);
+  // Only ever read where the count is already known: Apply is unreachable until
+  // it is, so neither the confirmation nor the toast can quote an unread run.
+  const count = heldCount ?? 0;
 
   async function resolve(resolution: "applied" | "closed") {
     setBusy(true);
@@ -44,7 +54,7 @@ export function ResolveRun({ runId, heldCount, onResolved }: { runId: string; he
       }
       if (resolution === "closed") toast.success("Closed without applying");
       else if (res.failed > 0) toast.warning(`Applied, but ${res.failed} of the changes could not be. The run says why.`);
-      else toast.success(heldCount === 1 ? "Change applied" : "Changes applied");
+      else toast.success(count === 1 ? "Change applied" : "Changes applied");
       setConfirmApply(false);
       setClosing(false);
       setNote("");
@@ -63,9 +73,9 @@ export function ResolveRun({ runId, heldCount, onResolved }: { runId: string; he
 
   return (
     <div data-testid="resolve-run" className="flex flex-wrap gap-2">
-      {heldCount > 0 && (
-        <Button size="sm" onClick={() => setConfirmApply(true)} disabled={busy}>
-          <Check className="size-4" /> {heldCount === 1 ? "Apply change" : `Apply ${heldCount} changes`}
+      {heldCount !== 0 && (
+        <Button size="sm" onClick={() => setConfirmApply(true)} disabled={busy || heldCount === null}>
+          <Check className="size-4" /> {heldCount === null ? "Apply changes" : heldCount === 1 ? "Apply change" : `Apply ${heldCount} changes`}
         </Button>
       )}
       <Button size="sm" variant="outline" onClick={() => setClosing(true)} disabled={busy}>
@@ -75,7 +85,7 @@ export function ResolveRun({ runId, heldCount, onResolved }: { runId: string; he
       <AlertDialog open={confirmApply} onOpenChange={(open) => !busy && setConfirmApply(open)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{heldCount === 1 ? "Apply this change?" : `Apply ${heldCount} changes?`}</AlertDialogTitle>
+            <AlertDialogTitle>{count === 1 ? "Apply this change?" : `Apply ${count} changes?`}</AlertDialogTitle>
             <AlertDialogDescription>
               The deal moves now, recorded as you, and that stage&apos;s automations run. If the deal has moved since the
               agent looked, nothing is applied.

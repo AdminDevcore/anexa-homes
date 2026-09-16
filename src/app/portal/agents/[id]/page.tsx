@@ -24,7 +24,7 @@ export const metadata = { title: "Agent" };
 // page's server actions, so they get the same 300 s the cron tick has.
 export const maxDuration = 300;
 
-/** `Agent.id` is a Postgres uuid: a malformed one throws out of Prisma rather than missing. */
+/** Every Agent.id is a generated uuid, so anything else is a 404 without a database round trip — the same guard the actions apply. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function Chip({ children, className }: { children: React.ReactNode; className?: string }) {

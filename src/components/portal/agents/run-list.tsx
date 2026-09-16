@@ -21,6 +21,11 @@ import { RunStatusPill } from "./run-status-pill";
  * row fetches that ONE run. Everything the collapsed row shows — status,
  * summary, who triggered it, how long it took — is already in the list read, so
  * nothing about the list waits on a fetch.
+ *
+ * Each row is its own component because each row owns a fetch, and a fetch
+ * needs hooks: its own state, a request token, and the effect that re-reads a
+ * run which finishes while someone is watching it. The same shape as
+ * NeedsHumanCard, for the same reason.
  */
 
 /** Start to finish. The handler's own figure lives in `detail`, which a list does not read. */
@@ -64,6 +69,197 @@ const PRE = "max-h-72 overflow-auto rounded-lg border border-border bg-backgroun
 /** What one expanded row knows about its own run. */
 type Opened = { state: "loading" } | { state: "ready"; run: RunView } | { state: "error"; message: string };
 
+function RunRow({ run, canResolve, showAgent }: { run: RunListView; canResolve: boolean; showAgent: boolean }) {
+  const [open, setOpen] = React.useState(false);
+  const [opened, setOpened] = React.useState<Opened | null>(null);
+  const detailId = `agent-run-detail-${run.id}`;
+
+  /**
+   * Which read owns this row. Two can be in the air at once — a run finishing
+   * while its panel is open, or a resolve landing on top of a slow read — and
+   * without a token the SLOWER one writes last: an error over a good answer, or
+   * a stale panel over a fresh one. Only the newest read may set state.
+   */
+  const token = React.useRef(0);
+
+  const load = React.useCallback(async () => {
+    token.current += 1;
+    const mine = token.current;
+    setOpened({ state: "loading" });
+    try {
+      const res = await readAgentRunAction(run.id);
+      if (token.current !== mine) return;
+      setOpened(res.ok ? { state: "ready", run: res.run } : { state: "error", message: res.error });
+    } catch {
+      // Every path out of here reaches a terminal state. A throw that left a
+      // row on "loading" for ever would look exactly like a slow server.
+      if (token.current !== mine) return;
+      setOpened({ state: "error", message: "Could not read this run. Try again." });
+    }
+  }, [run.id]);
+
+  /**
+   * Read while the row is open, and read AGAIN whenever the run's own terminal
+   * facts change. Without the second half, the page's headline workflow ends in
+   * a lie: press Run now, open the queued row to watch it, and when it finishes
+   * AutoRefresh re-renders the server tree so the collapsed row's pill, summary
+   * and finished time all update from the list read — while the panel below
+   * them, fetched once when the run was still queued, stays empty for ever with
+   * no spinner and no error. `status` and `finishedAt` are already on the list
+   * row, so noticing the transition costs no read of its own, and a running row
+   * re-reads once per transition rather than on every three-second poll.
+   *
+   * The ref is what keeps that true: a settled row is left alone, and closing
+   * it clears the ref so reopening is a fresh read.
+   */
+  const terminal = `${run.status}|${run.finishedAt ?? ""}`;
+  const readFor = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (!open) {
+      readFor.current = null;
+      return;
+    }
+    if (readFor.current === terminal) return;
+    readFor.current = terminal;
+    void load();
+  }, [open, terminal, load]);
+
+  const full = opened?.state === "ready" ? opened.run : null;
+  const held = full ? full.detail.changes.filter((c) => c.outcome === "held").length : 0;
+  const facts = [
+    showAgent ? run.agentName : null,
+    PRODUCT_LABEL[productOf(run.vertical)],
+    TRIGGER_LABEL[run.trigger],
+    run.resolution ? (run.resolution.how === "applied" ? "Applied" : "Closed") : null,
+  ].filter(Boolean);
+
+  return (
+    <li data-testid="agent-run" data-status={run.status}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-controls={detailId}
+        className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/40"
+      >
+        {open ? (
+          <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+        )}
+        <RunStatusPill status={run.status} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium">{headline(run)}</span>
+          <span className="block truncate text-xs text-muted-foreground">{facts.join(" · ")}</span>
+        </span>
+        <span className="shrink-0 text-right text-xs text-muted-foreground">
+          <LocalTime iso={run.createdAt} />
+          <span className="block tabular-nums">{formatRunDuration(listDuration(run))}</span>
+        </span>
+      </button>
+
+      {open && (
+        <div id={detailId} data-testid="agent-run-detail" className="space-y-4 border-t border-border bg-muted/20 px-4 py-4 text-sm">
+          {/* Everything here is off the LIST row, so it is on screen the
+              instant the row opens rather than after a round trip. */}
+          <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-4">
+            <Fact label="Agent">
+              <Link href={`/portal/agents/${run.agentId}`} className="hover:underline">
+                {run.agentName}
+              </Link>
+            </Fact>
+            <Fact label="Trigger">
+              {run.triggeredBy ? `${TRIGGER_LABEL[run.trigger]} by ${run.triggeredBy}` : TRIGGER_LABEL[run.trigger]}
+            </Fact>
+            <Fact label="Started">{run.startedAt ? <LocalTime iso={run.startedAt} mode="absolute" /> : "Not started"}</Fact>
+            <Fact label="Finished">{run.finishedAt ? <LocalTime iso={run.finishedAt} mode="absolute" /> : "—"}</Fact>
+            <Fact label="Duration">{formatRunDuration(full ? openDuration(full) : listDuration(run))}</Fact>
+            <Fact label="Workspace">{PRODUCT_LABEL[productOf(run.vertical)]}</Fact>
+            {full && <Fact label="Human gate">{full.detail.gated ? "On" : "Off"}</Fact>}
+            {run.leadId && run.leadLabel && (
+              <Fact label="Deal">
+                <Link href={`/portal/leads/${run.leadId}`} className="hover:underline">
+                  {run.leadLabel}
+                </Link>
+              </Fact>
+            )}
+          </dl>
+
+          {opened?.state === "loading" && (
+            <p className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" /> Reading this run…
+            </p>
+          )}
+          {opened?.state === "error" && (
+            <p className="text-xs text-destructive">{`${opened.message} Close and open this run to try again.`}</p>
+          )}
+
+          {full && (
+            <>
+              {full.detail.changes.length > 0 && (
+                <Section title="Requested changes">
+                  <ChangeList changes={full.detail.changes} />
+                </Section>
+              )}
+              {full.error && (
+                <Section title="Error">
+                  <pre className={`${PRE} whitespace-pre-wrap text-destructive`}>{full.error}</pre>
+                </Section>
+              )}
+              {full.detail.log.length > 0 && (
+                <Section title="Log">
+                  <pre className={PRE}>{full.detail.log.join("\n")}</pre>
+                </Section>
+              )}
+              {full.detail.handler && (
+                <Section title="Handler detail">
+                  <pre className={PRE}>{JSON.stringify(full.detail.handler, null, 2)}</pre>
+                </Section>
+              )}
+              {full.detail.lateResult != null && (
+                <Section title="Late result">
+                  <p className="mb-1.5 text-xs text-muted-foreground">
+                    The handler answered after this run had been closed. Nothing in it was applied.
+                  </p>
+                  <pre className={PRE}>{JSON.stringify(full.detail.lateResult, null, 2)}</pre>
+                </Section>
+              )}
+            </>
+          )}
+
+          {/* Who resolved it and when are on the LIST row, so a failed read must
+              not hide them. Only the changes the resolve applied need `full`. */}
+          {run.resolution && (
+            <Section title="Resolution">
+              <p>
+                {`${run.resolution.how === "applied" ? "Applied" : "Closed without applying"} by ${run.resolution.by ?? "a former user"}, `}
+                <LocalTime iso={run.resolution.at} mode="absolute" />
+              </p>
+              {run.resolution.note && <p className="mt-1 text-muted-foreground">{run.resolution.note}</p>}
+              {full?.detail.resolution && full.detail.resolution.changes.length > 0 && (
+                <div className="mt-2">
+                  <ChangeList changes={full.detail.resolution.changes} />
+                </div>
+              )}
+            </Section>
+          )}
+
+          {/* Outside the `full` gate on purpose. This is the one control that
+              moves a real deal, and a transient read failure used to leave the
+              row offering no way to answer the run at all. Close is safe with
+              nothing read — the server re-reads the run itself — so it works
+              now; Apply waits for the changes, because nobody should apply
+              changes they have not been shown, and says so by staying visible
+              and disabled rather than by vanishing. */}
+          {!run.resolution && run.status === "needs_human" && canResolve && (
+            <ResolveRun runId={run.id} heldCount={full ? held : null} onResolved={() => void load()} />
+          )}
+        </div>
+      )}
+    </li>
+  );
+}
+
 export function RunList({
   runs,
   canResolve,
@@ -75,168 +271,15 @@ export function RunList({
   showAgent?: boolean;
   emptyText: string;
 }) {
-  const [open, setOpen] = React.useState<Set<string>>(() => new Set());
-  const [opened, setOpened] = React.useState<Record<string, Opened>>({});
-
-  const load = React.useCallback(async (id: string) => {
-    setOpened((m) => ({ ...m, [id]: { state: "loading" } }));
-    try {
-      const res = await readAgentRunAction(id);
-      setOpened((m) => ({ ...m, [id]: res.ok ? { state: "ready", run: res.run } : { state: "error", message: res.error } }));
-    } catch {
-      // Every path out of here reaches a terminal state. A throw that left a
-      // row on "loading" for ever would look exactly like a slow server.
-      setOpened((m) => ({ ...m, [id]: { state: "error", message: "Could not read this run. Try again." } }));
-    }
-  }, []);
-
-  function toggle(id: string) {
-    setOpen((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-    // Re-read a row that is being opened and is not already in hand. A row that
-    // failed last time is retried, which makes the error state recoverable
-    // without a reload.
-    if (!open.has(id) && opened[id]?.state !== "ready") void load(id);
-  }
-
   if (runs.length === 0) {
     return <p className="rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">{emptyText}</p>;
   }
 
   return (
     <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
-      {runs.map((run) => {
-        const expanded = open.has(run.id);
-        const detailId = `agent-run-detail-${run.id}`;
-        const here = opened[run.id];
-        const full = here?.state === "ready" ? here.run : null;
-        const held = full ? full.detail.changes.filter((c) => c.outcome === "held").length : 0;
-        const facts = [
-          showAgent ? run.agentName : null,
-          PRODUCT_LABEL[productOf(run.vertical)],
-          TRIGGER_LABEL[run.trigger],
-          run.resolution ? (run.resolution.how === "applied" ? "Applied" : "Closed") : null,
-        ].filter(Boolean);
-
-        return (
-          <li key={run.id} data-testid="agent-run" data-status={run.status}>
-            <button
-              type="button"
-              onClick={() => toggle(run.id)}
-              aria-expanded={expanded}
-              aria-controls={detailId}
-              className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/40"
-            >
-              {expanded ? (
-                <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
-              ) : (
-                <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
-              )}
-              <RunStatusPill status={run.status} />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-medium">{headline(run)}</span>
-                <span className="block truncate text-xs text-muted-foreground">{facts.join(" · ")}</span>
-              </span>
-              <span className="shrink-0 text-right text-xs text-muted-foreground">
-                <LocalTime iso={run.createdAt} />
-                <span className="block tabular-nums">{formatRunDuration(listDuration(run))}</span>
-              </span>
-            </button>
-
-            {expanded && (
-              <div id={detailId} data-testid="agent-run-detail" className="space-y-4 border-t border-border bg-muted/20 px-4 py-4 text-sm">
-                {/* Everything here is off the LIST row, so it is on screen the
-                    instant the row opens rather than after a round trip. */}
-                <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-4">
-                  <Fact label="Agent">
-                    <Link href={`/portal/agents/${run.agentId}`} className="hover:underline">
-                      {run.agentName}
-                    </Link>
-                  </Fact>
-                  <Fact label="Trigger">
-                    {run.triggeredBy ? `${TRIGGER_LABEL[run.trigger]} by ${run.triggeredBy}` : TRIGGER_LABEL[run.trigger]}
-                  </Fact>
-                  <Fact label="Started">{run.startedAt ? <LocalTime iso={run.startedAt} mode="absolute" /> : "Not started"}</Fact>
-                  <Fact label="Finished">{run.finishedAt ? <LocalTime iso={run.finishedAt} mode="absolute" /> : "—"}</Fact>
-                  <Fact label="Duration">{formatRunDuration(full ? openDuration(full) : listDuration(run))}</Fact>
-                  <Fact label="Workspace">{PRODUCT_LABEL[productOf(run.vertical)]}</Fact>
-                  {full && <Fact label="Human gate">{full.detail.gated ? "On" : "Off"}</Fact>}
-                  {run.leadId && run.leadLabel && (
-                    <Fact label="Deal">
-                      <Link href={`/portal/leads/${run.leadId}`} className="hover:underline">
-                        {run.leadLabel}
-                      </Link>
-                    </Fact>
-                  )}
-                </dl>
-
-                {here?.state === "loading" && (
-                  <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Loader2 className="size-4 animate-spin" /> Reading this run…
-                  </p>
-                )}
-                {here?.state === "error" && (
-                  <p className="text-xs text-destructive">{`${here.message} Close and open this run to try again.`}</p>
-                )}
-
-                {full && (
-                  <>
-                    {full.detail.changes.length > 0 && (
-                      <Section title="Requested changes">
-                        <ChangeList changes={full.detail.changes} />
-                      </Section>
-                    )}
-                    {full.error && (
-                      <Section title="Error">
-                        <pre className={`${PRE} whitespace-pre-wrap text-destructive`}>{full.error}</pre>
-                      </Section>
-                    )}
-                    {full.detail.log.length > 0 && (
-                      <Section title="Log">
-                        <pre className={PRE}>{full.detail.log.join("\n")}</pre>
-                      </Section>
-                    )}
-                    {full.detail.handler && (
-                      <Section title="Handler detail">
-                        <pre className={PRE}>{JSON.stringify(full.detail.handler, null, 2)}</pre>
-                      </Section>
-                    )}
-                    {full.detail.lateResult != null && (
-                      <Section title="Late result">
-                        <p className="mb-1.5 text-xs text-muted-foreground">
-                          The handler answered after this run had been closed. Nothing in it was applied.
-                        </p>
-                        <pre className={PRE}>{JSON.stringify(full.detail.lateResult, null, 2)}</pre>
-                      </Section>
-                    )}
-
-                    {run.resolution ? (
-                      <Section title="Resolution">
-                        <p>
-                          {`${run.resolution.how === "applied" ? "Applied" : "Closed without applying"} by ${run.resolution.by ?? "a former user"}, `}
-                          <LocalTime iso={run.resolution.at} mode="absolute" />
-                        </p>
-                        {run.resolution.note && <p className="mt-1 text-muted-foreground">{run.resolution.note}</p>}
-                        {full.detail.resolution && full.detail.resolution.changes.length > 0 && (
-                          <div className="mt-2">
-                            <ChangeList changes={full.detail.resolution.changes} />
-                          </div>
-                        )}
-                      </Section>
-                    ) : run.status === "needs_human" && canResolve ? (
-                      <ResolveRun runId={run.id} heldCount={held} onResolved={() => void load(run.id)} />
-                    ) : null}
-                  </>
-                )}
-              </div>
-            )}
-          </li>
-        );
-      })}
+      {runs.map((run) => (
+        <RunRow key={run.id} run={run} canResolve={canResolve} showAgent={showAgent} />
+      ))}
     </ul>
   );
 }
