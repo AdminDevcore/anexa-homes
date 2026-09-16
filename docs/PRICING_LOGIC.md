@@ -1802,3 +1802,81 @@ snapshot file is byte-identical in git.
 
 **Schema:** `companyDefaultBasePpwCents`'s comment no longer says "gross". DDL
 compared before and after: **3,039 significant lines each, 0 differences.**
+
+## 8.28 Stage 4, slice 4c — what "connect the 25 sites" actually requires
+
+§8.5's list is an inventory of places that work out a price. Reading all of them
+against `priceDeal()` shows they are **not one kind of site**, and the difference
+decides what can be connected and what would be vandalism.
+
+**Three of the twenty-five compute nothing.** `solar-deal-value.ts`,
+`payroll/solar-engine.ts` and `solar-system-of-record.ts` make ZERO calls to the
+money primitives — they read stored or frozen figures. Pointing them at
+`priceDeal()` would ADD computation where the design deliberately reads what was
+frozen, which is the defect the snapshot chain exists to prevent. They are
+listed as price sites; they are readers. **Not connected, on purpose.**
+
+**Five more are conversions, not ladders.** `solar-proposal-options.ts:219, 237,
+326, 368, 455` are `basePpwFromSticker`/`grossPpwFromNet` calls that take THIS
+deal's base and re-gross it by EACH alternative programme's fee, so the menu
+compares one system across partners. `priceDeal()` prices one deal at one fee
+and exposes no entry point for that conversion. Connecting them means one
+`priceDeal()` call per menu row — defensible, and a bigger change than a swap.
+
+**A blocker I reported, then disproved.** I recorded that the customer's
+document could not be connected because `solar-proposal.ts` passes the WHOLE
+`PurchaseBreakdown` into `savingsModel` (`purchase?: PurchaseBreakdown` at
+`:330`), and that `onTopAdderStickerCents` and `marginCents` were missing from
+`DealPrice`. The first half was reasoning from the boundary's SHAPE without
+asking what crosses it for. Checked:
+
+- **`savingsModel` reads exactly ONE field off `purchase`: `contractPriceCents`.**
+  And `:533` already reads `args.purchasePriceCents ?? args.purchase?.contractPriceCents`,
+  with `:1868` already passing `purchasePriceCents`. So site 5 needs no signature
+  change at all.
+- The whole file reads seven fields, and all seven map onto `DealPrice`:
+  `baseStickerCents → baseFinalCents`, `adderStickerCents → addersFinalCents`,
+  `batteryStickerCents → equipmentFinalCents`,
+  `batteryPriceCents → equipmentChargesCents`,
+  `contractPriceCents → finalPriceCents`, plus `finalPpwCents` and `systemWatts`
+  unchanged.
+
+Structural assignability was never available anyway: `DealPrice` renames
+`contractPriceCents → finalPriceCents`, so it cannot satisfy `PurchaseBreakdown`
+whatever fields are added to it. **Site 5 is connectable by mapping.**
+
+**`addersOutsideRuleFinalCents` added; `marginCents` deliberately not.**
+`ladderFrom` never copied `onTopAdderStickerCents` across, and it has a real
+reader — `system-price.tsx:782` uses it to name a financed roof separately. The
+goldens already spell it `addersOutsideRuleFinalCents`
+(`pricing-golden-deals.ts:532`), so the name matches the established vocabulary
+rather than inventing a synonym.
+
+`marginCents` was added and then REMOVED. It is
+`grossPriceCents - equipmentCostCents`; `PriceDealInput` carries no cost, and no
+caller anywhere in `src/` passes one. On `DealPrice` it could only ever have
+reported zero — a field that can only mislead a site reading it. The test that
+briefly "covered" it asserted `0 === 0`.
+
+A field-by-field test now pins the superset, with a $7,000 ON-TOP adder in the
+fixture: priced with none, the very assertion that matters passes while proving
+nothing, which is how the field came to be missing in the first place.
+
+**One mapping was tried and discarded.** `CompareRow.grossPpwCents` (the
+sticker, fee included — §8.20 defect 2) looks like `DealPrice.baseFinalPpwCents`.
+It is not safe to substitute: `baseFinalPpwCents` is
+`round(baseStickerCents / systemWatts)`, which is **0 on a zero-watt row**, and
+the shelf sets `grossPpwCents` on every row including ones where `priced` is
+null entirely. The substitution would print $0.00/W on a storage row. So
+`solar-compare.ts` keeps its own `capStickerToFinalPpw` call: `priceDeal()` does
+not expose the CAPPED STICKER, which is the third gap and the one not closed
+here.
+
+**Status, stated plainly.** 4a (one fee rule) and 4b (the company default as a
+base) are LANDED and green. **4c is NOT done: no site has been rewired to
+`priceDeal()` yet.** What this slice did is classify all twenty-five, disprove
+the blocker I had reported against site 5, and close the one real API gap
+(`addersOutsideRuleFinalCents`) so the remaining sites can be connected by
+mapping. Three sites should never be connected (they are readers, not price
+sites); five are conversions needing one call per menu row; one gap remains open
+(the capped sticker, for `solar-compare.ts`).

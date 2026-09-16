@@ -237,6 +237,67 @@ describe("the partner's price rule", () => {
   });
 });
 
+describe("the ladder is a complete substitute for PurchaseBreakdown", () => {
+  /**
+   * WHY THIS IS FIELD-BY-FIELD, AND WHY THE FIXTURE CARRIES ON-TOP ADDERS.
+   *
+   * Stage 4 connects the price sites to `priceDeal()`, and a site can only be
+   * connected if every money figure it reads off `PurchaseBreakdown` has a home
+   * here. `onTopAdderStickerCents` did not: `ladderFrom` never copied it, and
+   * `system-price.tsx:782` reads it to name a financed roof separately.
+   *
+   * The fixture gives the deal a $7,000 ON-TOP adder on purpose. Priced with
+   * none, `onTopAdderStickerCents` is zero on both sides and the assertion for
+   * it passes while proving nothing — which is exactly how the field came to be
+   * missing in the first place.
+   *
+   * (`marginCents` is deliberately NOT mirrored here. It is
+   * `grossPriceCents - equipmentCostCents`, `PriceDealInput` carries no cost,
+   * and no caller in `src/` passes one — so on `DealPrice` it could only ever
+   * have reported zero.)
+   */
+  it("carries every money figure the document's breakdown reads", () => {
+    const ON_TOP = 700_000;
+    const d = priceDeal({
+      ...KW10, dealerFeePct: 25, addersInsideRuleCents: 250_000,
+      addersOutsideRuleCents: ON_TOP, ...ALL_CREDITS,
+    });
+    const b = priceStoredPurchase({
+      product: "loan",
+      systemSizeKwDc: 10,
+      stickerPpwCents: 400,
+      dealerFeePct: 25,
+      adderTotalCents: 250_000,
+      onTopAdderTotalCents: ON_TOP,
+      maxFinalPpwCents: null,
+    }).breakdown;
+
+    expect(d.systemWatts).toBe(b.systemWatts);
+    expect(d.baseKeptCents).toBe(b.baseKeptCents);
+    expect(d.basePpwCents).toBe(b.basePpwCents);
+    expect(d.addersInsideRuleCents).toBe(b.adderTotalCents);
+    expect(d.addersOutsideRuleCents).toBe(b.onTopAdderTotalCents);
+    expect(d.addersOutsideRuleFinalCents).toBe(b.onTopAdderStickerCents);
+    expect(d.equipmentChargesCents).toBe(b.batteryPriceCents);
+    expect(d.equipmentFinalCents).toBe(b.batteryStickerCents);
+    expect(d.grossPriceCents).toBe(b.grossPriceCents);
+    expect(d.grossPpwCents).toBe(b.grossPpwCents);
+    expect(d.dealerFeeCents).toBe(b.dealerFeeCents);
+    expect(d.finalPriceCents).toBe(b.contractPriceCents);
+    expect(d.finalPpwCents).toBe(b.finalPpwCents);
+    expect(d.baseFinalCents).toBe(b.baseStickerCents);
+    expect(d.addersFinalCents).toBe(b.adderStickerCents);
+
+    // The assertion above is only worth anything if the figure is real.
+    expect(d.addersOutsideRuleFinalCents).toBeGreaterThan(0);
+  });
+
+  it("keeps the customer's own breakdown reaching its own total", () => {
+    const d = priceDeal({ ...KW10, dealerFeePct: 25, addersInsideRuleCents: 250_000, ...ALL_CREDITS });
+    expect(d.baseFinalCents + d.addersFinalCents + d.equipmentFinalCents).toBe(d.finalPriceCents);
+  });
+});
+
 describe("the naming rule holds on the result itself", () => {
   it('no field on a priced deal carries the word "contract"', () => {
     const d = priceDeal({ ...KW10, dealerFeePct: 25, ...ALL_CREDITS, monetizerPayoutRate: 50 });

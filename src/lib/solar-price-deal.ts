@@ -173,6 +173,12 @@ export type DealPrice = {
   baseFinalCents: number;
   baseFinalPpwCents: number;
   addersFinalCents: number;
+  /**
+   * Of `addersFinalCents`, the part financed ON TOP of the partner's price —
+   * a roof on a flat-rate partner, which rides above the ceiling at its own
+   * price rather than inside it.
+   */
+  addersOutsideRuleFinalCents: number;
   equipmentFinalCents: number;
 
   /** Null on cash, and on any deal whose partner publishes no rule. */
@@ -269,6 +275,7 @@ function ladderFrom(b: PurchaseBreakdown, feePct: number, source: DealerFeeSourc
     baseFinalCents: b.baseStickerCents,
     baseFinalPpwCents: b.systemWatts > 0 ? Math.round(b.baseStickerCents / b.systemWatts) : 0,
     addersFinalCents: b.adderStickerCents,
+    addersOutsideRuleFinalCents: b.onTopAdderStickerCents,
     equipmentFinalCents: b.batteryStickerCents,
   };
 }
@@ -396,6 +403,7 @@ export function priceDeal(input: PriceDealInput): DealPrice {
       baseFinalCents: 0,
       baseFinalPpwCents: 0,
       addersFinalCents: 0,
+      addersOutsideRuleFinalCents: 0,
       equipmentFinalCents: 0,
       priceRule: null,
       applied: zero("applied"),
