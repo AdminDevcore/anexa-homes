@@ -367,6 +367,44 @@ the retraction branch is the most consequential in the file and the fixture
 never reports removals, so without injection it could only be tested by mocking
 the module graph — which tests the mock. Production never passes it.
 
+### A cross-tenant hole found in Phase 1's work, and closed
+
+Worth recording because it corrects something Phase 1 got wrong, and because the
+way it surfaced is the useful part.
+
+`postJournalEntry` resolved **accounts** against the company and then wrote the
+caller's `projectId` and `vendorId` straight onto the line. Both arrive from a
+browser. A bookkeeper at one company could therefore cost a line to **another
+company's job**, and nothing about the result would look wrong — it balances, it
+posts, and the cost lands on a deal whose owner cannot see it.
+
+It surfaced because the `row-scope-boundary` CI guard flagged
+`acceptFeedTransactionAction`. The guard offers two remedies: scope the id, or
+add an `ALLOWED` entry saying the id cannot cross a boundary there. The second
+is one line and would have been accepted by review. It would also have been
+false — and `postManualEntryAction` already carried exactly such an entry from
+Phase 1, sitting on this same hole, so a second one would have compounded it.
+
+Two fixes, because they answer different questions:
+
+- **Tenancy, at the door.** `postJournalEntry` now verifies every `projectId`
+  and `vendorId` belongs to the company, covering every caller present and
+  future rather than the one action the guard happened to notice.
+- **Per-viewer scope, at the action.** `acceptFeedTransactionAction` asks
+  `projectAccessible`, because that question needs a user and there is one
+  there.
+
+The tenancy check runs **unscoped by vertical**. `Project` is SCOPED, so an
+ordinary read would be filtered to the active workspace and would reject a valid
+roofing job merely because the poster had solar open — and one entry may
+legitimately carry lines for both departments, which is the entire reason the
+tag sits on the line. The error never echoes the id, since whether a row exists
+elsewhere is not something that message should confirm.
+
+**The lesson to keep:** a CI guard firing on new code is worth reading as a
+question about the existing code, not only as an obstacle to the new. The guard
+was right, and it was right about something written a phase earlier.
+
 ---
 
 ## Not decided yet
