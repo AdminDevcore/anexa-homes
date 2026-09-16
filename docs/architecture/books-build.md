@@ -312,6 +312,61 @@ Gates at the end of Phase 1: tsc 0 errors; lint clean on the changed files;
 unit 2497/2497; integration 72 files / 941 tests, 0 failures, 0 deadlocks
 (baseline was 71 / 927).
 
+## Phase 2 decisions — bank feeds (2026-09-16)
+
+**Every provider sits behind `BankFeedProvider`, chosen by `BANK_FEED_PROVIDER`,
+defaulting to the fixture.** A deployment with no bank credentials runs a
+working feed against seeded data rather than crashing or half-working. Plaid is
+imported lazily, because its client reads credentials in the constructor and
+would otherwise make every test depend on Plaid configuration merely for being
+in the import graph.
+
+**The sign convention is the dangerous part.** Our interface is signed from the
+account holder's view: negative means money left. Plaid reports the opposite for
+depository accounts, so the adapter flips it in exactly one place. A flip books
+every expense as income — nothing throws, nothing fails to balance, and the
+review queue looks normal. The fixture carries both directions so a test fails
+if it is ever wrong.
+
+**The fixture is a real implementation, not a stub.** It pages with a cursor,
+settles a pending row as a modification, and contains a genuine transfer pair
+plus a same-merchant same-amount pair with distinct ids. A tidy stub would let
+the cursor loop, the dedupe and the sign handling all be wrong while the suite
+stayed green.
+
+**Dedupe is on the provider's transaction id and nothing else.** Two purchases
+at the same shop for the same amount on different days are two purchases;
+matching on amount and merchant would quietly delete real spend.
+
+**A connected account gets NO opening balance.** The provider's current balance
+is what the bank thinks today, which already includes everything the feed is
+about to deliver. Booking it as an opening balance and then ingesting the
+history counts the same money twice.
+
+**Evidence under a posted entry is immutable.** When the provider replays a
+revised version of a transaction already booked, only its pending flag settles.
+Rewriting the row would leave the books saying one number and the bank row
+saying another, with nothing recording that they ever agreed.
+
+**A retraction is a reversal.** If the bank takes back a transaction we posted,
+the entry is voided by reversing entry — the same rule as every other void.
+
+**The webhook records; the cron syncs.** The receiver verifies over the raw
+bytes, dedupes on `(provider, eventId)`, writes one row and returns. Syncing
+inline would put a multi-page network loop inside a delivery expected to be
+acknowledged in seconds, and a slow 200 reads as a dead host. Missed deliveries
+are never replayed by the provider, so the sweep has to be the guarantee
+regardless — the webhook only makes the next sweep worth running sooner.
+
+**Plaid webhooks are ES256 JWTs, not HMACs**, and Plaid sends no event id.
+The dedupe key is derived from the body hash that verification has already
+proven authentic.
+
+**`syncConnection` accepts an injected provider.** A seam, not a convenience:
+the retraction branch is the most consequential in the file and the fixture
+never reports removals, so without injection it could only be tested by mocking
+the module graph — which tests the mock. Production never passes it.
+
 ---
 
 ## Not decided yet
