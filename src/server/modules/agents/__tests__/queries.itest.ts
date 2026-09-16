@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient, type AgentDepartment, type AgentRunStatus, type Prisma, type Vertical } from "@prisma/client";
 import { TEST_DATABASE_URL } from "@/server/vertical/__tests__/global-setup";
-import { countNeedsHuman, getAgent, listAgents, listRunsFeed, needsHumanQueue, type Viewer } from "../queries";
+import { countNeedsHuman, getAgent, listAgents, listRunsFeed, listRunsForAgent, needsHumanQueue, type Viewer } from "../queries";
 
 /**
  * Agent and AgentRun are shared models, so the pages' workspace boundary lives
@@ -35,7 +35,15 @@ beforeAll(async () => {
   await run("Roofing Poller", companyId, "roofing", "success");
   await run("Solar Poller", companyId, "solar", "failed");
   await run("Both Poller", companyId, "roofing", "needs_human");
-  await run("Both Poller", companyId, "solar", "needs_human", { resolvedAt: new Date(), resolution: "closed", resolutionNote: "fine" });
+  // Explicitly newer than the roofing run above, not merely inserted after it:
+  // the vertical-filter test below depends on there being no doubt which run
+  // is more recent.
+  await run("Both Poller", companyId, "solar", "needs_human", {
+    resolvedAt: new Date(),
+    resolution: "closed",
+    resolutionNote: "fine",
+    createdAt: new Date(Date.now() + 60_000),
+  });
   await run("Elsewhere", otherId, "roofing", "needs_human");
 });
 
@@ -84,5 +92,41 @@ describe("agents pages queries", () => {
     expect(queue.map((r) => r.summary)).toEqual(["Both Poller roofing needs_human"]);
     expect(queue[0]).toMatchObject({ agentName: "Both Poller", resolution: null });
     expect(await countNeedsHuman(owner())).toBe(1);
+  });
+
+  it("filters a Both agent's last run to the viewer's held verticals, not merely the newest run overall", async () => {
+    const roofingRun = await db.agentRun.findFirst({
+      where: { agentId: agents["Both Poller"], vertical: "roofing" },
+      select: { createdAt: true },
+    });
+    const solarRun = await db.agentRun.findFirst({
+      where: { agentId: agents["Both Poller"], vertical: "solar" },
+      select: { createdAt: true },
+    });
+    // The fixture: this really is the newer run, so a filter-less "most
+    // recent" lookup would pick it — which is exactly the bug this proves
+    // doesn't happen for a viewer who does not hold Solar.
+    expect(solarRun!.createdAt.getTime()).toBeGreaterThan(roofingRun!.createdAt.getTime());
+
+    const rows = await listAgents(roofingAdmin(), { product: null, department: null });
+    const both = rows.find((r) => r.name === "Both Poller");
+    expect(both?.lastRun?.createdAt.getTime()).toBe(roofingRun!.createdAt.getTime());
+  });
+
+  it("lists one agent's own runs, scoped to the viewer's workspaces", async () => {
+    const both = await listRunsForAgent(owner(), agents["Both Poller"], 1);
+    expect(both.total).toBe(2);
+    // Newest first: the solar run is the one stamped 60s ahead in the fixture.
+    expect(both.runs.map((r) => r.vertical)).toEqual(["solar", "roofing"]);
+
+    const scoped = await listRunsForAgent(roofingAdmin(), agents["Both Poller"], 1);
+    expect(scoped.runs.map((r) => r.vertical)).toEqual(["roofing"]);
+  });
+
+  it("clamps a page number past the end instead of erroring or returning nonsense", async () => {
+    const feed = await listRunsFeed(owner(), { status: null, product: null, page: 99 });
+    expect(feed.pageCount).toBe(1);
+    expect(feed.page).toBe(1);
+    expect(feed.runs.length).toBe(4);
   });
 });

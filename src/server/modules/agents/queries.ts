@@ -29,8 +29,8 @@ export type Viewer = { companyId: string; role: Role; verticals: Vertical[] };
 
 const held = (viewer: Viewer): Vertical[] => userVerticals(viewer);
 
-function visibleAgents(viewer: Viewer): Prisma.AgentWhereInput {
-  return { companyId: viewer.companyId, OR: [{ vertical: null }, { vertical: { in: held(viewer) } }] };
+function visibleAgents(viewer: Viewer, heldVerticals: Vertical[] = held(viewer)): Prisma.AgentWhereInput {
+  return { companyId: viewer.companyId, OR: [{ vertical: null }, { vertical: { in: heldVerticals } }] };
 }
 
 function visibleRuns(viewer: Viewer): Prisma.AgentRunWhereInput {
@@ -80,8 +80,11 @@ export async function listAgents(
   viewer: Viewer,
   filters: { product: Product | null; department: AgentDepartment | null }
 ): Promise<AgentListRow[]> {
+  const heldVerticals = held(viewer);
   const rows = await prisma.agent.findMany({
-    where: { AND: [visibleAgents(viewer), productWhere(filters.product), filters.department ? { department: filters.department } : {}] },
+    where: {
+      AND: [visibleAgents(viewer, heldVerticals), productWhere(filters.product), filters.department ? { department: filters.department } : {}],
+    },
     orderBy: { name: "asc" },
     select: AGENT_LIST_SELECT,
   });
@@ -89,11 +92,15 @@ export async function listAgents(
   // No nested `runs: { take: 1 }` — without the relationJoins preview, Prisma
   // fetches every run of every listed agent and applies `take` in memory.
   // One findFirst per agent, in parallel, instead. Agents are few.
-  const heldVerticals = held(viewer);
+  //
+  // `companyId` is stated here rather than relied on positionally: this is
+  // safe today only because `agent.id` already came from a company- and
+  // workspace-filtered list, and a future caller of this loop should not have
+  // to re-derive that from the query above.
   const lastRuns = await Promise.all(
     rows.map((agent) =>
       prisma.agentRun.findFirst({
-        where: { agentId: agent.id, vertical: { in: heldVerticals } },
+        where: { agentId: agent.id, companyId: viewer.companyId, vertical: { in: heldVerticals } },
         orderBy: { createdAt: "desc" },
         select: LAST_RUN_SELECT,
       })
@@ -171,6 +178,10 @@ export async function getAgent(viewer: Viewer, agentId: string): Promise<AgentVi
 // Runs
 // ---------------------------------------------------------------------------
 
+// Named the same as runner.ts's own RUN_SELECT, which is a different shape
+// for a different purpose (claiming a run to execute it, not showing it on a
+// page) — the two never import from each other, so there's no collision, but
+// grepping for "RUN_SELECT" turns up both.
 const RUN_SELECT = {
   id: true,
   agentId: true,
@@ -247,7 +258,11 @@ async function runPage(where: Prisma.AgentRunWhereInput, page: number, size: num
   const current = Math.min(Math.max(1, Math.floor(page) || 1), pageCount);
   const rows = await prisma.agentRun.findMany({
     where,
-    orderBy: { createdAt: "desc" },
+    // A tiebreaker on `id` matters here: the tick can start several runs in
+    // the same millisecond, so `createdAt` alone is not a stable sort key,
+    // and skip/take over an unstable order can show a row on two pages or
+    // drop it from both.
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     skip: (current - 1) * size,
     take: size,
     select: RUN_SELECT,
@@ -284,7 +299,9 @@ const unresolvedNeedsHuman = (viewer: Viewer): Prisma.AgentRunWhereInput => ({
 export async function needsHumanQueue(viewer: Viewer): Promise<RunView[]> {
   const rows = await prisma.agentRun.findMany({
     where: unresolvedNeedsHuman(viewer),
-    orderBy: { createdAt: "asc" },
+    // Same tiebreaker as runPage, and for the same reason: same-millisecond
+    // ties from the tick must sort the same way every time this is read.
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     take: QUEUE_LIMIT,
     select: RUN_SELECT,
   });
