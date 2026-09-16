@@ -293,15 +293,27 @@ const GRANTS: Partial<Record<Role, Grant>> = {
   },
 
   /**
-   * THE OUTSIDE CPA. Two resources, two verbs, and nothing else.
+   * THE OUTSIDE CPA. ONE resource, two verbs, and nothing else.
    *
    * Everything an accountant actually needs — P&L, balance sheet, trial
-   * balance, general ledger, 1099 totals, reconciliation history — lives under
-   * `Bookkeeping` and `Report`. So nothing else is granted.
+   * balance, general ledger, 1099 totals, reconciliation history — is a
+   * BOOKKEEPING artifact, and lives under `Bookkeeping`.
+   *
+   * `Report` WAS granted here and has been deliberately taken away. It reads
+   * like the financial-reports permission and is not: it is the gate on the
+   * reports hub, which is mostly the sales floor — Funnel, Lead Sources,
+   * Canvassing, Rep Scorecard, Delinquency, Claims, A/R Aging, Production.
+   * Granting it handed an outside party customer names, addresses and per-rep
+   * performance, which is the very thing refusing `Project: ["read"]` was meant
+   * to prevent. It also does not stop at the hub: each of those pages gates
+   * itself on `can(user, "read", "Report")` independently, so hiding the cards
+   * would still have left every URL openable — ten pages and twenty export/PDF
+   * routes. Withholding the resource denies all of them at once, including the
+   * ones nobody has written yet. `cpa-report-visibility.test.ts` pins it.
    *
    * `Project: ["read"]` was considered and deliberately refused: it would hand
    * an outside party the entire deal pipeline, with customer names and
-   * addresses, to answer questions the reports already answer. Every extra
+   * addresses, to answer questions the statements already answer. Every extra
    * resource here is a real widening of what leaves the building.
    *
    * `create` IS DELIBERATELY ABSENT, and not only because this role is
@@ -313,7 +325,6 @@ const GRANTS: Partial<Record<Role, Grant>> = {
    */
   accountant_readonly: {
     Bookkeeping: ["read", "export"],
-    Report: ["read", "export"],
   },
 };
 

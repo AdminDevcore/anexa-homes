@@ -60,7 +60,17 @@ describe("export grants", () => {
 
   /** Recorded so a matrix edit has to come past this file. */
   it("Report and Payroll exports stay with finance", () => {
-    expectExport("Report", ["super_admin", "accounting", "accountant_readonly"]);
+    /**
+     * The CPA is ABSENT from `Report`, and that is the whole point of the
+     * resource split.
+     *
+     * `Report` sounds like the financial statements and is not — it gates the
+     * reports hub, which is mostly the sales floor. The outside accountant gets
+     * the books through `Bookkeeping` above; giving them `Report` as well
+     * handed them the pipeline. See the comment on `accountant_readonly` in
+     * matrix.ts and cpa-report-visibility.test.ts.
+     */
+    expectExport("Report", ["super_admin", "accounting"]);
 
     /**
      * And the CPA is deliberately ABSENT from these two.
