@@ -641,6 +641,126 @@ shipping none.
 
 ---
 
+## Phase 4 decisions — invoices, bills and lender funding (2026-09-16)
+
+Phase 4 is the money the company is owed and owes: what we billed a customer,
+what a vendor billed us, and what a lender still has to wire. Three modules
+(`invoices.ts`, `bills.ts`, `funding.ts`), one shared helper (`aging.ts`), and
+one defect found while building them that was older and wider than this phase.
+
+### `Invoice.issuedAt` — a new column, because `createdAt` would not do
+
+An invoice is revenue on the day it was ISSUED. `Invoice` had `createdAt`,
+`dueAt` and `paidAt` but no issue date, and `reports/ar-aging.ts` was already
+papering over the gap with `dueAt ?? createdAt`.
+
+Prisma does let you set a `@default(now())` field explicitly, so `createdAt`
+could technically have been pressed into service. It was not, because row
+creation time and invoice date are different facts: an invoice for January
+entered in February is January revenue, and dating it by when somebody typed it
+in moves income into the wrong period and shifts two trial balances at once.
+
+The migration is one `ADD COLUMN` plus `UPDATE invoices SET issuedAt =
+createdAt`. The backfill writes to a column that did not exist one statement
+earlier, so it cannot overwrite anything anybody entered. Re-diff reports an
+empty migration.
+
+### The money field keeps its name
+
+`Invoice.amount` was NOT renamed to `amountCents`, despite the rest of the books
+using that name. `bookkeeping/queries.ts` already normalises it at the boundary
+(`amountCents: iv.amount` when building `BkInvoice`), which is a deliberate
+existing convention. `invoices.ts` follows it: the column stays `amount`, every
+books-facing type says `amountCents`. A Prisma rename emits DROP + ADD and loses
+data; `@map` would have avoided that, but churning a column to win consistency
+the boundary layer already provides is not worth any migration risk.
+
+### Revenue follows the job's department, never the reader's workspace
+
+Revenue is split (`roofing_revenue`, `solar_revenue`). The credit account is
+derived from `Project.vertical`, which is non-null, on an invoice whose
+`projectId` is required — so there is always an answer. A vertical with no
+revenue account configured is an ERROR, not a guess, because quietly booking
+solar revenue as roofing yields a P&L that splits wrongly and reconciles
+perfectly. An explicit account or system key from the caller still wins.
+
+### The receivables schedule exists twice, on purpose
+
+`reports/ar-aging.ts` (whole dollars, gated on `Report`) is the sales-floor
+view and is deliberately untouched. `invoices.ts#arAging` (cent-exact, gated on
+`Bookkeeping`) is the accountant's. They are not duplicates: Phase 3 removed
+`Report` from `accountant_readonly` precisely so an outside CPA cannot reach the
+sales pipeline, and a CPA who cannot see who owes the company money is useless.
+Only the bucket arithmetic is shared, via `aging.ts`, so A/R and A/P can never
+disagree about where "31–60" ends.
+
+### SHARED vs TAGGED for the new models
+
+`Bill` is TAGGED with `projectId` provenance — a bill is departmental spend for
+the same reason an invoice is. `LenderFunding` is deliberately ABSENT from
+`TAGGED_PROVENANCE`: it hangs off a LEAD, not a job, and that lookup resolves
+project ids, so registering `leadId` would resolve nothing while appearing
+configured. Its `vertical` column is non-null with a solar default instead.
+
+### The defect: a ledger line's department, which nothing was setting
+
+Found while testing invoice tagging; it predates this phase and reached
+everything that posts.
+
+`schema.prisma` promises "every line is tagged so the P&L breaks out by
+department", and `reports.ts` filters the LINE by `vertical` — that filter is
+what makes a departmental P&L possible. The tag was never being set.
+
+Two individually correct decisions produced it, and the gap is only visible
+holding both at once:
+
+1. `postJournalEntry` creates lines NESTED, as `lines: { create: [...] }` under
+   `journalEntry.create`.
+2. The vertical extension therefore sees a **JournalEntry** write. JournalEntry
+   is deliberately not tagged, because one entry may legitimately span
+   departments, so `classify()` returns `"shared"` and the extension returns at
+   its first branch — never inspecting the nested line rows.
+
+So `JournalLine`'s TAGGED `projectId` provenance never fired on the posting
+path, and a line's department was only ever whatever the caller passed. No
+caller passed one. A vendor bill entered against a solar job was written with no
+department, vanished from the solar P&L, and still appeared in the company
+totals. Every report balanced, so nothing could look wrong. The test that
+proves it reads `expected +0 to be 125000`.
+
+There is a second, related trap: a TAGGED row created with NO ambient workspace
+is also written untagged, because `resolveVertical()` returns unscoped and the
+extension returns before provenance resolution. The books normally run with no
+workspace at all, so this is their default state, not an edge case.
+
+**Fixed at the door rather than at each caller.** `postJournalEntry` is the only
+way into the ledger, and `resolveReferences` already reads these very jobs to
+check they belong to the company; adding `vertical` to that existing `select`
+resolves every line's department in the same query, at no extra round trip, for
+every caller present and future. Precedence follows the extension's own
+documented rule minus ambient: explicit wins, then the line's job, then nothing
+(a bank fee, office rent and a transfer between our own accounts belong to no
+department). **Ambient is deliberately not a fallback** — stamping whichever
+workspace the reader happened to have toggled is exactly how a solar cost lands
+in roofing. `createBill` and `createInvoice` tag their own rows from the job for
+the same reason.
+
+Seven integration tests, written first and watched to fail 4/7 with the
+predicted signature. No existing test regressed, which is itself evidence that
+nothing had been relying on lines being untagged.
+
+### What Phase 4 shipped
+
+- `books/invoices.ts` — issue, post to A/R, collect, void, cent-exact A/R aging.
+- `books/bills.ts` — enter, accrue, pay, void, A/P aging.
+- `books/funding.ts` — expected lender funding per milestone, recognition, and
+  variance routed to Dealer Fees or Funding Variance by lender configuration.
+- `books/aging.ts` — the shared bucket definition.
+- Two migrations, both additive, both proven by re-diff: bills + lender funding,
+  and `invoice_issued_at`.
+- 60 new integration tests (30 invoices, 23 funding, 7 department). Full suite
+  1084 passed, up from a 981 baseline at the start of Phase 3.
+
 ## Not decided yet
 
 These decisions leave some questions open. Settle each one before the phase that
