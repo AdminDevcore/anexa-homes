@@ -298,6 +298,60 @@ describe("the ladder is a complete substitute for PurchaseBreakdown", () => {
   });
 });
 
+describe("the rate the deal is actually priced at", () => {
+  it("is the sticker it was handed when no partner publishes a rule", () => {
+    const d = priceDeal({ ...KW10, dealerFeePct: 25, ...ALL_CREDITS });
+    expect(d.stickerPerUnitCents).toBe(400);
+  });
+
+  it("is the CAPPED sticker once the ceiling bites, not the typed one", () => {
+    const d = priceDeal({
+      ...KW10, baseFinalPpwCents: 800, dealerFeePct: 65,
+      priceRulePpwCents: 550, priceRuleMode: "cap", ...ALL_CREDITS,
+    });
+    expect(d.priceRule?.capped).toBe(true);
+    expect(d.stickerPerUnitCents).toBeLessThan(800);
+    // `proposal-generate.ts` WRITES this figure back to SolarFinance, so it has
+    // to be the rate the deal is priced at and not merely a flag that it moved.
+    expect(d.stickerPerUnitCents).toBe(d.baseFinalPpwCents);
+  });
+
+  it("is the PER-BATTERY rate on a storage job, where every per-watt figure is 0", () => {
+    // The case that rules out reusing `baseFinalPpwCents`: it reads 0 here,
+    // because a storage job has no installed watts to divide by. A site that
+    // wrote THAT back would price a battery deal at nothing.
+    const d = priceDeal({
+      product: "loan", systemType: "storage", systemSizeKwDc: 0,
+      baseFinalPpwCents: 0, baseFinalPerBatteryCents: 2_000_000, batteryQty: 2,
+      dealerFeePct: 50, addersInsideRuleCents: 0, ...ALL_CREDITS,
+    });
+    expect(d.baseFinalPpwCents).toBe(0);
+    expect(d.stickerPerUnitCents).toBe(2_000_000);
+  });
+
+  it("carries the capped per-battery rate under a flat partner rule", () => {
+    const d = priceDeal({
+      product: "loan", systemType: "storage", systemSizeKwDc: 0,
+      baseFinalPpwCents: 0, baseFinalPerBatteryCents: 2_000_000, batteryQty: 2,
+      dealerFeePct: 50, addersInsideRuleCents: 0,
+      priceRulePerBatteryCents: 1_200_000, priceRuleBatteryMode: "flat",
+      batteryPriceBasis: "gross", ...ALL_CREDITS,
+    });
+    expect(d.stickerPerUnitCents).not.toBe(2_000_000);
+    expect(d.finalPriceCents).toBe(d.stickerPerUnitCents * 2);
+  });
+
+  it("is zero on a lease, which sells electricity and has no unit to price", () => {
+    const d = priceDeal({
+      product: "lease", systemSizeKwDc: 10, baseFinalPpwCents: 0,
+      dealerFeePct: 25, addersInsideRuleCents: 0,
+      leasePaymentCents: 18_500, escalatorPct: 2.9, termYears: 25,
+      year1ProductionKwh: 14_000, ...ALL_CREDITS,
+    });
+    expect(d.stickerPerUnitCents).toBe(0);
+  });
+});
+
 describe("the naming rule holds on the result itself", () => {
   it('no field on a priced deal carries the word "contract"', () => {
     const d = priceDeal({ ...KW10, dealerFeePct: 25, ...ALL_CREDITS, monetizerPayoutRate: 50 });

@@ -167,6 +167,21 @@ export type DealPrice = {
   /** FINAL — gross with the fee in it, before any credit. */
   finalPriceCents: number;
   finalPpwCents: number;
+  /**
+   * THE RATE THIS DEAL IS PRICED AT, after any partner ceiling — per installed
+   * WATT on an array, per BATTERY on a storage job.
+   *
+   * Exposed because three sites need the capped figure as a VALUE, not just the
+   * `capped` flag: `proposal-generate.ts` writes it back to `SolarFinance`,
+   * `solar-compare.ts` prints it as each column's headline, and
+   * `system-price.tsx` shows the rep what the ceiling did.
+   *
+   * NOT the same as `baseFinalPpwCents`, which is `baseStickerCents /
+   * systemWatts`. On an array the two agree; on a storage job `systemWatts` is
+   * zero, `purchaseFromUnits` zeroes every per-watt figure, and that one reads
+   * 0 while this one carries the real per-battery rate.
+   */
+  stickerPerUnitCents: number;
 
   // ── The same money, split the way the household's own breakdown reads it ──
 
@@ -400,6 +415,8 @@ export function priceDeal(input: PriceDealInput): DealPrice {
       dealerFeeSource: source,
       finalPriceCents: 0,
       finalPpwCents: 0,
+      // A lease or PPA sells electricity: there is no unit with a price on it.
+      stickerPerUnitCents: 0,
       baseFinalCents: 0,
       baseFinalPpwCents: 0,
       addersFinalCents: 0,
@@ -430,20 +447,30 @@ export function priceDeal(input: PriceDealInput): DealPrice {
           finalBatteryPriceMode: input.priceRuleBatteryMode,
           batteryPriceBasis: input.batteryPriceBasis,
         });
-        return { breakdown: purchaseFromUnits(r.breakdown), cap: r.cap };
+        return {
+          breakdown: purchaseFromUnits(r.breakdown),
+          cap: r.cap,
+          stickerPerUnitCents: r.cap.stickerPerUnitCents,
+        };
       })()
-    : priceStoredPurchase({
-        product,
-        systemSizeKwDc: input.systemSizeKwDc,
-        stickerPpwCents: input.baseFinalPpwCents,
-        dealerFeePct,
-        adderTotalCents: input.addersInsideRuleCents,
-        onTopAdderTotalCents: input.addersOutsideRuleCents,
-        batteryPriceCents: input.equipmentChargesCents,
-        maxFinalPpwCents: input.priceRulePpwCents,
-        finalPpwMode: input.priceRuleMode,
-        ppwBasis: input.ppwBasis,
-      });
+    : (() => {
+        const r = priceStoredPurchase({
+          product,
+          systemSizeKwDc: input.systemSizeKwDc,
+          stickerPpwCents: input.baseFinalPpwCents,
+          dealerFeePct,
+          adderTotalCents: input.addersInsideRuleCents,
+          onTopAdderTotalCents: input.addersOutsideRuleCents,
+          batteryPriceCents: input.equipmentChargesCents,
+          maxFinalPpwCents: input.priceRulePpwCents,
+          finalPpwMode: input.priceRuleMode,
+          ppwBasis: input.ppwBasis,
+        });
+        // `FinalPpwCap` spells it `stickerPpwCents` and `UnitCap` spells it
+        // `stickerPerUnitCents`. Normalised HERE, once, so no caller has to
+        // know which kind of deal it is holding to ask the same question.
+        return { breakdown: r.breakdown, cap: r.cap, stickerPerUnitCents: r.cap.stickerPpwCents };
+      })();
 
   const rungs = ladderFrom(priced.breakdown, dealerFeePct, source);
 
@@ -453,6 +480,7 @@ export function priceDeal(input: PriceDealInput): DealPrice {
   return {
     product: input.product,
     ...rungs,
+    stickerPerUnitCents: priced.stickerPerUnitCents,
     priceRule:
       product === "cash" ? null : { capped: priced.cap.capped, adderOverrun: priced.cap.adderOverrun },
     applied: creditState("applied", rungs.finalPriceCents, rungs.systemWatts, dealerFeePct, input),

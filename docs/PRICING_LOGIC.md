@@ -1862,15 +1862,20 @@ A field-by-field test now pins the superset, with a $7,000 ON-TOP adder in the
 fixture: priced with none, the very assertion that matters passes while proving
 nothing, which is how the field came to be missing in the first place.
 
-**One mapping was tried and discarded.** `CompareRow.grossPpwCents` (the
-sticker, fee included — §8.20 defect 2) looks like `DealPrice.baseFinalPpwCents`.
-It is not safe to substitute: `baseFinalPpwCents` is
-`round(baseStickerCents / systemWatts)`, which is **0 on a zero-watt row**, and
-the shelf sets `grossPpwCents` on every row including ones where `priced` is
-null entirely. The substitution would print $0.00/W on a storage row. So
-`solar-compare.ts` keeps its own `capStickerToFinalPpw` call: `priceDeal()` does
-not expose the CAPPED STICKER, which is the third gap and the one not closed
-here.
+**One mapping was tried and discarded, and the gap behind it is now closed.**
+`CompareRow.grossPpwCents` (the sticker, fee included — §8.20 defect 2) looks
+like `DealPrice.baseFinalPpwCents`. It is NOT safe to substitute:
+`baseFinalPpwCents` is `round(baseStickerCents / systemWatts)`, which is **0 on
+a zero-watt row**, and the shelf sets `grossPpwCents` on every row including
+ones where `priced` is null entirely. The substitution would print $0.00/W on a
+storage row.
+
+That was the third gap — `priceDeal()` exposed the `capped` FLAG but never the
+capped STICKER. **Closed in §8.30** by `DealPrice.stickerPerUnitCents`, which
+carries the rate per watt on an array and per BATTERY on a storage job. The
+zero-watt edge resolves correctly: `capStickerToFinalUnit` returns `uncapped`
+the moment `units <= 0`, so such a row reports the sticker it was handed rather
+than a zero.
 
 **Status, stated plainly.** 4a (one fee rule) and 4b (the company default as a
 base) are LANDED and green. **4c is NOT done: no site has been rewired to
@@ -1948,3 +1953,37 @@ snapshot file byte-identical in git. Lint clean.
 not price sites); five are per-programme conversions needing one call per menu
 row; `solar-compare.ts` still needs a capped-sticker accessor `priceDeal()` does
 not expose.
+
+
+## 8.30 `DealPrice.stickerPerUnitCents` — the rate a deal is actually priced at
+
+`priceDeal()` reported WHETHER a partner's ceiling bit (`priceRule.capped`) but
+never WHAT it left. Three sites need that figure as a value:
+
+| Site | Uses it for |
+|---|---|
+| `proposal-generate.ts:529, 595` | **writes it back** to `SolarFinance.baseFinalPpwCents` / `baseFinalPerBatteryCents` |
+| `solar-compare.ts:270` | each column's headline $/W |
+| `system-price.tsx:313` | showing the rep what the ceiling did |
+
+All three were verified by reading the call sites, not recalled — the standard
+`marginCents` failed in §8.28, where a field was added that nothing read and
+that could only ever report zero.
+
+**Why it is not `baseFinalPpwCents`.** That field is
+`baseStickerCents / systemWatts`. On an array the two agree exactly. On a
+STORAGE job `systemWatts` is zero, `purchaseFromUnits` zeroes every per-watt
+figure, and it reads **0** while the real per-battery rate is thousands of
+dollars. `proposal-generate.ts` writes this number to the database, so reusing
+it would have priced a battery deal at nothing. A test pins that case
+specifically.
+
+**One normalisation.** `FinalPpwCap` spells it `stickerPpwCents`; `UnitCap`
+spells it `stickerPerUnitCents`. `priceDeal` reached `priced.cap` only for
+`capped` and `adderOverrun` — fields both types share — so the divergence had
+never surfaced. It is normalised inside `priceDeal`, once, so no caller has to
+know which kind of deal it is holding.
+
+Five cases pin it: no rule, a cap that bites, storage where every per-watt
+figure is 0, a flat per-battery rule, and a lease (which sells electricity and
+has no unit to price).
