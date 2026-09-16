@@ -174,6 +174,135 @@ describe("compareOffers — lease and PPA columns", () => {
     expect(row.rateMillsPerKwh).toBe(145);
   });
 
+  it("says what that PPA averages a month, because that is what it is compared on", () => {
+    const [row] = compareOffers(
+      [
+        loan({
+          id: "ppa",
+          product: "ppa",
+          aprPct: null,
+          termMonths: null,
+          dealerFeePct: null,
+          rateMillsPerKwh: 145,
+          escalatorPct: 0,
+          termYears: 1,
+          label: "Amos PPA",
+        }),
+      ],
+      BASIS
+    );
+    // 12,000 kWh at $0.145 is $1,740 in year one, spread over twelve bills.
+    expect(row.avgMonthlyCents).toBe(14_500);
+    // And still no CONTRACTUAL monthly: the two are different promises.
+    expect(row.monthlyCents).toBeNull();
+  });
+
+  it("leaves the average off a lease, whose monthly is already the contract", () => {
+    const [row] = compareOffers(
+      [
+        loan({
+          id: "lease",
+          product: "lease",
+          aprPct: null,
+          termMonths: null,
+          dealerFeePct: null,
+          leaseRateCentsPerKwMonth: 1200,
+          escalatorPct: 0,
+          termYears: 25,
+        }),
+      ],
+      BASIS
+    );
+    expect(row.monthlyCents).toBe(9_600);
+    expect(row.avgMonthlyCents).toBeNull();
+  });
+
+  it("says what that average has escalated to by the last year of the term", () => {
+    // No degradation, so the escalator is the only thing moving: year one is
+    // 12,000 kWh at $0.145 = $1,740 ($145.00/mo) and year two is 10% more.
+    const [row] = compareOffers(
+      [
+        loan({
+          id: "ppa",
+          product: "ppa",
+          aprPct: null,
+          termMonths: null,
+          dealerFeePct: null,
+          rateMillsPerKwh: 145,
+          escalatorPct: 10,
+          termYears: 2,
+        }),
+      ],
+      { ...BASIS, annualDegradationPct: 0 }
+    );
+    expect(row.avgMonthlyCents).toBe(14_500);
+    expect(row.finalYearMonthlyCents).toBe(15_950);
+    expect(row.totalPaidCents).toBe(174_000 + 191_400);
+  });
+
+  it("keeps the last year quiet when nothing escalates", () => {
+    // The same figure printed twice under two headings reads as two payments.
+    const [row] = compareOffers(
+      [
+        loan({
+          id: "lease",
+          product: "lease",
+          aprPct: null,
+          termMonths: null,
+          dealerFeePct: null,
+          leaseRateCentsPerKwMonth: 1200,
+          escalatorPct: 0,
+          termYears: 25,
+        }),
+      ],
+      BASIS
+    );
+    expect(row.monthlyCents).toBe(9_600);
+    expect(row.finalYearMonthlyCents).toBeNull();
+  });
+
+  it("escalates a lease's monthly too, because a lease escalates", () => {
+    const [row] = compareOffers(
+      [
+        loan({
+          id: "lease",
+          product: "lease",
+          aprPct: null,
+          termMonths: null,
+          dealerFeePct: null,
+          leaseRateCentsPerKwMonth: 1200,
+          escalatorPct: 10,
+          termYears: 2,
+        }),
+      ],
+      BASIS
+    );
+    // A lease bills the same twelve payments whatever the roof makes, so the
+    // last year is simply the first grossed up by one year of escalator.
+    expect(row.monthlyCents).toBe(9_600);
+    expect(row.finalYearMonthlyCents).toBe(10_560);
+  });
+
+  it("averages nothing on a PPA whose sheet carries no rate", () => {
+    // Half an entered rate sheet quotes nothing rather than $0.00/mo.
+    const [row] = compareOffers(
+      [
+        loan({
+          id: "ppa",
+          product: "ppa",
+          aprPct: null,
+          termMonths: null,
+          dealerFeePct: null,
+          rateMillsPerKwh: null,
+          escalatorPct: 2.9,
+          termYears: 25,
+        }),
+      ],
+      BASIS
+    );
+    expect(row.avgMonthlyCents).toBeNull();
+  });
+
   it("compounds the escalator rather than adding it", () => {
     const [flat, rising] = compareOffers(
       [

@@ -164,6 +164,37 @@ export type CompareRow = {
    * Null where a fixed monthly is not what this product quotes (cash, PPA).
    */
   monthlyCents: number | null;
+  /**
+   * PPA ONLY — what year one's twelve bills average out at.
+   *
+   * Separate from `monthlyCents` above, which is a figure the customer OWES
+   * every month whatever the weather does. A PPA promises no such thing: the
+   * bill is whatever the roof made that month at the agreed rate, so the twelve
+   * differ and the one honest single number is their mean.
+   *
+   * It has to exist because the shelf is a comparison. Every other column
+   * quotes a monthly and this one quoted a price per kilowatt-hour, which is
+   * not a figure a homeowner can hold up against "$188 a month" — so the PPA
+   * card was the one card on the screen nobody could compare, and a rep closing
+   * one had to do the arithmetic at the table. Null on every other product:
+   * cash has no monthly at all, and a loan's and a lease's are already above.
+   */
+  avgMonthlyCents: number | null;
+  /**
+   * THE SAME MONTHLY IN THE LAST YEAR OF THE TERM — lease and PPA.
+   *
+   * The honest floor of a third-party deal, and the counterpart to the loan
+   * column's `monthlyWithoutPaydownCents` directly below: both are the figure a
+   * headline is quietly hiding, printed under it rather than left to be found
+   * out later. A PPA at a 3.99% escalator is sold on "about $145 a month" and
+   * bills nearer $430 by year thirty; the screen that says the first has to say
+   * the second.
+   *
+   * Null where it would not come out ABOVE the headline — a flat lease, a PPA
+   * with no escalator — because the same number printed twice under two names
+   * reads as two different payments.
+   */
+  finalYearMonthlyCents: number | null;
   /** Loan only: what the payment becomes if the paydown is never applied. */
   monthlyWithoutPaydownCents: number | null;
   /**
@@ -285,6 +316,10 @@ function purchaseRow(
   const base: CompareRow = {
     ...meta,
     monthlyCents: null,
+    // A purchase has a real monthly or none; there is nothing to average.
+    avgMonthlyCents: null,
+    // A loan's payment is the same in its last month as its first.
+    finalYearMonthlyCents: null,
     monthlyWithoutPaydownCents: null,
     withoutCreditsMonthlyCents: null,
     netCostAfterCreditsCents: null,
@@ -472,9 +507,33 @@ function thirdPartyRow(
       )
     : null;
 
+  /**
+   * The last year over twelve months, but only where it says something new.
+   * Both shapes escalate, so both get it; neither gets it flat.
+   */
+  const finalYearMonthlyCents = (): number | null => {
+    if (!lifetime) return null;
+    const last = Math.round(lifetime.finalYearCostCents / 12);
+    const first =
+      p.product === "lease" ? monthlyCents : Math.round(lifetime.year1CostCents / 12);
+    return first != null && last > first ? last : null;
+  };
+
   return {
     ...meta,
     monthlyCents,
+    /**
+     * A PPA's year one, over twelve months.
+     *
+     * Year ONE and not the term's mean, deliberately: the escalator makes the
+     * last year's bill half as much again as the first, and averaging across
+     * all of it would quote a homeowner a payment they never make in any month
+     * of the agreement. Year one is the bill they start paying, which is the
+     * figure every other column on this shelf is also quoting.
+     */
+    avgMonthlyCents:
+      p.product === "ppa" && lifetime ? Math.round(lifetime.year1CostCents / 12) : null,
+    finalYearMonthlyCents: finalYearMonthlyCents(),
     monthlyWithoutPaydownCents: null,
     // A lease or PPA buys electricity. The household never owns the array, so
     // it never claims a credit on one and there is no second payment to quote.

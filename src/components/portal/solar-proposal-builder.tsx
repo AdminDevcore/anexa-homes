@@ -362,6 +362,10 @@ export function SolarProposalBuilder({
               canApprove={canApproveProposal}
               versions={versions}
               onOpenStep={setStep}
+              /* Every step above stays mounted, so this panel's findings would
+                 otherwise survive the very edits they sent the rep off to make.
+                 See `active` on the gate. */
+              active={step === s.id}
             />
           )}
         </StepPanel>

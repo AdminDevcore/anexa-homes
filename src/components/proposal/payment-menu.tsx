@@ -8,6 +8,7 @@ import { QualifyAction, QualifyNote, hasQualifyAction } from "./qualify-button";
 import type { QualifyOffer } from "@/lib/proposal-qualify";
 import {
   optionMonthlyCents,
+  optionSavings,
   quotedTotalCents,
   type ProposalPaymentOption,
 } from "@/lib/solar-proposal";
@@ -69,6 +70,28 @@ export function PaymentMenu({
   const f = selected.financing;
   const offerMenu = showMenu && options.length > 1;
   const monthly = optionMonthlyCents(selected, creditsApplied);
+
+  /**
+   * WHERE A PPA'S MONTHLY COMES FROM, in the household's own numbers.
+   *
+   * Every other option on this menu quotes a figure somebody agreed to: a loan
+   * payment, a lease payment, a price. A PPA's is arithmetic — the roof's
+   * output at a rate per kilowatt-hour — and printing the answer without the
+   * sum leaves the one number on the page that cannot be checked, sitting under
+   * a heading that says "on average" without saying an average of what.
+   *
+   * Read off the frozen year-one row rather than recomputed, like everything
+   * else here: the sentence has to divide into the figure beside it.
+   */
+  const ppaBasis =
+    f.product === "ppa" && f.rateMillsPerKwh != null
+      ? (() => {
+          const year1 = optionSavings(selected, creditsApplied).years[0];
+          return year1 && year1.productionKwh > 0
+            ? { productionKwh: year1.productionKwh, rateMillsPerKwh: f.rateMillsPerKwh }
+            : null;
+        })()
+      : null;
 
   /**
    * THE OFFER BELONGS TO THE QUOTED OPTION AND TO NOTHING ELSE.
@@ -147,6 +170,19 @@ export function PaymentMenu({
             />
           ) : (
             <Line k="Due at completion" v={usd(quotedTotalCents(f) ?? 0)} strong />
+          )}
+
+          {/* One template literal, not a row of {expr} fragments: JSX drops the
+              whitespace between an expression and the text after it, and this
+              sentence is read by a homeowner checking our arithmetic. */}
+          {ppaBasis && (
+            <p className="-mt-1 text-[11px] leading-relaxed text-neutral-500">
+              {`${ppaBasis.productionKwh.toLocaleString()} kWh a year × $${(
+                ppaBasis.rateMillsPerKwh / 1000
+              ).toFixed(3)} per kWh ÷ 12 months. You pay for the power the roof makes, so no two months are the same${
+                f.escalatorPct ? `, and the rate rises ${f.escalatorPct}% a year` : ""
+              }.`}
+            </p>
           )}
 
           {/* THE PRICE, not the paper. On a deal carrying a programme

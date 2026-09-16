@@ -3,6 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Loader2, TriangleAlert, CircleAlert, Sun, ImageUp, Trash2, BadgeCheck, ExternalLink, Maximize2,
@@ -50,7 +51,7 @@ import {
 } from "@/lib/solar-credit-ladder";
 import { lenderProductLabel } from "@/lib/solar-lender-product";
 import { proposalVersionStanding } from "@/lib/solar-proposal-state";
-import { CASH_OFFER_ID, type CompareBasis, type CompareRow, type OfferProduct } from "@/lib/solar-compare";
+import { CASH_OFFER_ID, compareOffers, type CompareBasis, type CompareRow, type OfferProduct } from "@/lib/solar-compare";
 import { FinanceOffers } from "@/components/portal/solar-finance-offers";
 import { SolarSharePanel } from "@/components/portal/solar-share-panel";
 import {
@@ -1314,17 +1315,48 @@ export function SolarFinancePanel({
 
     if (!chosen) return null;
 
-    if (product === "lease" && chosen.leaseRateCentsPerKwMonth != null) {
+    /**
+     * A LEASE OR PPA, PRICED BY THE SAME FUNCTION THE CARD ABOVE IT USES.
+     *
+     * A PPA reached this point and returned null — "priced per kWh produced,
+     * not per month" — so the strip did not render at all, and the one screen
+     * where a rep settles on a way to pay showed a PPA deal no payment of any
+     * kind. It is true that a PPA promises no fixed monthly; it is not true
+     * that there is no monthly. The household pays twelve bills a year and
+     * wants to know what they come to, and the customer's own document has
+     * always printed that average on its front page. The builder simply did
+     * not, so the first place the figure appeared was in front of the customer.
+     *
+     * Through `compareOffers` rather than by multiplying it out here, for the
+     * reason `livePrice` gives above: the card, the comparison column and this
+     * strip are three renderings of one quote, and three call sites deriving it
+     * three ways is how they come to disagree.
+     */
+    if (product === "lease" || product === "ppa") {
+      const offer = offers.find((o) => o.id === chosen.id);
+      const row = offer ? compareOffers([offer], basis)[0] : null;
+      // A lease owes a fixed monthly; a PPA's is the average of a bill that
+      // moves. Both are "what they pay a month", and the label says which.
+      const monthlyCents = row ? (row.monthlyCents ?? row.avgMonthlyCents) : null;
+      if (!row || monthlyCents == null) return null;
       return {
-        monthlyCents: leaseMonthlyCents(chosen.leaseRateCentsPerKwMonth, systemSizeKwDc),
+        monthlyCents,
         fromFactor: false,
         factors: null,
-        // A lease never owns the array, so it never claims a credit on one.
+        // Neither ever owns the array, so neither claims a credit on one.
         withoutCreditsMonthlyCents: null,
         netCostAfterCreditsCents: null,
+        tpo: {
+          /** True when that monthly is an average rather than an obligation. */
+          averaged: product === "ppa",
+          rateMillsPerKwh: chosen.rateMillsPerKwh ?? null,
+          escalatorPct: chosen.escalatorPct ?? null,
+          termYears: chosen.termYears ?? null,
+          finalYearMonthlyCents: row.finalYearMonthlyCents,
+          totalPaidCents: row.totalPaidCents,
+        },
       };
     }
-    if (product === "ppa") return null; // priced per kWh produced, not per month
     if (!isLoan || contractNow == null) return null;
 
     // A PUBLISHED payment factor outranks our amortisation. The factor already
@@ -1377,8 +1409,10 @@ export function SolarFinancePanel({
       /** The deal with no credit ever claimed — printed under the quote. */
       withoutCreditsMonthlyCents: creditsApply ? contractMonthlyCents : null,
       netCostAfterCreditsCents: creditsApply ? liveLadder!.netCostCents : null,
+      tpo: null,
     };
-  }, [chosen, product, isLoan, systemSizeKwDc, documentPriceCents, liveLadder]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chosen, product, isLoan, systemSizeKwDc, documentPriceCents, liveLadder, offers, basis]);
 
   /**
    * What the boxes above currently add up to. Purchase only — see solar-money.
@@ -1610,20 +1644,45 @@ export function SolarFinancePanel({
                 <div className="truncate text-sm font-semibold">
                   {chosen ? lenderProductLabel(chosen) : "Cash"}
                 </div>
+                {/* WHERE THE FIGURE CAME FROM, in one sentence — and on a
+                    third-party deal that sentence is the arithmetic itself,
+                    because "what is this number" is the question a rep gets
+                    asked at the table about a PPA and about nothing else. The
+                    two purchase sentences used to be the only ones here, so a
+                    lease was told its monthly had been "amortised from the
+                    programme's APR and term", which a lease does not have. */}
                 <div className="text-[11px] text-muted-foreground">
-                  {quote.fromFactor
-                    ? "From the rate sheet's payment factor, the lender's own published figure."
-                    : "Amortised from the programme's APR and term."}
+                  {quote.tpo
+                    ? quote.tpo.averaged
+                      ? `${year1ProductionKwh.toLocaleString()} kWh a year${
+                          quote.tpo.rateMillsPerKwh != null
+                            ? ` × $${(quote.tpo.rateMillsPerKwh / 1000).toFixed(3)}/kWh`
+                            : ""
+                        } ÷ 12 — a PPA bills what the roof makes, so this is year one's average.`
+                      : "The lease's own fixed monthly, off this programme's rate sheet."
+                    : quote.fromFactor
+                      ? "From the rate sheet's payment factor, the lender's own published figure."
+                      : "Amortised from the programme's APR and term."}
                 </div>
               </div>
             </div>
             <div className="text-right">
               <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                Monthly
+                {quote.tpo?.averaged ? "Monthly · average" : "Monthly"}
               </div>
               <div className="font-display text-2xl font-semibold tabular-nums">
                 ${(quote.monthlyCents / 100).toFixed(2)}
               </div>
+              {/* The escalator, said as money rather than as a percentage. A
+                  rep quoting "about $145 a month" on thirty years at 3.99% is
+                  quoting the smallest figure in the agreement, and the year the
+                  number doubles is not a thing to find out from the customer. */}
+              {quote.tpo?.finalYearMonthlyCents != null && (
+                <div className="text-[11px] tabular-nums text-muted-foreground">
+                  ${(quote.tpo.finalYearMonthlyCents / 100).toFixed(2)}/mo
+                  {quote.tpo.termYears ? ` in year ${quote.tpo.termYears}` : " at the end"}
+                </div>
+              )}
               {/* Both payments, in the order the customer's own document says
                   them: what they are quoted — the credits this job earns
                   already against the loan — and what it costs if they never
@@ -1664,6 +1723,41 @@ export function SolarFinancePanel({
                   className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-foreground"
                 >
                   Run credit at {lender.name} <ExternalLink className="size-3" />
+                </a>
+              )}
+            </div>
+          )}
+
+          {/* The terms of a third-party deal, in the same place a loan's sit.
+              The rate and the escalator ARE the deal — there is no price per
+              watt and no contract price on one — so a strip that showed neither
+              left a rep nothing to check the rate sheet against. */}
+          {chosen && quote.tpo && (
+            <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1 border-t border-border/70 px-4 py-2 text-[11px] text-muted-foreground">
+              <span>
+                {[
+                  quote.tpo.rateMillsPerKwh != null
+                    ? `$${(quote.tpo.rateMillsPerKwh / 1000).toFixed(3)}/kWh`
+                    : null,
+                  quote.tpo.termYears ? `${quote.tpo.termYears} yr` : null,
+                  quote.tpo.escalatorPct != null
+                    ? `${quote.tpo.escalatorPct}%/yr escalator`
+                    : null,
+                  quote.tpo.totalPaidCents != null
+                    ? `${money(quote.tpo.totalPaidCents)} over the term`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
+              {lender?.portalUrl && (
+                <a
+                  href={lender.portalUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-foreground"
+                >
+                  Open {lender.name} <ExternalLink className="size-3" />
                 </a>
               )}
             </div>
@@ -1876,6 +1970,7 @@ export function SolarProposalGate({
   canEdit,
   canApprove = false,
   onOpenStep,
+  active,
 }: {
   leadId: string;
   /** Where the proposal can be sent. Null means nowhere. */
@@ -1887,26 +1982,88 @@ export function SolarProposalGate({
   canApprove?: boolean;
   /** Sends the rep to the builder step that fixes a finding. See ValidationList. */
   onOpenStep?: (step: BuilderStep) => void;
+  /**
+   * Whether this step is the one on screen.
+   *
+   * THE REPORT MUST NOT OUTLIVE THE DEAL IT JUDGED. Every step of the builder
+   * stays mounted — they are hidden, not unmounted, so a rep can move between
+   * them without losing a half-filled form — and this panel's findings are
+   * client state. Together that meant a report ran once and then stayed on the
+   * screen for the rest of the session, however much of the deal changed
+   * underneath it.
+   *
+   * A real one: a rep checked a loan quoted at a 50% dealer fee, was told the
+   * fee was implausible, went to Financing, re-quoted the deal as a 30-year
+   * PPA — which has no dealer fee at all, and which the validator has never
+   * asked about one — came back, and read the same red block against a product
+   * it cannot apply to. Nothing was wrong with the rules. The screen was
+   * answering a question about a deal that no longer existed.
+   */
+  active?: boolean;
 }) {
-  const [issues, setIssues] = React.useState<ValidationIssue[] | null>(null);
-  const [canGen, setCanGen] = React.useState<boolean | null>(null);
-  const [busy, setBusy] = React.useState(false);
+  const [generating, setGenerating] = React.useState(false);
   const router = useRouter();
+  const qc = useQueryClient();
+  const readinessKey = React.useMemo(() => ["solar-readiness", leadId], [leadId]);
+
+  /**
+   * The readiness report, held as a QUERY rather than as remembered state.
+   *
+   * Arriving at this step is what asks the question — that is `enabled` — and
+   * nothing survives the visit, so a rep who goes off to change the financing
+   * and comes back is answered about the deal as it is NOW rather than as it
+   * was when they last pressed a button. The button stays, for asking again
+   * without leaving the step, which is what a rep does after fixing something
+   * in another tab. It is simply no longer the only way to find out.
+   */
+  const {
+    data: answer,
+    isFetching,
+    refetch,
+  } = useQuery({
+    queryKey: readinessKey,
+    queryFn: async () => {
+      const res = await validateSolarDealAction(leadId);
+      if (!res.ok) throw new Error(res.error);
+      return { issues: res.issues, canGenerate: res.canGenerate };
+    },
+    enabled: !!active,
+    // Nothing about a deal mid-edit is worth keeping for even a moment: a
+    // remembered answer IS the bug this panel had.
+    staleTime: 0,
+    gcTime: 0,
+    retry: false,
+  });
+
+  /**
+   * And nothing is painted while the answer is in flight.
+   *
+   * Whatever is on screen belongs to the last deal this panel asked about. The
+   * moment a fresh question is out, it is a claim about a deal that may have
+   * changed underneath it — which is the whole failure — so it comes off the
+   * screen until the answer lands rather than sitting there looking current.
+   */
+  const report = isFetching ? null : (answer ?? null);
+  const issues = report?.issues ?? null;
+  const canGen = report ? report.canGenerate : null;
+  const busy = isFetching || generating;
 
   // Versions arrive newest-first, so the first one still standing is the one
   // this deal is actually quoting.
   const current = versions.find((v) => !v.supersededAt) ?? null;
 
   async function generate() {
-    setBusy(true);
+    setGenerating(true);
     const res = await generateSolarProposalAction(leadId);
-    setBusy(false);
+    setGenerating(false);
     if (!res.ok) {
       // Blocking issues are surfaced inline rather than as a bare toast — the
-      // rep needs to know WHAT to fix, not just that it failed.
+      // rep needs to know WHAT to fix, not just that it failed. Written into
+      // the query rather than into a second copy of it: generation runs the
+      // same rules, so its answer IS the report, and two stores of one report
+      // are two things on a screen that can disagree.
       if ("issues" in res && res.issues) {
-        setIssues(res.issues);
-        setCanGen(false);
+        qc.setQueryData(readinessKey, { issues: res.issues, canGenerate: false });
       }
       return toast.error(res.error);
     }
@@ -1914,14 +2071,7 @@ export function SolarProposalGate({
     router.refresh();
   }
 
-  async function check() {
-    setBusy(true);
-    const res = await validateSolarDealAction(leadId);
-    setBusy(false);
-    if (!res.ok) return toast.error(res.error);
-    setIssues(res.issues);
-    setCanGen(res.canGenerate);
-  }
+  const check = () => void refetch();
 
   return (
     <div className="space-y-3">
@@ -1940,7 +2090,9 @@ export function SolarProposalGate({
           Check it is ready
         </Button>
         {canGen === true && <span className="text-xs text-emerald-600">Ready to generate</span>}
-        {canGen === false && <span className="text-xs text-red-600">Blocked — fix the issues below</span>}
+        {canGen === false && (
+          <span className="text-xs text-red-600">Blocked — fix the issues below</span>
+        )}
       </div>
       {issues && <ValidationList issues={issues} onOpenStep={onOpenStep} />}
       {issues && issues.length === 0 && (
