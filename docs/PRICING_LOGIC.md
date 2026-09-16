@@ -2083,3 +2083,124 @@ baseline.
 
 **Stage 4c now stands at 4 of 25 sites rewired:** the customer's document (§8.29),
 the commission measure, generation (§8.31), and the builder shelf.
+
+## 8.33 Stage 4c — COMPLETE. Every price site prices through `priceDeal()`
+
+**Measured, not asserted.** A comment-aware sweep of `src/` (code lines only —
+see the note on `sed` below):
+
+| | count |
+|---|---|
+| Files calling a raw price primitive outside the pricing library | **0** |
+| Files pricing through `priceDeal()` | **11** |
+| Files holding base↔sticker conversions only (these stay) | **9** |
+
+The eleven: `leads/[id]/page.tsx`, `member-pay-structure.tsx`,
+`solar-panels.tsx`, `solar/system-price.tsx`, `solar-compare.ts`,
+`solar-finance-row.ts`, `solar-proposal-options.ts`, `solar-proposal.ts`,
+`commission-pricing.ts`, `deal-money.ts`, `proposal-generate.ts`.
+
+### A correction to this document's own counting
+
+§8.28 and four commit messages in this stage say "of 25" and "of 22". **Both
+denominators were wrong.** They counted files and call sites that include
+base↔sticker conversions and pure readers — neither of which is a price site,
+and neither of which `priceDeal()` has a door for. On the measure that matters
+— *code that prices a deal outside the pricing library* — the true figure was
+**11 files**, and it is now **0**.
+
+`solar-validation.ts`, `proposal-reprice-actions.ts` and
+`solar-lender/detail.tsx` were on the "sites to connect" list and should never
+have been: they contain conversions and a floor judgement, and nothing else.
+
+### What each remaining conversion converted
+
+Six sites landed in this stretch. Each one hid a detail that would have moved a
+number, and none was caught by a test — all were found by reading the consumers
+before editing:
+
+1. **`solar-finance-row.ts`** — cap-then-price collapsed. Cash cannot diverge
+   because `lp` is already null on cash by the guard where it is resolved.
+   Proved with 210 differential cases against the transcribed old arithmetic.
+2. **`solar-proposal-options.ts`** — the per-battery ceiling. A cap-ONLY site:
+   a primitive became a ladder of which one number is kept. 96 cases.
+3. **`leads/[id]/page.tsx`** — the deal page's working price. Its adders rung
+   wants BOTH halves, which is `addersCents` — correct only because of the fix
+   below.
+4. **`member-pay-structure.tsx`** — a worked example with no lender, which is
+   why it carries a reviewed `ALLOWED` entry rather than a partner rule.
+5. **`solar/system-price.tsx`** — TWO pairs, array and battery. `product: "loan"`
+   pinned on the battery: the old code capped separately and ignored the
+   product, so passing `fee > 0 ? "loan" : "cash"` through would have stopped
+   capping a 0%-fee programme.
+6. **`solar-panels.tsx` + `deal-money.ts`** — the builder strip and the deal
+   save. Here `product` passes straight through, because those old calls were
+   `priceStoredPurchase`/`priceStorageStored`, which null the rule on cash
+   themselves. **Same-looking sites, opposite correct answers.**
+
+### Two defects found on the way, both fixed
+
+**`priceDeal` counted a financed-on-top adder twice** (`c38ba27`).
+`priceUnits` builds `adderTotalCents` as `inside + onTop`, and `ladderFrom` then
+added `onTop` again — so `addersCents` was `inside + 2 × onTop`, and
+`addersInsideRuleCents` held the total under a name saying otherwise. On the
+suite's own fixture, $16,500 against a true $9,500. It survived because the two
+input types describe the on-top adders in **opposite directions and both are
+correct**: disjoint on the INPUT, "of that" on the OUTPUT. Not live — nothing
+read `addersCents` — but the deal page conversion above would have put it on a
+screen.
+
+**Both CI guards had gone blind to Stage 4** (`d5a4e4f`). Guard 1 triggers on
+`pricePurchase(`; guard 3 on a list of five functions. `priceDeal` was in
+neither, so **every conversion silently removed a file from their view** — six
+of the first seven, one per commit. The old trigger saw 3 files under `src/`;
+the extended one sees 11. A guard a refactor can retire without anyone deciding
+to retire it is the same hole as a spread the guard cannot see.
+
+### The ratchet
+
+"Zero raw primitives outside the library" was a property of the tree, not a
+rule, and would have lasted until the next screen needed a price and found
+`pricePurchase` first — which is how eleven independent price sites came to
+exist. `solar-partner-price-rule.test.ts` now asserts it, with a negative
+control: a ratchet whose regex matched nothing would pass exactly as green.
+
+### Verification
+
+- `tsc` 0, unit **173 files / 2,945 tests**, lint 0 errors 0 warnings on every
+  changed file.
+- Integration in the private schema `vertical_stage4c`: **791 passing, 7
+  failing** — byte-identical to this branch's baseline (`storage/retention` ×6,
+  `calendar/visit-crew` ×1, both pre-existing and unreachable from these diffs).
+- Golden snapshots **byte-identical in git** throughout. **No customer price
+  moved.**
+
+### A flaw in this session's own measuring, recorded
+
+Several sweeps used `sed '/^\s*\*/d'` to strip block comments. **BSD/macOS `sed`
+does not support `\s`**, so that pattern deleted nothing and comment lines were
+counted as code. It produced a wrong reading of where the guards' evidence
+lived, which was then quoted as justification in a commit message. The claim
+happened to be true; the evidence for it was worthless. Everything above was
+re-measured with a comment-aware parser.
+
+The same habit caught a second time, one paragraph up: the test count in
+**Verification** was first written as "2,950" from arithmetic in my head, before
+the suite was run. The measured figure is 2,945. A verification section carrying
+a predicted number is not a verification section, and the prediction was wrong
+by five.
+
+### Not done, and deliberately
+
+- **Stage 5 — waits on counsel.** Not started.
+- **D4 wording — not shipped.** Credits stay out of the contract.
+- **The storage-only gap on the deal page** (§ in the site 7 commit):
+  `batteryChargeCents` returns 0 on a storage-only deal, so that page's working
+  price would be its adders with the batteries missing. Unreachable today —
+  production holds no storage-only design (6 `pv_storage`, 2 `pv`, read-only
+  check) — and fixing it changes what a screen shows, which is not what a
+  conversion is for.
+- **Lease/PPA commission has no test anywhere**, which is why
+  `commission-pricing.ts` stays product-gated rather than delegating wholesale.
+- **The e2e suite has never been run on this branch.** 17 specs are already red
+  on `main`, so that signal needs separating before it means anything.

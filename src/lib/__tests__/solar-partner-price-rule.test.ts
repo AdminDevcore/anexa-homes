@@ -322,3 +322,80 @@ describe("the basis guard watches both spellings of the partner's figure", () =>
     expect(APPLIES_FIGURE.test("priceStoredPurchase({")).toBe(true);
   });
 });
+
+/**
+ * THE RATCHET: a deal is priced through ONE door.
+ *
+ * Stage 4c ended with every price site in the product going through
+ * `priceDeal()` and no file outside the pricing library calling the arithmetic
+ * underneath it. That is a property of the tree today, not a rule — and an
+ * unenforced property lasts exactly until the next screen needs a price and
+ * finds `pricePurchase` first, which is how the eleven independent price sites
+ * came to exist in the first place.
+ *
+ * The guard above does NOT cover this. It asks whether a caller applies the
+ * partner's rule; a new `pricePurchase` caller that dutifully caps first would
+ * satisfy it completely while still being a twelfth independent derivation of
+ * the customer's price, free to drift from the other eleven the moment either
+ * changes.
+ *
+ * So: the primitives are the pricing library's to call. Everything else asks
+ * `priceDeal()`.
+ *
+ * `basePpwFromSticker`, `grossPpwFromNet` and `underBaseFloor` are deliberately
+ * NOT listed. They convert between a base and a sticker, or judge a floor; they
+ * price nothing, `priceDeal` has no door that answers those questions, and nine
+ * files legitimately use them.
+ */
+const RAW_PRICE =
+  /\b(pricePurchase|priceStoredPurchase|priceStoragePurchase|priceStorageStored|priceUnits|capStickerToFinalPpw|capStickerToFinalUnit)\s*\(/;
+
+/** The pricing library itself. Reviewed exceptions go here with the reason. */
+const ALLOWED_RAW_PRICE: Record<string, string> = {
+  // Declares the arithmetic. Every one of these functions lives here.
+  "src/lib/solar-money.ts": "declares the primitives",
+  // THE ONE DOOR. `priceDeal` is the only thing that may call them, which is
+  // the whole point of the rule — its two branches delegate to
+  // `priceStoredPurchase` and `priceStorageStored`.
+  "src/lib/solar-price-deal.ts": "the one door every site prices through",
+};
+
+describe("a deal is priced through one door", () => {
+  it("no file outside the pricing library calls the arithmetic directly", () => {
+    const offenders: string[] = [];
+
+    for (const dir of SCAN_DIRS) {
+      for (const file of walk(join(REPO_ROOT, dir))) {
+        const rel = relative(REPO_ROOT, file).split(sep).join("/");
+        if (rel in ALLOWED_RAW_PRICE) continue;
+
+        const code = readFileSync(file, "utf8")
+          .split("\n")
+          .filter((line) => !COMMENT.test(line));
+
+        if (code.some((line) => RAW_PRICE.test(line))) offenders.push(rel);
+      }
+    }
+
+    expect(
+      offenders,
+      `These files price a deal with the raw arithmetic instead of priceDeal(). ` +
+        `Stage 4c removed the last of them; a new one is a twelfth independent ` +
+        `derivation of the customer's price. Call priceDeal(), or add the file to ` +
+        `ALLOWED_RAW_PRICE with the reason it cannot.`
+    ).toEqual([]);
+  });
+
+  it("can still fail — it is not a pattern that matches nothing", () => {
+    // The same lesson as the negative control above: a ratchet whose regex
+    // matched nothing would pass just as green as one holding the line.
+    const lines = (s: string) => s.split("\n").filter((l) => !COMMENT.test(l));
+    expect(lines(`const b = pricePurchase({ stickerPpwCents: 400 });`).some((l) => RAW_PRICE.test(l))).toBe(true);
+    expect(lines(`const c = capStickerToFinalUnit({ units: 2 });`).some((l) => RAW_PRICE.test(l))).toBe(true);
+    expect(lines(`const s = priceStorageStored({ batteryQty: 2 });`).some((l) => RAW_PRICE.test(l))).toBe(true);
+    // The approved way through, and the conversions that are not pricing.
+    expect(lines(`const p = priceDeal({ priceRulePpwCents: 550 });`).some((l) => RAW_PRICE.test(l))).toBe(false);
+    expect(lines(`const base = basePpwFromSticker(550, 65);`).some((l) => RAW_PRICE.test(l))).toBe(false);
+    expect(lines(`const up = grossPpwFromNet(350, 18);`).some((l) => RAW_PRICE.test(l))).toBe(false);
+  });
+});
