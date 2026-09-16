@@ -281,7 +281,7 @@ const LINES: CompareLine[] = [
     label: "You keep",
     hint: "Your gross per watt after this lender's cut and the adders.",
     cell: (r) =>
-      r.capped && r.netPpwCents != null ? `$${(r.netPpwCents / 100).toFixed(2)}/W` : null,
+      r.capped && r.keptPpwCents != null ? `$${(r.keptPpwCents / 100).toFixed(2)}/W` : null,
   },
   {
     key: "contract-price",
@@ -525,7 +525,7 @@ function CompareColumn({
             <>
               Held at {row.lenderName ?? "this lender"}&rsquo;s $
               {(row.maxFinalPpwCents / 100).toFixed(2)}/W cap
-              {row.netPpwCents != null && <> — you keep ${(row.netPpwCents / 100).toFixed(2)}/W</>}.
+              {row.keptPpwCents != null && <> — you keep ${(row.keptPpwCents / 100).toFixed(2)}/W</>}.
             </>
           )}
         </p>

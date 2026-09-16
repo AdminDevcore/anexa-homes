@@ -1,6 +1,7 @@
 import type { FinanceProduct } from "@prisma/client";
 import { factorQuote, factorMonthlyCents, hasPaymentFactor, type PaymentFactors } from "./solar-loan";
 import { resolveUtilityRateMills } from "./solar-energy";
+import { withoutDealerFee } from "./solar-lender-product";
 import {
   apportionCents,
   pricePurchase,
@@ -329,7 +330,7 @@ export function savingsModel(args: {
   purchase?: PurchaseBreakdown;
   thirdParty?: ThirdPartyBreakdown;
   ppaRateMills?: number | null;
-  leaseMonthlyCents?: number | null;
+  leasePaymentCents?: number | null;
   escalatorPct?: number | null;
   termYears?: number | null;
   assumptions: SolarAssumptions;
@@ -538,7 +539,7 @@ export function savingsModel(args: {
         solarPaymentCents =
           args.product === "ppa"
             ? Math.round((production * (args.ppaRateMills ?? 0) * esc) / 10)
-            : Math.round((args.leaseMonthlyCents ?? 0) * 12 * esc);
+            : Math.round((args.leasePaymentCents ?? 0) * 12 * esc);
       }
     }
 
@@ -756,7 +757,7 @@ export type SnapshotFinancing = {
   batteryQty?: number;
   finalPpwCents: number | null;
   /** Lease/PPA only. */
-  leaseMonthlyCents: number | null;
+  leasePaymentCents: number | null;
   rateMillsPerKwh: number | null;
   escalatorPct: number | null;
   termYears: number | null;
@@ -818,7 +819,7 @@ export type SnapshotFinancing = {
    * deal was written on, and a catalogue row can be renamed or retired long
    * before anybody goes looking for it.
    */
-  lenderProductLabel?: string | null;
+  programmeLabel?: string | null;
   /**
    * WHAT THE CUSTOMER IS FINANCING. v6 and later.
    *
@@ -1285,7 +1286,13 @@ export type SolarProposalSnapshot = {
 
 /**
  * The price keys as they were spelled before v9, paired with what they are
- * called now. Order is irrelevant; every pair is independent.
+ * called now.
+ *
+ * TWO LEGACY SPELLINGS CAN SHARE ONE CURRENT KEY — the lease payment has been
+ * called three things — so the pairs are applied in order and the FIRST one
+ * present wins. `monthlyPaymentCents` is the older of the two and is listed
+ * first for that reason; a document carrying both (nothing writes one) is
+ * answered by it.
  */
 const LEGACY_FINANCING_KEYS = [
   ["contractPriceCents", "finalPriceCents"],
@@ -1293,7 +1300,13 @@ const LEGACY_FINANCING_KEYS = [
   ["basePriceCents", "baseFinalCents"],
   ["adderTotalCents", "addersFinalCents"],
   ["batteryPriceCents", "equipmentFinalCents"],
-  ["monthlyPaymentCents", "leaseMonthlyCents"],
+  ["monthlyPaymentCents", "leasePaymentCents"],
+  // v9 as first shipped called it this; renamed once the FUNCTION of the same
+  // name in solar-money.ts made the spelling ambiguous at every call site.
+  ["leaseMonthlyCents", "leasePaymentCents"],
+  // The rate-sheet row a document was quoted from. Renamed away from
+  // `lenderProductLabel` for the same reason: that name is a FUNCTION.
+  ["lenderProductLabel", "programmeLabel"],
 ] as const;
 
 /**
@@ -1346,10 +1359,23 @@ export function readProposalSnapshot(raw: unknown): SolarProposalSnapshot | null
     let touched = false;
     const next = storedOptions.map((option) => {
       if (option == null || typeof option !== "object") return option;
-      const respelled = respellFinancing((option as Record<string, unknown>).financing);
-      if (!respelled) return option;
+      const o = option as Record<string, unknown>;
+      const respelled = respellFinancing(o.financing);
+      /**
+       * The option's own menu label is a SIBLING of `financing`, not a key
+       * inside it, so `respellFinancing` above never sees it — and it is the
+       * string the payment menu actually prints. It carries the same frozen
+       * dealer fee and comes off the same way.
+       */
+      const label = typeof o.label === "string" ? withoutDealerFee(o.label) : o.label;
+      const relabelled = label !== o.label;
+      if (!respelled && !relabelled) return option;
       touched = true;
-      return { ...(option as Record<string, unknown>), financing: respelled };
+      return {
+        ...o,
+        ...(respelled ? { financing: respelled } : {}),
+        ...(relabelled ? { label } : {}),
+      };
     });
     if (touched) options = next;
   }
@@ -1379,6 +1405,29 @@ function respellFinancing(financing: unknown): Record<string, unknown> | null {
     delete next[legacy];
     respelled = true;
   }
+
+  /**
+   * THE DEALER FEE COMES OFF THE PROGRAMME LABEL HERE, not in the renderer.
+   *
+   * A document frozen before `customerProductLabel` existed carries labels like
+   * "25 yr · 6.99% · fee 18%", and the fee is what the LENDER charges US — it
+   * is inside the price the household was quoted and is not a line they are
+   * ever shown. Three renderers were each taking it off on the way to the
+   * screen, which meant a fourth would print it.
+   *
+   * Stripping on the way out of the one door fixes every reader at once, and it
+   * is safe to do unconditionally: a label with no fee in it is returned
+   * unchanged, so a v9 document still takes the fast path below.
+   */
+  const label = next.programmeLabel;
+  if (typeof label === "string") {
+    const stripped = withoutDealerFee(label);
+    if (stripped !== label) {
+      next.programmeLabel = stripped;
+      respelled = true;
+    }
+  }
+
   return respelled ? next : null;
 }
 
@@ -1500,7 +1549,7 @@ export type ProposalAlternative = {
   lenderApplyUrl?: string | null;
   loanFactors?: PaymentFactors | null;
   /** The rate-sheet row's own name, frozen for the funder's paperwork. */
-  lenderProductLabel?: string | null;
+  programmeLabel?: string | null;
   /**
    * THIS option's partner's sign-today rule.
    *
@@ -1543,7 +1592,7 @@ function priceOption(args: {
   lenderLogoUrl: string | null;
   lenderApplyUrl: string | null;
   loanFactors: PaymentFactors | null;
-  lenderProductLabel?: string | null;
+  programmeLabel?: string | null;
   /**
    * The company's federal-credit percentages, and which of them THIS deal
    * earns.
@@ -1800,7 +1849,7 @@ function priceOption(args: {
       purchase,
       thirdParty,
       ppaRateMills: finance.rateMillsPerKwh,
-      leaseMonthlyCents: finance.monthlyPaymentCents,
+      leasePaymentCents: finance.monthlyPaymentCents,
       escalatorPct: finance.escalatorPct,
       termYears: finance.termYears,
       assumptions: a,
@@ -1995,7 +2044,7 @@ function priceOption(args: {
     // Lease/PPA carry no APR. Gating here as well as at the write means a
     // stale value left on the row by a product switch can never reach a
     // customer as a fabricated lender term.
-    leaseMonthlyCents: isPurchase ? null : finance.monthlyPaymentCents,
+    leasePaymentCents: isPurchase ? null : finance.monthlyPaymentCents,
     rateMillsPerKwh: finance.product === "ppa" ? finance.rateMillsPerKwh : null,
     escalatorPct: isPurchase ? null : finance.escalatorPct,
     termYears: finance.termYears,
@@ -2028,8 +2077,8 @@ function priceOption(args: {
     // Spread, not assigned null — the snapshot holds no undefined, and a key
     // that is simply not there is how a pre-v6 document says "nobody recorded
     // this", which is exactly what happened.
-    ...(finance.product === "loan" && args.lenderProductLabel
-      ? { lenderProductLabel: args.lenderProductLabel }
+    ...(finance.product === "loan" && args.programmeLabel
+      ? { programmeLabel: args.programmeLabel }
       : {}),
     /**
      * The money the payment is actually taken from.
@@ -2065,7 +2114,7 @@ function priceOption(args: {
       : finance.product === "loan"
         ? financing.loanMonthlyPaymentCents
         : finance.product === "lease"
-          ? financing.leaseMonthlyCents
+          ? financing.leasePaymentCents
           : year1
             ? Math.round(year1.solarPaymentCents / 12)
             : null;
@@ -2165,7 +2214,7 @@ export function buildProposalSnapshot(args: {
   /** The lender's CUSTOMER application link. Never the dealer portal. */
   lenderApplyUrl?: string | null;
   /** The quoted rate-sheet row's own name, for the funder's paperwork. */
-  lenderProductLabel?: string | null;
+  programmeLabel?: string | null;
   /**
    * The federal credits, as the company states them and as this deal earns
    * them. Document-wide rather than per option: the statute does not change
@@ -2277,7 +2326,7 @@ export function buildProposalSnapshot(args: {
     lenderLogoUrl: args.lenderLogoUrl ?? null,
     lenderApplyUrl: args.lenderApplyUrl ?? null,
     loanFactors: args.loanFactors ?? null,
-    lenderProductLabel: args.lenderProductLabel ?? null,
+    programmeLabel: args.programmeLabel ?? null,
     now: args.now,
   });
 
@@ -2317,7 +2366,7 @@ export function buildProposalSnapshot(args: {
       lenderLogoUrl: alt.lenderLogoUrl ?? null,
       lenderApplyUrl: alt.lenderApplyUrl ?? null,
       loanFactors: alt.loanFactors ?? null,
-      lenderProductLabel: alt.lenderProductLabel ?? null,
+      programmeLabel: alt.programmeLabel ?? null,
       // This column's partner, not the deal's. Cash carries none and falls to
       // whatever the rep typed, which is the same line the shelf draws.
       signTodayRule: alt.signTodayRule ?? null,

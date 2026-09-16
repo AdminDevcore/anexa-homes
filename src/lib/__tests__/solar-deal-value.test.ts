@@ -117,7 +117,7 @@ describe("what gets stamped onto Lead.value", () => {
     const f = {
       product: "loan",
       finalPriceCents: 8_266_000,
-      leaseMonthlyCents: null,
+      leasePaymentCents: null,
       rateMillsPerKwh: null,
       creditLadder: { netCostCents: 4_133_000 },
     } as unknown as SnapshotFinancing;
@@ -248,7 +248,7 @@ describe("contract revenue is the gross, never the after-credit net", () => {
       product: "loan",
       finalPriceCents: CONTRACT,
       creditLadder: { netCostCents: NET_AFTER_30PCT_ITC },
-      leaseMonthlyCents: null,
+      leasePaymentCents: null,
       rateMillsPerKwh: null,
     } as unknown as SnapshotFinancing;
     expect(solarContractRevenueCents(snapshotPriceSource(financing))).toBe(CONTRACT);

@@ -59,7 +59,7 @@ export type AdderOption = {
    * between a $7,000 roof the customer borrows and a $7,000 roof that comes out
    * of the company's margin.
    */
-  financedOnTop: boolean;
+  outsidePriceRule: boolean;
 };
 
 export type DealAdderLine = AdderLine & {
@@ -71,7 +71,7 @@ export type DealAdderLine = AdderLine & {
 };
 
 /**
- * `financedOnTop` rides in on `AdderLine`, and it is worth saying here why the
+ * `outsidePriceRule` rides in on `AdderLine`, and it is worth saying here why the
  * chip below matters: it is COPIED off the catalogue when the line is added.
  * Ticking the box in Settings therefore changes nothing on a line already on a
  * deal — deliberately, exactly like a price change — so a rep who needs an
@@ -119,7 +119,7 @@ export function SolarAddersPanel({
     basis: "custom" as AdderBasis,
     rate: "",
     qty: "1",
-    financedOnTop: false,
+    outsidePriceRule: false,
   });
 
   const totals = React.useMemo(() => adderTotals(lines, systemWatts), [lines, systemWatts]);
@@ -172,11 +172,11 @@ export function SolarAddersPanel({
         showOnProposal: false,
         // Only honoured on a ONE-OFF. A line picked off the catalogue takes the
         // catalogue's answer — see `addDealAdderAction`.
-        financedOnTop: custom.basis === "discount" ? false : custom.financedOnTop,
+        outsidePriceRule: custom.basis === "discount" ? false : custom.outsidePriceRule,
       })
     );
     setCustom({
-      label: "", amount: "", basis: "custom", rate: "", qty: "1", financedOnTop: false,
+      label: "", amount: "", basis: "custom", rate: "", qty: "1", outsidePriceRule: false,
     });
     setAdding(false);
   }
@@ -293,7 +293,7 @@ export function SolarAddersPanel({
                   partner's rate. Two identical-looking roof lines can be priced
                   differently — one added before the box was ticked in Settings,
                   one after — and nothing else on this row would say so. */}
-              {l.financedOnTop && (
+              {l.outsidePriceRule && (
                 <span
                   className="rounded-full border chip-warning px-2 py-0.5 text-[11px] font-medium"
                   title="Financed on top of the lender's fixed or maximum $/W instead of coming out of the system price. The dealer fee still applies to it."
@@ -517,16 +517,16 @@ export function SolarAddersPanel({
               {/* The one-off equivalent of the catalogue's own tick. A roof
                   priced on the day is still a roof, and on a fixed-price
                   partner it rides on the loan rather than out of the system
-                  price — see `financedOnTop`. Hidden on a discount, which the
+                  price — see `outsidePriceRule`. Hidden on a discount, which the
                   server refuses for the same reason. */}
               {custom.basis !== "discount" && (
                 <label className="flex items-start gap-2 text-xs text-muted-foreground">
                   <input
                     type="checkbox"
                     className="mt-0.5"
-                    checked={custom.financedOnTop}
+                    checked={custom.outsidePriceRule}
                     onChange={(e) =>
-                      setCustom((c) => ({ ...c, financedOnTop: e.target.checked }))
+                      setCustom((c) => ({ ...c, outsidePriceRule: e.target.checked }))
                     }
                   />
                   <span>
@@ -780,7 +780,7 @@ function AdderPicker({
                       {ADDER_BASES[o.basis].counted &&
                         ` · enter ${adderCountLabel(o.basis)?.toLowerCase()} on the line`}
                       {o.consumptionAdjustable && " · changes usage"}
-                      {o.financedOnTop && " · financed on top of a fixed price"}
+                      {o.outsidePriceRule && " · financed on top of a fixed price"}
                       {onDealIds.has(o.id) && " · already on the quote"}
                     </span>
                   </span>

@@ -12,7 +12,7 @@ import { runInVertical } from "@/server/vertical/context";
  * was that nothing behind the control said no.
  *
  * The sharp end: `SolarDealComp` freezes the pay RATES at signing, but a
- * redline is measured against `basePriceCents`, which payroll recomputes live
+ * redline is measured against `baseKeptCents`, which payroll recomputes live
  * from `SolarFinance`. Raising the price after signature raised the rep's own
  * commission on their own deal.
  */
@@ -221,7 +221,7 @@ describe("after the customer signs, the economics are locked", () => {
     const res = await inSolar(() =>
       addDealAdderAction({
         leadId, label: "Trenching", basis: "flat", flatCents: 500_000, qty: 1,
-        showOnProposal: false, financedOnTop: false,
+        showOnProposal: false, outsidePriceRule: false,
       } as Parameters<typeof addDealAdderAction>[0])
     );
     expect(res.ok).toBe(false);

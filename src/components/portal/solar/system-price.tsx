@@ -348,7 +348,7 @@ export function SystemPriceCard({
    * still holds what they typed; the rung says what the rule made of it.
    */
   const heldBaseCents =
-    customerCap?.capped && customerPriced ? customerPriced.basePriceCents : null;
+    customerCap?.capped && customerPriced ? customerPriced.baseKeptCents : null;
   const ladderBaseCents = heldBaseCents ?? baseTotalCents;
   const ladderBasePpw =
     heldBaseCents != null ? (watts > 0 ? heldBaseCents / watts : null) : basePpwCents;

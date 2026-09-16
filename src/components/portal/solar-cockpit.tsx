@@ -189,9 +189,9 @@ export type SystemMoney = {
     } | null;
   } | null;
   /** The partner's stated final $/W, cents. Null when it publishes none. */
-  maxFinalPpwCents: number | null;
+  priceRulePpwCents: number | null;
   /** Whether that figure is a ceiling or this partner's flat price. */
-  finalPpwMode: "cap" | "flat";
+  priceRuleMode: "cap" | "flat";
   /** Which price that figure fixes on the quoted programme. See SolarPriceBasis. */
   ppwBasis: "final" | "gross" | "base";
   /** True when that rule is what set this price, rather than the base. */
@@ -346,10 +346,10 @@ export function SolarSystemMoneyPanel({
                     ladder={money.ladder}
                     redrawn={money.drift.length > 0}
                     cap={
-                      money.cappedByLender && money.maxFinalPpwCents != null
+                      money.cappedByLender && money.priceRulePpwCents != null
                         ? {
-                            ppwCents: money.maxFinalPpwCents,
-                            mode: money.finalPpwMode,
+                            ppwCents: money.priceRulePpwCents,
+                            mode: money.priceRuleMode,
                             basis: money.ppwBasis,
                             lenderName: money.lenderName,
                           }

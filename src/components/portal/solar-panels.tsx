@@ -288,7 +288,7 @@ export type SolarFinanceView = {
   finalPriceCents: number;
   itcEstimateCents: number;
   rateMillsPerKwh: number | null;
-  leaseMonthlyCents: number | null;
+  leasePaymentCents: number | null;
   escalatorPct: number | null;
   termYears: number | null;
   aprPct: number | null;
@@ -719,7 +719,7 @@ export type LenderOption = {
    * included, cents. Null — nearly every lender — means the ordinary
    * base-times-fee pricing, unchanged.
    */
-  maxFinalPpwCents: number | null;
+  priceRulePpwCents: number | null;
   /**
    * How this partner's SIGN TODAY CREDIT is arrived at, and its figure. `none`
    * — every lender until somebody sets a rule — leaves the credit to the rep,
@@ -732,14 +732,14 @@ export type LenderOption = {
    * The same two rules over BATTERIES, for a deal with no watts. Null means no
    * rule, which is every lender until somebody sets one.
    */
-  maxFinalPricePerBatteryCents: number | null;
+  priceRulePerBatteryCents: number | null;
   minBasePricePerBatteryCents: number | null;
-  finalBatteryPriceMode: "cap" | "flat";
+  priceRuleBatteryMode: "cap" | "flat";
   /**
    * Whether that figure is a CEILING or the PRICE. A flat partner sells at one
-   * number whatever the base and whatever the adders; see SolarFinalPpwMode.
+   * number whatever the base and whatever the adders; see SolarPriceRuleMode.
    */
-  finalPpwMode: FinalPpwMode;
+  priceRuleMode: FinalPpwMode;
   /**
    * The least this partner's deals may leave the company per watt, before its
    * cut, cents. Null — nearly every lender — means no floor.
@@ -865,7 +865,7 @@ export function SolarFinancePanel({
   const seed = (f: SolarFinanceView) => ({
     dealerFeePct: num(f?.dealerFeePct),
     rate: num(f?.rateMillsPerKwh, 1000, 3),
-    monthly: num(f?.leaseMonthlyCents, 100),
+    monthly: num(f?.leasePaymentCents, 100),
     escalatorPct: num(f?.escalatorPct),
     termYears: num(f?.termYears),
     aprPct: num(f?.aprPct),
@@ -911,7 +911,7 @@ export function SolarFinancePanel({
    * Null on a partner that prices the ordinary way.
    */
   const quotedFlatPpwCents =
-    quotedLender?.finalPpwMode === "flat" ? quotedLender.maxFinalPpwCents : null;
+    quotedLender?.priceRuleMode === "flat" ? quotedLender.priceRulePpwCents : null;
 
   /**
    * The deal's base price per watt — what Anexa charges before a lender's cut.
@@ -1041,8 +1041,8 @@ export function SolarFinancePanel({
                 ...p,
                 lenderName: l.name,
                 label: lenderProductLabel(p),
-                maxFinalPpwCents: l.maxFinalPpwCents,
-                finalPpwMode: l.finalPpwMode,
+                maxFinalPpwCents: l.priceRulePpwCents,
+                finalPpwMode: l.priceRuleMode,
                 // Same reason as the ceiling above: the shelf prices a
                 // programme, and each column's closing credit is its own
                 // partner's to decide.
@@ -1200,8 +1200,8 @@ export function SolarFinancePanel({
         dealerFeePct: Number.isFinite(feePct) ? feePct : 0,
         adderTotalCents,
         onTopAdderTotalCents,
-        maxFinalPricePerBatteryCents: quotedLender?.maxFinalPricePerBatteryCents ?? null,
-        finalBatteryPriceMode: quotedLender?.finalBatteryPriceMode ?? "cap",
+        maxFinalPricePerBatteryCents: quotedLender?.priceRulePerBatteryCents ?? null,
+        finalBatteryPriceMode: quotedLender?.priceRuleBatteryMode ?? "cap",
         batteryPriceBasis: chosen?.batteryPriceBasis,
       });
     }
@@ -1215,15 +1215,15 @@ export function SolarFinancePanel({
       adderTotalCents,
       onTopAdderTotalCents,
       batteryPriceCents,
-      maxFinalPpwCents: quotedLender?.maxFinalPpwCents ?? null,
-      finalPpwMode: quotedLender?.finalPpwMode ?? "cap",
+      maxFinalPpwCents: quotedLender?.priceRulePpwCents ?? null,
+      finalPpwMode: quotedLender?.priceRuleMode ?? "cap",
       ppwBasis: chosen?.ppwBasis,
     });
   }, [
     isPurchase, isStorage, batteryQty, product, systemSizeKwDc, stickerPpwCents, feePct,
     adderTotalCents, onTopAdderTotalCents, batteryPriceCents,
-    quotedLender?.maxFinalPpwCents, quotedLender?.finalPpwMode,
-    quotedLender?.maxFinalPricePerBatteryCents, quotedLender?.finalBatteryPriceMode,
+    quotedLender?.priceRulePpwCents, quotedLender?.priceRuleMode,
+    quotedLender?.priceRulePerBatteryCents, quotedLender?.priceRuleBatteryMode,
     chosen?.ppwBasis, chosen?.batteryPriceBasis,
   ]);
 
@@ -1489,8 +1489,8 @@ export function SolarFinancePanel({
           batteryQty={batteryQty}
           basePerBatteryCents={basePpwCents}
           quotedFeePct={chosen && !isCash ? chosen.dealerFeePct : null}
-          quotedMaxFinalPerBatteryCents={quotedLender?.maxFinalPricePerBatteryCents ?? null}
-          quotedFinalBatteryPriceMode={quotedLender?.finalBatteryPriceMode ?? "cap"}
+          quotedMaxFinalPerBatteryCents={quotedLender?.priceRulePerBatteryCents ?? null}
+          quotedFinalBatteryPriceMode={quotedLender?.priceRuleBatteryMode ?? "cap"}
           quotedBatteryPriceBasis={chosen?.batteryPriceBasis ?? "final"}
           quotedMinBasePerBatteryCents={isCash ? null : (quotedLender?.minBasePricePerBatteryCents ?? null)}
           quotedLabel={quotedLender?.name ?? null}
@@ -1514,11 +1514,11 @@ export function SolarFinancePanel({
         // chosen programme was published by — never off the programme row — and
         // off the one `quotedLender` already resolved, so this card and the
         // payment below it cannot be holding two different partners' rules.
-        quotedMaxFinalPpwCents={quotedLender?.maxFinalPpwCents ?? null}
+        quotedMaxFinalPpwCents={quotedLender?.priceRulePpwCents ?? null}
         // Read the same way and from the same row: a mode without its figure
         // is not a pricing rule, and the two arriving from different places is
         // how one of them goes stale.
-        quotedFinalPpwMode={quotedLender?.finalPpwMode ?? "cap"}
+        quotedFinalPpwMode={quotedLender?.priceRuleMode ?? "cap"}
         // Which price that figure fixes is the chosen PROGRAMME's to say.
         quotedPpwBasis={chosen?.ppwBasis ?? "final"}
         // The floor is the partner's too, and read the same way. Cash has no

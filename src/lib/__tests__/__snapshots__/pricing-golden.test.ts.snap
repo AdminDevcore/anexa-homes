@@ -843,8 +843,8 @@ exports[`golden: every pure pricing site, every golden deal > the ladder (priceS
     "addersOutsideRuleCents": 700000,
     "addersOutsideRuleFinalCents": 2000000,
     "baseFinalCents": 7018000,
+    "baseKeptCents": 2456300,
     "basePpwCents": 192.5,
-    "basePriceCents": 2456300,
     "cap": {
       "adderOverrun": false,
       "capped": true,
@@ -864,8 +864,8 @@ exports[`golden: every pure pricing site, every golden deal > the ladder (priceS
     "addersOutsideRuleCents": 0,
     "addersOutsideRuleFinalCents": 0,
     "baseFinalCents": 2480000,
+    "baseKeptCents": 2480000,
     "basePpwCents": 310,
-    "basePriceCents": 2480000,
     "cap": {
       "adderOverrun": false,
       "capped": false,
@@ -883,8 +883,8 @@ exports[`golden: every pure pricing site, every golden deal > the ladder (priceS
     "addersCents": 0,
     "addersFinalCents": 0,
     "baseFinalCents": 4800000,
+    "baseKeptCents": 2400000,
     "basePerUnitCents": 1200000,
-    "basePriceCents": 2400000,
     "cap": {
       "adderOverrun": false,
       "capped": true,
@@ -902,8 +902,8 @@ exports[`golden: every pure pricing site, every golden deal > the ladder (priceS
     "addersOutsideRuleCents": 0,
     "addersOutsideRuleFinalCents": 0,
     "baseFinalCents": 4000000,
+    "baseKeptCents": 3000000,
     "basePpwCents": 300,
-    "basePriceCents": 3000000,
     "cap": {
       "adderOverrun": false,
       "capped": false,

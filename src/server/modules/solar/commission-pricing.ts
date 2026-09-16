@@ -64,10 +64,10 @@ export async function loadCommissionDeal(db: Db, companyId: string, leadId: stri
           select: {
             repPayMode: true,
             batteryPayMode: true,
-            maxFinalPpwCents: true,
-            finalPpwMode: true,
-            maxFinalPricePerBatteryCents: true,
-            finalBatteryPriceMode: true,
+            priceRulePpwCents: true,
+            priceRuleMode: true,
+            priceRulePerBatteryCents: true,
+            priceRuleBatteryMode: true,
           },
         },
       },
@@ -112,8 +112,8 @@ export async function loadCommissionDeal(db: Db, companyId: string, leadId: stri
           dealerFeePct: finance.dealerFeePct,
           adderTotalCents: finance.addersInsideRuleCents,
           onTopAdderTotalCents: finance.addersOutsideRuleCents,
-          maxFinalPricePerBatteryCents: design.lender?.maxFinalPricePerBatteryCents ?? null,
-          finalBatteryPriceMode: design.lender?.finalBatteryPriceMode,
+          maxFinalPricePerBatteryCents: design.lender?.priceRulePerBatteryCents ?? null,
+          finalBatteryPriceMode: design.lender?.priceRuleBatteryMode,
           batteryPriceBasis: finance.lenderProduct?.batteryPriceBasis,
         }).breakdown
       : null;
@@ -128,7 +128,7 @@ export async function loadCommissionDeal(db: Db, companyId: string, leadId: stri
           adderTotalCents: finance.addersInsideRuleCents,
           onTopAdderTotalCents: finance.addersOutsideRuleCents,
           // ON THE FINAL PRICE, OUT OF THE BASE. The household signs for the
-          // battery; a rep's redline is measured on `basePriceCents`, which the
+          // battery; a rep's redline is measured on `baseKeptCents`, which the
           // battery deliberately stays out of — it is priced from the catalogue
           // to cover its own cost, exactly like an adder.
           batteryPriceCents: batteryChargeCents({
@@ -137,8 +137,8 @@ export async function loadCommissionDeal(db: Db, companyId: string, leadId: stri
             dealPerBatteryCents: finance.baseFinalPerBatteryCents,
             cataloguePerBatteryCents: design.battery?.priceCents ?? null,
           }),
-          maxFinalPpwCents: design.lender?.maxFinalPpwCents ?? null,
-          finalPpwMode: design.lender?.finalPpwMode,
+          maxFinalPpwCents: design.lender?.priceRulePpwCents ?? null,
+          finalPpwMode: design.lender?.priceRuleMode,
           ppwBasis: finance.lenderProduct?.ppwBasis,
         }).breakdown
       : null;
@@ -161,26 +161,51 @@ export async function loadCommissionDeal(db: Db, companyId: string, leadId: stri
     // conversion that did not happen.
     systemWatts: isStorage ? 0 : (purchase?.systemWatts ?? Math.round(design.systemSizeKwDc * 1000)),
     batteryQty: design.batteryQty,
-    basePriceCents: priced?.basePriceCents ?? 0,
+    baseKeptCents: priced?.baseKeptCents ?? 0,
     /**
      * The final price, before any credit — what the signed document is checked
      * against when the measure is frozen. No pay is a share of it: an override
      * is a share of the rep's net.
      *
-     * DERIVED, not the stored column: `SolarFinance.contractPriceCents` is only
-     * as fresh as the last save, and a deal priced before adders were pulled
-     * inside the dealer fee carries a figure several thousand dollars light.
+     * DERIVED, not the stored column. `SolarFinance.finalPriceCents` — the row,
+     * which is still the column `contractPriceCents` on disk — is only as fresh
+     * as the last save, and a deal priced before adders were pulled inside the
+     * dealer fee carries a figure several thousand dollars light.
+     *
+     * The two are the same NAME on purpose (the figure is the same thing), so
+     * the difference that matters is carried by the TYPE: this one is branded
+     * `DerivedPriceCents` and the stored one is a plain `number`. A comment
+     * saying "derived" is advice; a brand is something the compiler holds.
      */
-    finalPriceCents: priced?.contractPriceCents ?? finance.finalPriceCents,
+    finalPriceCents: derivedPrice(priced?.contractPriceCents ?? finance.finalPriceCents),
   };
 }
 
 export type CommissionDeal = NonNullable<Awaited<ReturnType<typeof loadCommissionDeal>>>;
 
+declare const DERIVED_PRICE: unique symbol;
+
+/**
+ * A CONTRACT PRICE WORKED OUT NOW, rather than the one sitting on the row.
+ *
+ * `finalPriceCents` is the right name for both — they are the same quantity —
+ * but they are not interchangeable: the stored one is as old as the last save.
+ * Branding the derived one makes the difference something the compiler can see,
+ * so a figure that was freshly priced cannot be quietly swapped for a stale
+ * column, or the reverse, by a refactor that only reads the names.
+ *
+ * Assignable to `number` in both directions of USE — every consumer keeps
+ * working — but only `derivedPrice()` produces one.
+ */
+export type DerivedPriceCents = number & { readonly [DERIVED_PRICE]: true };
+
+/** The only way to make one: say out loud that this figure was just derived. */
+export const derivedPrice = (cents: number): DerivedPriceCents => cents as DerivedPriceCents;
+
 /** The three figures a commission multiplies. See `solarRepPayCents`. */
 export type CommissionMeasure = {
   systemWatts: number;
-  basePriceCents: number;
+  baseKeptCents: number;
   batteryQty: number;
   /** True when these came from the copy frozen at signing. */
   frozen: boolean;
@@ -189,14 +214,14 @@ export type CommissionMeasure = {
 /** The columns on `SolarDealComp` that hold the frozen measure. */
 export const FROZEN_MEASURE_SELECT = {
   systemWatts: true,
-  basePriceCents: true,
+  baseKeptCents: true,
   batteryQty: true,
   pricedAt: true,
 } as const;
 
 type FrozenMeasureColumns = {
   systemWatts: number | null;
-  basePriceCents: number | null;
+  baseKeptCents: number | null;
   batteryQty: number | null;
   pricedAt: Date | null;
 };
@@ -208,18 +233,18 @@ type FrozenMeasureColumns = {
  * Null only when neither exists — an unsigned deal that is not priced yet.
  */
 export function commissionMeasure(
-  live: Pick<CommissionDeal, "systemWatts" | "basePriceCents" | "batteryQty"> | null,
+  live: Pick<CommissionDeal, "systemWatts" | "baseKeptCents" | "batteryQty"> | null,
   comp: FrozenMeasureColumns | null
 ): CommissionMeasure | null {
   if (
     comp?.pricedAt != null &&
     comp.systemWatts != null &&
-    comp.basePriceCents != null &&
+    comp.baseKeptCents != null &&
     comp.batteryQty != null
   ) {
     return {
       systemWatts: comp.systemWatts,
-      basePriceCents: comp.basePriceCents,
+      baseKeptCents: comp.baseKeptCents,
       batteryQty: comp.batteryQty,
       frozen: true,
     };
@@ -227,7 +252,7 @@ export function commissionMeasure(
   return live
     ? {
         systemWatts: live.systemWatts,
-        basePriceCents: live.basePriceCents,
+        baseKeptCents: live.baseKeptCents,
         batteryQty: live.batteryQty,
         frozen: false,
       }
@@ -339,7 +364,7 @@ export function measureFromSignedDocument(
       deal.systemType === "storage"
         ? 0
         : Math.round((snapshotNumber(s.system?.sizeKwDc) ?? 0) * 1000),
-    basePriceCents: baseStickerCents - Math.round(baseStickerCents * f),
+    baseKeptCents: baseStickerCents - Math.round(baseStickerCents * f),
     batteryQty: snapshotNumber(s.financing?.batteryQty) ?? snapshotNumber(s.storage?.batteryQty) ?? 0,
   };
 }
@@ -413,7 +438,7 @@ export async function freezeCommissionMeasure(
 
   const liveMeasure = {
     systemWatts: live.systemWatts,
-    basePriceCents: live.basePriceCents,
+    baseKeptCents: live.baseKeptCents,
     batteryQty: live.batteryQty,
   };
   const fromDocument = document ? measureFromSignedDocument(document.snapshot, live) : null;
@@ -425,9 +450,9 @@ export async function freezeCommissionMeasure(
     : { matches: null, differences: [] };
   const differences = [...check.differences];
   // The figure the money actually turns on, reported beside the rest.
-  if (fromDocument && fromDocument.basePriceCents !== live.basePriceCents) {
+  if (fromDocument && fromDocument.baseKeptCents !== live.baseKeptCents) {
     differences.push(
-      `base price ${usd(live.basePriceCents)} on the deal, ${usd(fromDocument.basePriceCents)} on the signed document`
+      `base price ${usd(live.baseKeptCents)} on the deal, ${usd(fromDocument.baseKeptCents)} on the signed document`
     );
   }
   const matches = check.matches == null && fromDocument == null ? null : differences.length === 0;
@@ -464,7 +489,7 @@ export async function freezeCommissionMeasure(
 function sameMeasure(a: Omit<CommissionMeasure, "frozen">, b: Omit<CommissionMeasure, "frozen">) {
   return (
     a.systemWatts === b.systemWatts &&
-    a.basePriceCents === b.basePriceCents &&
+    a.baseKeptCents === b.baseKeptCents &&
     a.batteryQty === b.batteryQty
   );
 }

@@ -34,12 +34,12 @@ import { Hint, NumField, Pill, TextField } from "@/components/portal/settings-ki
 export function RateSheetPanel({
   lender,
   canEdit,
-  targetNetPpwCents,
+  targetBasePpwCents,
 }: {
   lender: LenderRow;
   canEdit: boolean;
   /** From Solar Settings. Null = the sticker is not derived from a dealer fee. */
-  targetNetPpwCents: number | null;
+  targetBasePpwCents: number | null;
 }) {
   const router = useRouter();
   const [adding, setAdding] = React.useState<LenderProductKind | null>(null);
@@ -60,7 +60,7 @@ export function RateSheetPanel({
         <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
           A rep picks one of these on a deal and the payment is quoted from it — the APR, term and
           dealer fee come from here, never from the deal screen.{" "}
-          {targetNetPpwCents == null ? (
+          {targetBasePpwCents == null ? (
             <>
               No target net $/W is set, so the sticker price stays exactly as a rep types it. Set one
               in{" "}
@@ -74,7 +74,7 @@ export function RateSheetPanel({
             <>
               Target net{" "}
               <span className="font-medium text-foreground tabular-nums">
-                ${(targetNetPpwCents / 100).toFixed(2)}/W
+                ${(targetBasePpwCents / 100).toFixed(2)}/W
               </span>
               , so the sticker is derived from the chosen programme&rsquo;s dealer fee.
             </>

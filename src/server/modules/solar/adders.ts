@@ -36,7 +36,7 @@ export type DealAdderRow = AdderLine & {
    * Added to the loan ON TOP of a partner's fixed or maximum $/W, at its own
    * price. Copied off the catalogue at pick time, like the price and the basis.
    */
-  financedOnTop: boolean;
+  outsidePriceRule: boolean;
   /** What this adds to the household's yearly consumption, kWh. */
   consumptionKwhPerYear: number | null;
   /** The system-size rule put this here, so the same rule may take it away. */
@@ -54,7 +54,7 @@ export async function listDealAdders(
     select: {
       id: true, label: true, description: true, basis: true, flatCents: true,
       millsPerWatt: true, qty: true, sortOrder: true, equipmentId: true,
-      showOnProposal: true, financedOnTop: true, consumptionKwhPerYear: true,
+      showOnProposal: true, outsidePriceRule: true, consumptionKwhPerYear: true,
       autoApplied: true,
     },
   });
@@ -92,7 +92,7 @@ async function autoApplyRules(companyId: string) {
     select: {
       id: true, manufacturer: true, model: true, description: true,
       adderBasis: true, priceCents: true, priceMillsPerWatt: true,
-      showOnProposal: true, financedOnTop: true, autoApplyMinKw: true,
+      showOnProposal: true, outsidePriceRule: true, autoApplyMinKw: true,
       autoApplyMaxKw: true,
     },
   });
@@ -101,7 +101,7 @@ async function autoApplyRules(companyId: string) {
 /**
  * Which adders THIS lender puts on top of its own price.
  *
- * The catalogue's `financedOnTop` is the fallback, not the answer. It says what
+ * The catalogue's `outsidePriceRule` is the fallback, not the answer. It says what
  * the company does with a piece of work in general; the lender says what this
  * partner does with it, and only the second one is a fact about the paper the
  * customer signs. Amos funds a roof above its flat $5.50/W; the next capped
@@ -123,9 +123,9 @@ export async function lenderAdderRules(
   if (!lenderId) return new Map();
   const rows = await prisma.solarLenderAdderRule.findMany({
     where: { lenderId },
-    select: { equipmentId: true, financedOnTop: true },
+    select: { equipmentId: true, outsidePriceRule: true },
   });
-  return new Map(rows.map((r) => [r.equipmentId, r.financedOnTop]));
+  return new Map(rows.map((r) => [r.equipmentId, r.outsidePriceRule]));
 }
 
 /** The lender rule if this partner stated one, otherwise the catalogue's. */
@@ -150,7 +150,7 @@ export async function dealLenderId(leadId: string): Promise<string | null> {
 /**
  * Re-stamp every catalogue-linked adder line against the deal's CURRENT lender.
  *
- * `SolarDealAdder.financedOnTop` is copied at pick time and deliberately does
+ * `SolarDealAdder.outsidePriceRule` is copied at pick time and deliberately does
  * not move when Settings changes — a catalogue edit must never re-price a quote
  * somebody has already been shown. Changing the LENDER is not a settings edit
  * though: it is a decision about this one deal, taken on this one deal, and it
@@ -172,7 +172,7 @@ export async function restampAddersForLender(
 ): Promise<number> {
   const lines = await prisma.solarDealAdder.findMany({
     where: { companyId, leadId, equipmentId: { not: null } },
-    select: { id: true, equipmentId: true, financedOnTop: true },
+    select: { id: true, equipmentId: true, outsidePriceRule: true },
   });
   if (lines.length === 0) return 0;
 
@@ -181,10 +181,10 @@ export async function restampAddersForLender(
     lenderAdderRules(lenderId),
     prisma.solarEquipment.findMany({
       where: { companyId, id: { in: ids } },
-      select: { id: true, financedOnTop: true },
+      select: { id: true, outsidePriceRule: true },
     }),
   ]);
-  const fallback = new Map(catalogue.map((c) => [c.id, c.financedOnTop]));
+  const fallback = new Map(catalogue.map((c) => [c.id, c.outsidePriceRule]));
 
   const moved = lines.filter((l) => {
     // A line whose catalogue row has been deleted has no fallback to fall back
@@ -193,7 +193,7 @@ export async function restampAddersForLender(
     if (!fallback.has(l.equipmentId!)) return false;
     return (
       financedOnTopFor(rules, l.equipmentId, fallback.get(l.equipmentId!)!) !==
-      l.financedOnTop
+      l.outsidePriceRule
     );
   });
   if (moved.length === 0) return 0;
@@ -203,7 +203,7 @@ export async function restampAddersForLender(
       prisma.solarDealAdder.update({
         where: { id: l.id },
         data: {
-          financedOnTop: financedOnTopFor(
+          outsidePriceRule: financedOnTopFor(
             rules,
             l.equipmentId,
             fallback.get(l.equipmentId!)!
@@ -226,7 +226,7 @@ export function lineFromCatalogue(
     priceCents: number;
     priceMillsPerWatt: number | null;
     showOnProposal: boolean;
-    financedOnTop: boolean;
+    outsidePriceRule: boolean;
   },
   /**
    * This deal's lender's own rules, when the caller has them. Omitted, the
@@ -250,7 +250,7 @@ export function lineFromCatalogue(
     // customer's contract comes to, and re-reading it through the catalogue
     // would let a settings tick move the total on a quote already shown.
     // Resolved against the LENDER first — see `financedOnTopFor`.
-    financedOnTop: financedOnTopFor(rules, item.id, item.financedOnTop),
+    outsidePriceRule: financedOnTopFor(rules, item.id, item.outsidePriceRule),
   };
 }
 

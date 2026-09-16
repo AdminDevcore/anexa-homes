@@ -100,7 +100,7 @@ describe("adderTotals", () => {
     // loan at its own price and trenching comes out of the partner's rate.
     const t = adderTotals(
       [
-        line({ id: "roof", flatCents: 700_000, financedOnTop: true }),
+        line({ id: "roof", flatCents: 700_000, outsidePriceRule: true }),
         line({ id: "trench", flatCents: 255_000 }),
       ],
       WATTS

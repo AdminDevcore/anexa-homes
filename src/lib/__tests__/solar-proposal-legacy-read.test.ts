@@ -43,7 +43,7 @@ describe("readProposalSnapshot translates a pre-v9 document", () => {
     expect(f.baseFinalCents).toBe(4_200_000);
     expect(f.addersFinalCents).toBe(385_000);
     expect(f.equipmentFinalCents).toBe(495_000);
-    expect(f.leaseMonthlyCents).toBe(27_400);
+    expect(f.leasePaymentCents).toBe(27_400);
   });
 
   it("retires the old spellings rather than answering to both", () => {
@@ -190,5 +190,77 @@ describe("readProposalSnapshot survives what a JSON column can hold", () => {
   it("does not throw on a scalar where an object was expected", () => {
     expect(() => readProposalSnapshot("not a document")).not.toThrow();
     expect(() => readProposalSnapshot({ financing: 4 })).not.toThrow();
+  });
+});
+
+/**
+ * THE DEALER FEE COMES OFF ON READ.
+ *
+ * Three renderers were each taking it off on the way to the screen, so a fourth
+ * would have printed it. The strip moved into the reader; these are the tests
+ * that say so, and they are the only thing that can — a frozen label is stored
+ * JSON, so a renderer that stops stripping type-checks perfectly and shows a
+ * homeowner what their lender charges us.
+ */
+describe("readProposalSnapshot takes the dealer fee off a frozen label", () => {
+  const V7_LABELLED = {
+    schemaVersion: 7,
+    financing: {
+      product: "loan",
+      contractPriceCents: 5_080_000,
+      lenderProductLabel: "Credit Humen · 30 yr · 0% · fee 25%",
+    },
+    options: [
+      {
+        key: "loan:1",
+        label: "Credit Humen · 30 yr · 0% · fee 25%",
+        financing: { product: "loan", contractPriceCents: 5_080_000 },
+      },
+      { key: "cash", label: "Pay in full", financing: { product: "cash", contractPriceCents: 4_200_000 } },
+    ],
+  };
+
+  it("answers the frozen label by its current name, without the fee", () => {
+    const f = readProposalSnapshot(V7_LABELLED)!.financing as unknown as Record<string, unknown>;
+    expect(f.programmeLabel).toBe("Credit Humen · 30 yr · 0%");
+    expect(f).not.toHaveProperty("lenderProductLabel");
+  });
+
+  it("strips the option labels too — the menu prints those, not `financing`", () => {
+    const opts = readProposalSnapshot(V7_LABELLED)!.options as unknown as { label: string }[];
+    expect(opts[0].label).toBe("Credit Humen · 30 yr · 0%");
+    // A label that never carried a fee is handed back exactly as it was.
+    expect(opts[1].label).toBe("Pay in full");
+  });
+
+  it("leaves a document whose labels are already clean untouched", () => {
+    const clean = {
+      schemaVersion: 9,
+      financing: { product: "loan", finalPriceCents: 1, programmeLabel: "Amos 30 Year Solar" },
+      options: [{ key: "loan:1", label: "Amos · 30 yr · 0%", financing: { product: "loan", finalPriceCents: 1 } }],
+    };
+    expect(readProposalSnapshot(clean)).toBe(clean);
+  });
+});
+
+/**
+ * The lease payment has been called three things. Every one of them has to read.
+ */
+describe("readProposalSnapshot answers a lease payment under all three spellings", () => {
+  const read = (financing: Record<string, unknown>) =>
+    readProposalSnapshot({ financing })!.financing as unknown as Record<string, unknown>;
+
+  it("reads the pre-v9 spelling", () => {
+    expect(read({ product: "lease", monthlyPaymentCents: 17_500 }).leasePaymentCents).toBe(17_500);
+  });
+
+  it("reads the spelling v9 first shipped with, and retires it", () => {
+    const f = read({ product: "lease", leaseMonthlyCents: 21_500 });
+    expect(f.leasePaymentCents).toBe(21_500);
+    expect(f).not.toHaveProperty("leaseMonthlyCents");
+  });
+
+  it("prefers the current key when a hand-edited row carries two", () => {
+    expect(read({ leasePaymentCents: 111, monthlyPaymentCents: 999 }).leasePaymentCents).toBe(111);
   });
 });

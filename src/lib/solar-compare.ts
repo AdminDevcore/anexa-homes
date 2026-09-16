@@ -197,7 +197,7 @@ export type CompareRow = {
    * on a capped column it is the other way round, and a rep quoting one needs
    * to see what the deal is worth without opening the payroll module.
    */
-  netPpwCents: number | null;
+  keptPpwCents: number | null;
   /** The lender's stated $/W, when it has one, so the card can name it. */
   maxFinalPpwCents: number | null;
   /** Whether that figure is a ceiling or this partner's flat price. */
@@ -293,7 +293,7 @@ function purchaseRow(
     grossPpwCents,
     dealerFeePct,
     contractPriceCents: priced?.contractPriceCents ?? null,
-    netPpwCents:
+    keptPpwCents:
       priced && priced.systemWatts > 0 ? priced.grossPriceCents / priced.systemWatts : null,
     maxFinalPpwCents,
     finalPpwMode: finalPpwMode ?? "cap",
@@ -464,7 +464,7 @@ function thirdPartyRow(
           utilityEscalationPct: 0,
           kwhPerKwYear: 0,
           utilityMeterFeeCents: 0,
-          defaultGrossPpwCents: 0,
+          companyDefaultBasePpwCents: 0,
           defaultDealerFeePct: 0,
           minOffsetPct: 0,
           maxOffsetPct: 0,
@@ -488,7 +488,7 @@ function thirdPartyRow(
     grossPpwCents: null,
     dealerFeePct: null,
     contractPriceCents: null,
-    netPpwCents: null,
+    keptPpwCents: null,
     maxFinalPpwCents: null,
     finalPpwMode: "cap",
     capped: false,

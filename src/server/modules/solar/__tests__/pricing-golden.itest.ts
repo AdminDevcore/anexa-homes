@@ -173,8 +173,8 @@ beforeAll(async () => {
   partnerLenderId = await lender({
     name: cp.lenderName,
     repPayMode: "per_watt",
-    maxFinalPpwCents: cp.rule.maxFinalPpwCents,
-    finalPpwMode: cp.rule.finalPpwMode,
+    priceRulePpwCents: cp.rule.maxFinalPpwCents,
+    priceRuleMode: cp.rule.finalPpwMode,
     minBasePpwCents: null,
     signTodayMode: "above_cap",
     signTodayCapPpwCents: cp.signToday.capPpwCents,
@@ -190,8 +190,8 @@ beforeAll(async () => {
 
   const storageLender = await lender({
     name: st.lenderName,
-    maxFinalPricePerBatteryCents: st.maxFinalPricePerBatteryCents,
-    finalBatteryPriceMode: st.finalBatteryPriceMode,
+    priceRulePerBatteryCents: st.maxFinalPricePerBatteryCents,
+    priceRuleBatteryMode: st.finalBatteryPriceMode,
     signTodayMode: "above_cap",
     signTodayCapPpwCents: st.signToday.capPpwCents,
   });
@@ -208,7 +208,7 @@ beforeAll(async () => {
     key: Key,
     design: Record<string, unknown>,
     finance: Record<string, unknown>,
-    adders: { label: string; basis: "flat" | "perWatt"; flatCents?: number; millsPerWatt?: number; financedOnTop?: boolean }[],
+    adders: { label: string; basis: "flat" | "perWatt"; flatCents?: number; millsPerWatt?: number; outsidePriceRule?: boolean }[],
     usageKwh: number,
     billCents: number
   ) {
@@ -312,7 +312,7 @@ beforeAll(async () => {
       aprPct: cp.aprPct,
       loanTermMonths: cp.termMonths,
     },
-    [{ label: "Re-roof", basis: "flat", flatCents: 700_000, financedOnTop: true }],
+    [{ label: "Re-roof", basis: "flat", flatCents: 700_000, outsidePriceRule: true }],
     cp.usageKwh,
     cp.billCents
   );

@@ -1390,3 +1390,153 @@ when a caller forgets to ask (an adder written straight past the guarded action
 moves nothing); and under an unlock it goes through and says what moved.
 Unit 2,495; integration 791 passing with the 7 baseline failures; typecheck and
 the touched files' lint clean. **No golden figure moved.**
+
+### 8.20 Known defects, logged and NOT fixed (2026-09-16)
+
+Found during the Stage 2 collision audit. Both are live on `origin/main`; neither
+is caused by the rework, and neither is being fixed in it. Listed so that the
+next person to touch these files knows, and so the rename does not quietly
+inherit them.
+
+**1. A company target is displayed as the company default.**
+`src/components/portal/solar/system-price.tsx:446` renders
+`Company default ${(defaultPpwCents / 100).toFixed(2)}/W`. The value reaching it
+is built two components up as
+`settings?.targetNetPpwCents ?? settings?.defaultGrossPpwCents ?? null`
+(`src/app/portal/leads/[id]/solar-proposal/page.tsx`, `origin/main:534`), so on
+any company that has set a target, the rep is told the TARGET is the DEFAULT.
+They are different figures with different meanings: the default is a starting
+price, the target is the floor the company must keep per watt after the lender's
+cut. Live on main. Rep-facing only; no customer document reads it.
+
+**2. `grossPpwCents` means two different things.**
+- `src/lib/solar-money.ts` — gross per watt, **before** the dealer fee.
+- `src/lib/solar-compare.ts:186` — `CompareRow.grossPpwCents` is the **sticker,
+  fee included**, fed from `cap?.stickerPpwCents ?? uncappedPpwCents` (`:270`);
+  the pre-fee figure in that same type is confusingly called `netPpwCents`
+  (`:190-199`, "what the company keeps per installed watt").
+
+So in one module "gross" is pre-fee and in the other it is post-fee, and "net"
+in `CompareRow` means what "gross" means everywhere else. This is why §8.8's
+proposed `CompareRow.netPpwCents → grossPpwCents` was **disqualified**: it would
+rename a figure INTO a name that already means the opposite in the neighbouring
+file. `CompareRow.netPpwCents` becomes `keptPpwCents` instead (§8.21), and
+`grossPpwCents` is left overloaded on purpose — **a later pass**, not this one.
+
+---
+
+## 8.21 Stage 2, slice 3 — the revised map as APPLIED
+
+One meaning, one name. Every rename below is code-only: the column keeps its
+name on disk behind `@map`, so no migration was produced and none is needed.
+Proved, not asserted — `prisma migrate diff --from-migrations` against the
+schema returns *"This is an empty migration."*, with zero `RENAME COLUMN`,
+`DROP COLUMN`, `ALTER TYPE` or `DROP TYPE`.
+
+| was | is | stays on disk as |
+|---|---|---|
+| `SolarFinalPpwMode` (enum) | `SolarPriceRuleMode` | `@@map("SolarFinalPpwMode")` |
+| `SolarLender.maxFinalPpwCents` | `priceRulePpwCents` | `maxFinalPpwCents` |
+| `SolarLender.finalPpwMode` | `priceRuleMode` | `finalPpwMode` |
+| `SolarLender.maxFinalPricePerBatteryCents` | `priceRulePerBatteryCents` | `maxFinalPricePerBatteryCents` |
+| `SolarLender.finalBatteryPriceMode` | `priceRuleBatteryMode` | `finalBatteryPriceMode` |
+| `SolarSettings.defaultGrossPpwCents` | `companyDefaultBasePpwCents` | `defaultGrossPpwCents` |
+| `SolarSettings.targetNetPpwCents` | `targetBasePpwCents` | `targetNetPpwCents` |
+| `SolarFinance.monthlyPaymentCents` | `leasePaymentCents` | `monthlyPaymentCents` |
+| `SolarDealComp.basePriceCents` | `baseKeptCents` | `basePriceCents` |
+| `*.financedOnTop` (×3 models) | `outsidePriceRule` | `financedOnTop` |
+
+### The owner's rulings, and how each was honoured
+
+- **`finalPriceCents` ALLOWED; derived vs stored distinguishable in the TYPE.**
+  The stored column is `SolarFinance.finalPriceCents` (`@map("contractPriceCents")`).
+  The freshly-worked-out one on `CommissionDeal` is now branded
+  `DerivedPriceCents`, made only by `derivedPrice()`. Same name, because it is
+  the same quantity; different type, because one of them is as old as the last
+  save. The brand paid for itself immediately — five fixtures that handed a bare
+  `number` where a derived figure was required stopped compiling.
+- **The stale comment at `commission-pricing.ts:170` is fixed.** It cited
+  `SolarFinance.contractPriceCents`, which is not a field under that name.
+- **`leaseMonthlyCents → leasePaymentCents`**, `CompareRow.netPpwCents →
+  keptPpwCents`, settings column → `companyDefaultBasePpwCents` (the existing
+  prop left alone), enum → `SolarPriceRuleMode`.
+- **`programmeLabel`: the v1–v8 READER strips the dealer fee, not the renderer.**
+  `respellFinancing` takes it off `financing.programmeLabel`, and the options
+  loop takes it off each `options[].label` — a SIBLING of `financing`, which the
+  respelling never reaches and which is the string the payment menu actually
+  prints. The four render-time `withoutDealerFee` calls in `pay.tsx` and
+  `payment-menu.tsx` are deleted. Safe because every customer-facing door reads
+  through `readProposalSnapshot`: `proposal-public.ts:73`, `print-access.ts:46`
+  and the preview page — verified, not assumed.
+- **`grossPpwCents` stays overloaded. Nothing was renamed into it.**
+
+### Deliberately NOT renamed
+
+- **`solar-money.ts`'s own vocabulary.** `PurchaseInput.maxFinalPpwCents`,
+  `finalPpwMode`, `PurchaseBreakdown.contractPriceCents`, `CompareRow`/
+  `OfferProduct.maxFinalPpwCents` are inputs and outputs of the pricing library,
+  not rows. Where a row meets them there is now an explicit adapter — row names
+  in, library names out — never a spread. `deal-money.ts`'s "ONE VOCABULARY AT
+  THE EXIT" block is the model.
+- **Three FUNCTIONS that share a name with a field they do not mean:**
+  `leaseMonthlyCents` (`solar-money.ts:1132`), `lenderProductLabel`
+  (`solar-lender-product.ts:61`) and `financedOnTopFor` (`adders.ts:132`). A
+  blanket rename hit the first of these and broke its import in
+  `solar-panels.tsx:35`; every file was afterwards classified by whether it
+  imports the function or holds the field.
+- **Stored spellings.** `basePriceCents`, `monthlyPaymentCents`,
+  `lenderProductLabel` survive in `LEGACY_FINANCING_KEYS`, in pre-v9 document
+  fixtures, and in the `@map` arguments. A frozen document is the household's
+  copy of what they agreed to; it is translated on the way out, never rewritten.
+
+## 8.22 What slice 3 cost, and the three defects it surfaced
+
+**Results.** `tsc` 0. Unit 167 files / 2,506 passing, 0 failing. Integration
+791 passing with **exactly the 7 pre-existing failures** — six in
+`storage/retention.itest.ts`, one in `calendar/visit-crew.itest.ts` — and no
+others. Lint clean on the touched set (one pre-existing `_drop` warning in
+`solar-validation-storage.test.ts`, last touched by `06a3451`, not this work).
+
+**The goldens did not move.** The golden's own output key `basePriceCents`
+became `baseKeptCents`, so the `.snap` changed and a positional diff reports
+phantom movement — renamed keys re-sort. Proved key-aware instead: 725
+`key → value` pairs before, 725 after, and with the rename applied to the
+baseline, **no value lost and none introduced**. A spelling moved; no number did.
+
+**Three real defects, all of the same family — a renamed field reaching a
+payload the compiler had stopped checking.**
+
+1. `solar-dealer-fee-adders-in-gross.test.ts` — a $7,000 re-roof came out of
+   `adderTotals` at **zero**. `AdderLine.outsidePriceRule` is optional by design,
+   and the fixture was a *variable*, so excess-property checking never ran:
+   `financedOnTop` was accepted as a stranger key while the field that is read
+   stayed `undefined`. Fixed, and the array is now annotated `AdderLine[]` so the
+   next stale key fails to compile rather than priced at nothing.
+2. `pricing-golden.itest.ts` seeded lenders through `{ companyId, ...data } as
+   never`, spelling four retired **field** names. Spread past the property check,
+   then cast past everything else.
+3. The same file spread an adder bag carrying `financedOnTop` straight into
+   `solarDealAdder.create`.
+
+Prisma addresses FIELDS, not columns, so each of these is a runtime failure
+under a clean `tsc`. Together they took the first integration run to 26 failed
+files; with them fixed it meets the bar exactly.
+
+**The guard** (`solar-pricing-retired-names.test.ts`) is positional, not a word
+ban — most of these spellings are still correct in `solar-money.ts`. It checks
+(a) no retired **field** name appears as a key inside a Prisma call, with an
+annotated `prisma-retired-ok` escape for genuine stored-JSON literals, (b) the
+two fully dead spellings appear nowhere in `src/`, and (c) `DERIVED_KEYS`,
+`FROZEN_MEASURE_SELECT` and `LENDER_TERMS_SELECT` name only fields their models
+actually have — the string lists neither `tsc` nor the positional check can see,
+and the construction that has already been wrong here once.
+
+**Known limit, stated rather than papered over:** the guard matches retired
+names written as literal keys. It does **not** catch one arriving through a
+spread — which is how defects 2 and 3 got in. The rule that does catch them is
+the one `deal-money.ts` already states: MAP across a vocabulary boundary, never
+spread.
+
+**Flagged for a later pass, not fixed here:** `grossPpwCents` still means
+pre-fee in `solar-money.ts` and the fee-inclusive sticker on `CompareRow`; and
+`financedOnTopFor` keeps a retired word in a function name.

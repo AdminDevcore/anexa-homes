@@ -143,7 +143,7 @@ export function snapshotPriceSource(f: SnapshotFinancing): SolarPriceSource {
     contractPriceCents: f.finalPriceCents,
     // THAT DOCUMENT'S OWN ladder, never today's percentages.
     netAfterCreditsCents: f.creditLadder?.netCostCents ?? null,
-    monthlyPaymentCents: f.leaseMonthlyCents,
+    monthlyPaymentCents: f.leasePaymentCents,
     rateMillsPerKwh: f.rateMillsPerKwh,
   };
 }

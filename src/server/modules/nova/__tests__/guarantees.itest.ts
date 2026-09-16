@@ -248,6 +248,14 @@ beforeAll(async () => {
       version: 1,
       status: "generated",
       approvedAt: daysFromNow(-2),
+      /**
+       * prisma-retired-ok — the keys below are a STORED v7 DOCUMENT, not row
+       * columns. `snapshot` is a Json column, and this is the JSON the builder
+       * of the day actually wrote; `readProposalSnapshot` translates the old
+       * spellings on the way out. Respelling them here would fabricate a
+       * document that never existed and quietly stop exercising the legacy
+       * path this fixture is here to cover.
+       */
       snapshot: {
         schemaVersion: 7,
         system: { sizeKwDc: 11, moduleQty: 25, year1ProductionKwh: 15_000, offsetPct: 104, moduleLabel: null, inverterLabel: null, batteryLabel: null },

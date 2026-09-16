@@ -53,7 +53,7 @@ describe("a flat price on GROSS: base and extra work together are the figure", (
     // whole-cent sticker can come.
     expect(Math.abs(b.grossPpwCents - 550)).toBeLessThanOrEqual(0.5);
     // The trenching came out of the base, not on top of the figure.
-    expect(b.basePriceCents).toBe(b.grossPriceCents - TRENCHING);
+    expect(b.baseKeptCents).toBe(b.grossPriceCents - TRENCHING);
     // The fee sits on top: $55,000 / 0.82 = $67,073, give or take the same
     // half cent a watt.
     expect(Math.abs(b.contractPriceCents - 6_707_317)).toBeLessThanOrEqual(5_000);
@@ -122,7 +122,7 @@ describe("a flat price on BASE: extra work and the fee both go on top", () => {
 
     const b = priced(rule.stickerPpwCents, 18);
     expect(Math.abs(b.basePpwCents - 550)).toBeLessThanOrEqual(0.5);
-    expect(b.grossPriceCents).toBe(b.basePriceCents + TRENCHING);
+    expect(b.grossPriceCents).toBe(b.baseKeptCents + TRENCHING);
     // $58,000 / 0.82 = $70,732, give or take half a cent a watt.
     expect(Math.abs(b.contractPriceCents - 7_073_171)).toBeLessThanOrEqual(5_000);
   });
@@ -154,7 +154,7 @@ describe("a flat price on BASE: extra work and the fee both go on top", () => {
       adderTotalCents: TRENCHING,
     });
     const b = priced(rule.stickerPpwCents, 0);
-    expect(b.basePriceCents).toBe(5_500_000);
+    expect(b.baseKeptCents).toBe(5_500_000);
     expect(b.grossPriceCents).toBe(5_800_000);
     expect(b.contractPriceCents).toBe(5_800_000);
   });
@@ -263,7 +263,7 @@ describe("the same choice per battery", () => {
   it("on base: $24,000 base, $26,000 gross, $52,000 final", () => {
     const rule = capStickerToFinalUnit({ ...BATTERIES, basis: "base" });
     const b = ladder(rule.stickerPerUnitCents);
-    expect(b.basePriceCents).toBe(24_000_00);
+    expect(b.baseKeptCents).toBe(24_000_00);
     expect(b.grossPriceCents).toBe(26_000_00);
     expect(b.contractPriceCents).toBe(52_000_00);
   });
@@ -271,7 +271,7 @@ describe("the same choice per battery", () => {
   it("on gross: $22,000 base, $24,000 gross, $48,000 final", () => {
     const rule = capStickerToFinalUnit({ ...BATTERIES, basis: "gross" });
     const b = ladder(rule.stickerPerUnitCents);
-    expect(b.basePriceCents).toBe(22_000_00);
+    expect(b.baseKeptCents).toBe(22_000_00);
     expect(b.grossPriceCents).toBe(24_000_00);
     expect(b.contractPriceCents).toBe(48_000_00);
   });

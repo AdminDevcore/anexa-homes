@@ -182,7 +182,7 @@ export async function readSolarReadiness(
         dealerFeePct: finance.dealerFeePct,
         contractPriceCents: finance.finalPriceCents,
         rateMillsPerKwh: finance.rateMillsPerKwh,
-        monthlyPaymentCents: finance.leaseMonthlyCents,
+        monthlyPaymentCents: finance.leasePaymentCents,
         escalatorPct: finance.escalatorPct,
         termYears: finance.termYears,
         downPaymentCents: finance.downPaymentCents,

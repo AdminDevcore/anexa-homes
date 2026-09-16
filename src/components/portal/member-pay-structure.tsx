@@ -204,12 +204,12 @@ export function MemberPayStructure({
       dealerFeePct: solarExample.dealerFeePct,
       adderTotalCents: 0,
     });
-    const deal = { systemWatts: priced.systemWatts, basePriceCents: priced.basePriceCents };
+    const deal = { systemWatts: priced.systemWatts, baseKeptCents: priced.baseKeptCents };
     // The storage job the two per-battery bases are shown against. No watts, by
     // definition — which is the whole reason those bases exist.
     const storage = {
       systemWatts: 0,
-      basePriceCents: EXAMPLE_BATTERY_BASE_CENTS,
+      baseKeptCents: EXAMPLE_BATTERY_BASE_CENTS,
       batteryQty: EXAMPLE_BATTERIES,
     };
     return {

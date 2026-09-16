@@ -3349,7 +3349,7 @@ model SolarSettings {
 
   // ── Pricing defaults ────────────────────────────────────────────────────
   /// Default gross price per watt, in cents (e.g. 350 = $3.50/W).
-  defaultGrossPpwCents Int   @default(350)
+  companyDefaultBasePpwCents Int @default(350) @map("defaultGrossPpwCents")
   /// Lender dealer fee as a % of gross. Applies to LOAN only — cash has none.
   /// The fallback when a deal quotes no lender product; a product's own fee wins.
   defaultDealerFeePct  Float @default(18)
@@ -3360,7 +3360,7 @@ model SolarSettings {
   /// price instead of quietly costing margin. Null = derive nothing and leave
   /// gross exactly as typed, which is how every existing company behaves until
   /// somebody sets it.
-  targetNetPpwCents    Int?
+  targetBasePpwCents   Int?  @map("targetNetPpwCents")
 
   // ── Incentives — RETIRED ────────────────────────────────────────────────
   /// No incentive is quoted anywhere: nothing sets these, nothing reads them,
@@ -3596,7 +3596,7 @@ enum SolarSignTodayMode {
 }
 
 /// How a partner's stated price per watt behaves.
-enum SolarFinalPpwMode {
+enum SolarPriceRuleMode {
   /// A CEILING. Price the deal the ordinary way -- base grossed up by the fee
   /// -- and hold the contract down to this figure only if it comes out above.
   /// A cheaper deal quotes cheaper.
@@ -3610,6 +3610,10 @@ enum SolarFinalPpwMode {
   /// the company's share once the partner has taken its cut and the extra work
   /// has been paid for.
   flat
+
+  /// The Postgres type keeps its original name. Renaming a live enum type is a
+  /// migration, and Stage 2 moves no column and no type.
+  @@map("SolarFinalPpwMode")
 }
 
 /// Which rung of the price ladder a partner's figure is a price FOR.
@@ -3788,16 +3792,16 @@ model SolarLender {
   ///
   /// Null -- the default and every lender until somebody sets one -- means no
   /// cap, and nothing about that lender's pricing changes.
-  maxFinalPpwCents Int?
+  priceRulePpwCents Int? @map("maxFinalPpwCents")
 
   /// Whether the figure above is a ceiling or the price itself.
   ///
   /// `cap` is the default and what every lender did before this existed, so
   /// setting nothing changes nothing. `flat` is for a partner like Amos whose
   /// paper is one number per watt whatever is on the job -- see
-  /// SolarFinalPpwMode. Ignored entirely when `maxFinalPpwCents` is null,
+  /// SolarPriceRuleMode. Ignored entirely when `priceRulePpwCents` is null,
   /// because a mode with no figure to apply is not a pricing rule.
-  finalPpwMode SolarFinalPpwMode @default(cap)
+  priceRuleMode SolarPriceRuleMode @default(cap) @map("finalPpwMode")
 
   /// The least this partner's deals may leave the company, per installed watt,
   /// in cents, BEFORE its cut. 175 = $1.75/W.
@@ -3819,8 +3823,8 @@ model SolarLender {
   /// The storage twins of the three fields above. Null means no rule — the
   /// default, and every lender until somebody sets one.
   minBasePricePerBatteryCents  Int?
-  maxFinalPricePerBatteryCents Int?
-  finalBatteryPriceMode        SolarFinalPpwMode @default(cap)
+  priceRulePerBatteryCents     Int?              @map("maxFinalPricePerBatteryCents")
+  priceRuleBatteryMode         SolarPriceRuleMode @default(cap) @map("finalBatteryPriceMode")
 
   /// Whether this partner funds an array with no battery -- see
   /// SolarLenderBatteryRule. `warn` is the default and is what every lender did
@@ -4245,7 +4249,7 @@ model SolarLenderAdderRule {
   /// dealer fee, like every adder). FALSE: it comes out of the $/W, so the work
   /// is paid for out of what the company keeps and the homeowner's number does
   /// not move.
-  financedOnTop Boolean
+  outsidePriceRule Boolean @map("financedOnTop")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -4322,7 +4326,7 @@ model SolarEquipment {
   ///
   /// Off means the rule that has always applied: the adder grosses up by the
   /// dealer fee and, under a ceiling, eats into the system price.
-  financedOnTop         Boolean            @default(false)
+  outsidePriceRule      Boolean            @default(false) @map("financedOnTop")
   /// Adders only: the system-size band, kW DC, in which this lands on a deal by
   /// itself. Both null means never automatic. A small-system charge that
   /// applies under 5 kW is `autoApplyMinKw = null, autoApplyMaxKw = 5`.
@@ -4687,7 +4691,7 @@ model SolarFinance {
   /// PPA only: price per kWh in tenths of a cent (e.g. 145 = $0.145/kWh).
   rateMillsPerKwh   Int?
   /// Lease only: fixed monthly payment, cents.
-  leaseMonthlyCents Int?   @map("monthlyPaymentCents")
+  leasePaymentCents Int?   @map("monthlyPaymentCents")
   /// Annual payment/rate increase, %. Applies to lease and PPA.
   escalatorPct      Float?
   termYears         Int?
@@ -4701,7 +4705,7 @@ model SolarFinance {
   /// never derived from amount + APR + term: promotional periods, fees and
   /// re-amortisation all mean a computed figure can contradict the real one,
   /// and the number a customer is quoted has to be the number the lender
-  /// issued. Distinct from `leaseMonthlyCents` above, which is LEASE-only.
+  /// issued. Distinct from `leasePaymentCents` above, which is LEASE-only.
   lenderMonthlyPaymentCents Int?   @map("loanMonthlyPaymentCents")
 
   createdAt DateTime @default(now())
@@ -5003,7 +5007,7 @@ model SolarDealAdder {
   /// for the same reason: this decides what the customer's contract comes to,
   /// and re-reading it through the relation would let a settings change move
   /// the total on a quote somebody has already been shown.
-  financedOnTop         Boolean         @default(false)
+  outsidePriceRule      Boolean         @default(false) @map("financedOnTop")
   /// What this adder does to the household's annual consumption, kWh. An EV
   /// charger is roughly +3,000. Added to the design's usage before offset is
   /// worked out, so a rep who sells a charger does not then quote an offset
@@ -5246,8 +5250,8 @@ model SolarDealComp {
   /// live deal", which is what payroll did before.
   systemWatts                  Int?
   /// The BASE price, cents: after the lender's cut, before adders and storage.
-  /// What a redline is measured against. Payroll's `basePriceCents`.
-  basePriceCents               Int?
+  /// What a redline is measured against — the base the company KEEPS.
+  baseKeptCents                Int?              @map("basePriceCents")
   batteryQty                   Int?
   pricedAt                     DateTime?
   /// "signature", "backfill" or "refreeze".

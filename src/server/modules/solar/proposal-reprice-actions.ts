@@ -195,7 +195,7 @@ export async function repriceProposalAction(
       select: {
         id: true, manufacturer: true, model: true, description: true,
         adderBasis: true, priceCents: true, priceMillsPerWatt: true,
-        showOnProposal: true, financedOnTop: true, rank: true,
+        showOnProposal: true, outsidePriceRule: true, rank: true,
       },
       orderBy: [{ rank: "asc" }, { model: "asc" }],
     });
@@ -325,7 +325,7 @@ export async function repriceProposalAction(
       grossPpwCents: d.grossPpwCents ?? finance.baseFinalPpwCents,
       dealerFeePct: finance.dealerFeePct,
       rateMillsPerKwh: finance.rateMillsPerKwh,
-      monthlyPaymentCents: finance.leaseMonthlyCents,
+      monthlyPaymentCents: finance.leasePaymentCents,
       escalatorPct: finance.escalatorPct,
       termYears: finance.termYears,
       aprPct: finance.aprPct,

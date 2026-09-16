@@ -43,7 +43,7 @@ export type SolarAssumptions = {
    * rather than observed, holds the projection on the conservative side.
    */
   utilityMeterFeeCents: number;
-  defaultGrossPpwCents: number;
+  companyDefaultBasePpwCents: number;
   defaultDealerFeePct: number;
   minOffsetPct: number;
   /**
@@ -265,7 +265,7 @@ export type PurchaseInput = {
    * array. There is no per-lender exception — "the final price is the gross
    * price plus the dealer fee, all together" (2026-09-15).
    *
-   * OUT OF `basePriceCents`, therefore out of the rep's redline: the battery is
+   * OUT OF `baseKeptCents`, therefore out of the rep's redline: the battery is
    * priced from the catalogue to cover its own cost, exactly like an adder, and
    * paying overage on it would pay a rep for the manufacturer's margin.
    */
@@ -280,7 +280,7 @@ export type PurchaseBreakdown = {
   // ── The ladder, in the words the business uses ────────────────────────────
 
   /** BASE — the system alone, before the lender's cut. What the rep prices. */
-  basePriceCents: number;
+  baseKeptCents: number;
   /** Base per installed watt. The rate a redline is measured against. */
   basePpwCents: number;
 
@@ -370,7 +370,7 @@ export type UnitPriceInput = {
 
 export type UnitPriceBreakdown = {
   units: number;
-  basePriceCents: number;
+  baseKeptCents: number;
   basePerUnitCents: number;
   adderTotalCents: number;
   onTopAdderTotalCents: number;
@@ -404,11 +404,11 @@ export function priceUnits(input: UnitPriceInput): UnitPriceBreakdown {
 
   // The base at sticker. `stickerPerUnitCents` already carries the fee.
   const baseStickerCents = units * Math.round(input.stickerPerUnitCents);
-  const basePriceCents = baseStickerCents - Math.round(baseStickerCents * f);
+  const baseKeptCents = baseStickerCents - Math.round(baseStickerCents * f);
 
   // EVERY adder, grossed up by the SAME fee, so that what survives the lender's
   // cut is the catalogue price and not 82% of it. That includes the lines
-  // flagged `financedOnTop` — a roof on a capped partner. They are customer
+  // flagged `outsidePriceRule` — a roof on a capped partner. They are customer
   // sell-side work, part of the gross like any other adder, and the dealer fee
   // is a percentage of the ENTIRE gross (2026-09-15). The flag decides only
   // which side of the partner's $/W ceiling the work sits on — see
@@ -423,7 +423,7 @@ export function priceUnits(input: UnitPriceInput): UnitPriceBreakdown {
   // still keeps its catalogue price.
   const batteryStickerCents = up(batteryPriceCents);
   const contractPriceCents = baseStickerCents + adderStickerCents + batteryStickerCents;
-  const grossPriceCents = basePriceCents + adderTotalCents + batteryPriceCents;
+  const grossPriceCents = baseKeptCents + adderTotalCents + batteryPriceCents;
 
   // Subtracted rather than recomputed as `contract × f`: gross + fee has to
   // equal final EXACTLY, because a customer reads those three lines and adds
@@ -436,8 +436,8 @@ export function priceUnits(input: UnitPriceInput): UnitPriceBreakdown {
   const per = (cents: number) => (units > 0 ? cents / units : 0);
   return {
     units,
-    basePriceCents,
-    basePerUnitCents: per(basePriceCents),
+    baseKeptCents,
+    basePerUnitCents: per(baseKeptCents),
     adderTotalCents,
     onTopAdderTotalCents,
     onTopAdderStickerCents,
@@ -517,7 +517,7 @@ export function pricePurchase(input: PurchaseInput): PurchaseBreakdown {
   });
   return {
     systemWatts: u.units,
-    basePriceCents: u.basePriceCents,
+    baseKeptCents: u.baseKeptCents,
     basePpwCents: u.basePerUnitCents,
     adderTotalCents: u.adderTotalCents,
     onTopAdderTotalCents: u.onTopAdderTotalCents,
@@ -722,7 +722,7 @@ export type FinalPpwCap = {
  * give in it. That is the whole behaviour in one sentence: under a cap, extra
  * work comes out of the company's side, and the homeowner's number never moves.
  *
- * ONE KIND OF WORK IS OUTSIDE THE CEILING. An adder marked `financedOnTop` — a
+ * ONE KIND OF WORK IS OUTSIDE THE CEILING. An adder marked `outsidePriceRule` — a
  * roof — is not part of what the partner's $/W is a price FOR. Amos publishes
  * $5.50/W and funds a roof above it, so a 10 kW job with a roof is $55,000 plus
  * the roof, not $55,000 with the roof taken out of the company's margin. It is
@@ -1103,13 +1103,13 @@ export function priceStorageStored(
 export function purchaseFromUnits(u: UnitPriceBreakdown): PurchaseBreakdown {
   return {
     systemWatts: 0,
-    basePriceCents: u.basePriceCents,
+    baseKeptCents: u.baseKeptCents,
     basePpwCents: 0,
     adderTotalCents: u.adderTotalCents,
     onTopAdderTotalCents: u.onTopAdderTotalCents,
     onTopAdderStickerCents: u.onTopAdderStickerCents,
     // Always zero out of `priceStoragePurchase`: on a storage-only deal the
-    // battery is the SYSTEM, counted in `basePriceCents`, and charging for it
+    // battery is the SYSTEM, counted in `baseKeptCents`, and charging for it
     // again on top would bill the household twice for one Powerwall.
     batteryPriceCents: u.batteryPriceCents,
     batteryStickerCents: u.batteryStickerCents,

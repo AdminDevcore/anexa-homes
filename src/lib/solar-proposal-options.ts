@@ -76,7 +76,7 @@ export type CatalogueProgramme = {
      * frozen into the snapshot and outlive anybody's chance to correct it.
      */
     maxFinalPpwCents: number | null;
-    /** Ceiling, or this partner's flat price. See SolarFinalPpwMode. */
+    /** Ceiling, or this partner's flat price. See SolarPriceRuleMode. */
     finalPpwMode: FinalPpwMode;
     /** The same rule, counted in batteries, for a job with no array. */
     maxFinalPricePerBatteryCents?: number | null;
@@ -382,7 +382,7 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
       lender: p.lender.name,
       lenderLogoUrl: p.lender.logoUrl,
       lenderApplyUrl: p.lender.applyUrl,
-      lenderProductLabel: customerProductLabel(p),
+      programmeLabel: customerProductLabel(p),
       // THIS partner's closing credit, not the deal partner's. A menu row is
       // an offer from whoever publishes it.
       signTodayRule: {

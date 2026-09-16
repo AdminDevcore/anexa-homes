@@ -100,7 +100,7 @@ function paymentOptions(s: SolarProposalSnapshot): ProposalPaymentOption[] {
       : f.product === "loan"
         ? f.loanMonthlyPaymentCents
         : f.product === "lease"
-          ? f.leaseMonthlyCents
+          ? f.leasePaymentCents
           : year1
             ? Math.round(year1.solarPaymentCents / 12)
             : null;

@@ -158,7 +158,7 @@ export function financeRowForProduct(
     isPurchase && ctx.targetNetPpwCents != null && f.grossPpwCents == null
       ? grossPpwFromNet(ctx.targetNetPpwCents, dealerFeePct)
       : null;
-  const uncappedPpwCents = derivedGrossPpw ?? f.grossPpwCents ?? assumptions.defaultGrossPpwCents;
+  const uncappedPpwCents = derivedGrossPpw ?? f.grossPpwCents ?? assumptions.companyDefaultBasePpwCents;
 
   // The lender's ceiling, applied last and to the price the rep TYPED as well
   // as to the derived one.
@@ -174,7 +174,7 @@ export function financeRowForProduct(
         stickerPpwCents: uncappedPpwCents,
         maxFinalPpwCents: lp?.maxFinalPpwCents ?? null,
         // A FLAT partner overrides the typed price outright rather than only
-        // holding it down — see SolarFinalPpwMode. On such a lender the box a
+        // holding it down — see SolarPriceRuleMode. On such a lender the box a
         // rep types in stops being the price of anything the customer sees.
         mode: lp?.finalPpwMode ?? undefined,
         basis: lp?.ppwBasis ?? undefined,

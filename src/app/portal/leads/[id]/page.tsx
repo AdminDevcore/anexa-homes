@@ -452,12 +452,12 @@ export default async function LeadDetailPage({
         prisma.solarLender.findMany({
           where: { companyId: user.companyId },
           orderBy: [{ isActive: "desc" }, { rank: "asc" }, { name: "asc" }],
-          // `maxFinalPpwCents` is the partner's ceiling on the customer's price
+          // `priceRulePpwCents` is the partner's ceiling on the customer's price
           // per watt. Read here so this page prices the deal the way the
           // proposal builder does — see priceStoredPurchase.
           select: {
             id: true, name: true, isActive: true, logoUpdatedAt: true,
-            maxFinalPpwCents: true, finalPpwMode: true,
+            priceRulePpwCents: true, priceRuleMode: true,
             // Which price that figure fixes, per programme — the deal is
             // priced on the basis of the programme it was quoted on.
             products: { select: { id: true, ppwBasis: true } },
@@ -641,8 +641,8 @@ export default async function LeadDetailPage({
             dealPerBatteryCents: solarFinance.baseFinalPerBatteryCents,
             cataloguePerBatteryCents: solarDesign.battery?.priceCents ?? null,
           }),
-          maxFinalPpwCents: designLenderRow?.maxFinalPpwCents ?? null,
-          finalPpwMode: designLenderRow?.finalPpwMode,
+          maxFinalPpwCents: designLenderRow?.priceRulePpwCents ?? null,
+          finalPpwMode: designLenderRow?.priceRuleMode,
           ppwBasis: designLenderRow?.products.find((p) => p.id === solarFinance.lenderProductId)
             ?.ppwBasis,
         })
@@ -730,7 +730,7 @@ export default async function LeadDetailPage({
         contractPriceCents:
           workingPrice?.breakdown.contractPriceCents ?? solarFinance?.finalPriceCents ?? null,
         netAfterCreditsCents: workingLadder?.netCostCents ?? null,
-        monthlyPaymentCents: solarFinance?.leaseMonthlyCents ?? null,
+        monthlyPaymentCents: solarFinance?.leasePaymentCents ?? null,
         rateMillsPerKwh: solarFinance?.rateMillsPerKwh ?? null,
       }
     : null;
@@ -1000,7 +1000,7 @@ export default async function LeadDetailPage({
    * defect `resolveReportedSystem` exists to stop, on the same card.
    *
    * What the snapshot froze is the CUSTOMER's ladder, not the internal one:
-   * `basePriceCents` and `adderTotalCents` are at STICKER, the dealer fee
+   * `baseKeptCents` and `adderTotalCents` are at STICKER, the dealer fee
    * already inside them. That is the right ladder for this screen — the fee
    * itself is deliberately not shown here any more, and at sticker the rungs
    * add up to the contract above them to the cent, which the internal ones
@@ -1049,7 +1049,7 @@ export default async function LeadDetailPage({
         // what the rep typed. `fin.grossPpwCents` is the sticker and does not
         // belong here — reading it on this rung was showing a rep a base of
         // $3.50 under a "final" of $2.87, which is a ladder pointing down.
-        base: { totalCents: b.basePriceCents, ppwCents: Math.round(b.basePpwCents) },
+        base: { totalCents: b.baseKeptCents, ppwCents: Math.round(b.basePpwCents) },
         // BOTH halves: the rung says what the extra work on this job costs, and
         // a roof financed on top of the partner's price is extra work like any
         // other — it is only the pricing rule that differs. `breakdown` sums
@@ -1185,8 +1185,8 @@ export default async function LeadDetailPage({
        * the screen names the reason. A frozen ladder needs no such notice — its
        * rungs are at sticker and add up to the contract on their own.
        */
-      maxFinalPpwCents: dealLender?.maxFinalPpwCents ?? null,
-      finalPpwMode: dealLender?.finalPpwMode ?? "cap",
+      priceRulePpwCents: dealLender?.priceRulePpwCents ?? null,
+      priceRuleMode: dealLender?.priceRuleMode ?? "cap",
       ppwBasis:
         dealLender?.products.find((p) => p.id === fin?.lenderProductId)?.ppwBasis ?? "final",
       cappedByLender: priced?.cap.capped ?? false,
@@ -1233,7 +1233,7 @@ export default async function LeadDetailPage({
           // the working one by construction — see `solarMoney.ladder`.
           contractPriceCents: solarMoney?.ladder?.final.totalCents ?? null,
           netAfterCreditsCents: workingLadder?.netCostCents ?? null,
-          monthlyPaymentCents: solarFinance?.leaseMonthlyCents ?? null,
+          monthlyPaymentCents: solarFinance?.leasePaymentCents ?? null,
           rateMillsPerKwh: solarFinance?.rateMillsPerKwh ?? null,
         });
         return working.kind !== "none"
@@ -1280,7 +1280,7 @@ export default async function LeadDetailPage({
           : [],
         downPaymentCents: solarFinance?.downPaymentCents ?? null,
         loanMonthlyPaymentCents: solarFinance?.lenderMonthlyPaymentCents ?? null,
-        monthlyPaymentCents: solarFinance?.leaseMonthlyCents ?? null,
+        monthlyPaymentCents: solarFinance?.leasePaymentCents ?? null,
         escalatorPct: solarFinance?.escalatorPct ?? null,
         rateMillsPerKwh: solarFinance?.rateMillsPerKwh ?? null,
       }
@@ -2031,7 +2031,7 @@ export default async function LeadDetailPage({
                       solarFinance?.finalPriceCents ??
                       null
                     }
-                    monthlyPaymentCents={solarFinance?.leaseMonthlyCents ?? null}
+                    monthlyPaymentCents={solarFinance?.leasePaymentCents ?? null}
                     rateMillsPerKwh={solarFinance?.rateMillsPerKwh ?? null}
                     canBuild={can(user, "create", "Proposal") || can(user, "update", "Proposal")}
                     canEdit={can(user, "create", "Proposal")}

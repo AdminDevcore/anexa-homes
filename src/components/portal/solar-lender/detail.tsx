@@ -143,7 +143,7 @@ export function LenderDetail({
   lender,
   canEdit,
   sellableEquipment,
-  targetNetPpwCents,
+  targetBasePpwCents,
   creditRates,
   adderCatalogue,
   tab,
@@ -153,7 +153,7 @@ export function LenderDetail({
   lender: LenderRow;
   canEdit: boolean;
   sellableEquipment: number;
-  targetNetPpwCents: number | null;
+  targetBasePpwCents: number | null;
   creditRates: CreditRates;
   adderCatalogue: AdderRuleOption[];
   tab: LenderTab;
@@ -309,13 +309,13 @@ export function LenderDetail({
     // A price is the one field on this screen that silently rewrites what every
     // deal on this partner quotes, and "Invalid lender." would send somebody
     // looking at the URL fields.
-    const maxFinalPpwCents = draft.ppwMode === "normal" ? null : ppwToCents(draft.maxFinalPpw);
-    if (maxFinalPpwCents === "invalid") {
+    const priceRulePpwCents = draft.ppwMode === "normal" ? null : ppwToCents(draft.maxFinalPpw);
+    if (priceRulePpwCents === "invalid") {
       return toast.error(
         "Final $/W has to be a price between $0.50 and $20.00, or choose “Prices the normal way”."
       );
     }
-    if (draft.ppwMode !== "normal" && maxFinalPpwCents == null) {
+    if (draft.ppwMode !== "normal" && priceRulePpwCents == null) {
       return toast.error(
         "Type this partner’s $/W, or choose “Prices the normal way” to leave pricing alone."
       );
@@ -325,12 +325,12 @@ export function LenderDetail({
       return toast.error("Min base $/W has to be a price between $0.50 and $20.00, or blank for no floor.");
     }
 
-    const maxFinalPricePerBatteryCents =
+    const priceRulePerBatteryCents =
       draft.batteryMode === "normal" ? null : batteryPriceToCents(draft.maxFinalBattery);
-    if (maxFinalPricePerBatteryCents === "invalid") {
+    if (priceRulePerBatteryCents === "invalid") {
       return toast.error("Final $/battery has to be between $500 and $100,000, or blank for no cap.");
     }
-    if (draft.batteryMode !== "normal" && maxFinalPricePerBatteryCents == null) {
+    if (draft.batteryMode !== "normal" && priceRulePerBatteryCents == null) {
       return toast.error("Type this partner’s price per battery, or choose “Prices the normal way”.");
     }
     const minBasePricePerBatteryCents = batteryPriceToCents(draft.minBaseBattery);
@@ -369,16 +369,16 @@ export function LenderDetail({
           creditInstructions: draft.creditInstructions.trim() || null,
           repPayMode: draft.repPayMode,
           batteryPayMode: draft.batteryPayMode,
-          maxFinalPpwCents,
+          priceRulePpwCents,
           // The stored mode only means anything alongside a figure, so on
           // "prices the normal way" it keeps whatever it was — flipping back to
           // a cap later should not silently forget that this partner is flat.
-          finalPpwMode: draft.ppwMode === "normal" ? lender.finalPpwMode : draft.ppwMode,
+          priceRuleMode: draft.ppwMode === "normal" ? lender.priceRuleMode : draft.ppwMode,
           programmeBases: Object.entries(draft.programmeBases).map(([id, b]) => ({ id, ...b })),
           minBasePpwCents,
-          maxFinalPricePerBatteryCents,
-          finalBatteryPriceMode:
-            draft.batteryMode === "normal" ? lender.finalBatteryPriceMode : draft.batteryMode,
+          priceRulePerBatteryCents,
+          priceRuleBatteryMode:
+            draft.batteryMode === "normal" ? lender.priceRuleBatteryMode : draft.batteryMode,
           minBasePricePerBatteryCents,
           batteryRule: draft.batteryRule,
           signTodayMode: draft.signTodayMode,
@@ -408,7 +408,7 @@ export function LenderDetail({
       if (addersDirty) {
         const res = await setLenderAdderRulesAction(
           lender.id,
-          adderCatalogue.map((a) => ({ equipmentId: a.id, financedOnTop: !!adderDraft[a.id] }))
+          adderCatalogue.map((a) => ({ equipmentId: a.id, outsidePriceRule: !!adderDraft[a.id] }))
         );
         if (!res.ok) {
           toast.error(res.error, { duration: 9000 });
@@ -500,10 +500,10 @@ export function LenderDetail({
             {!lender.isActive && <Pill>Retired</Pill>}
           </div>
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-            {lender.maxFinalPpwCents != null ? (
+            {lender.priceRulePpwCents != null ? (
               <Pill tone="gold">
-                {lender.finalPpwMode === "flat" ? "Flat" : "Max"} $
-                {ppwToDollars(lender.maxFinalPpwCents)}/W
+                {lender.priceRuleMode === "flat" ? "Flat" : "Max"} $
+                {ppwToDollars(lender.priceRulePpwCents)}/W
               </Pill>
             ) : (
               <Pill>Prices the normal way</Pill>
@@ -1215,7 +1215,7 @@ export function LenderDetail({
           <RateSheetPanel
             lender={lender}
             canEdit={canEdit}
-            targetNetPpwCents={targetNetPpwCents}
+            targetBasePpwCents={targetBasePpwCents}
           />
         </TabsContent>
 

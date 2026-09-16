@@ -42,7 +42,7 @@ export const ASSUMPTIONS: SolarAssumptions = {
   utilityEscalationPct: 3.5,
   kwhPerKwYear: 1450,
   utilityMeterFeeCents: 1000,
-  defaultGrossPpwCents: 350,
+  companyDefaultBasePpwCents: 350,
   defaultDealerFeePct: 18,
   minOffsetPct: 0,
   maxOffsetPct: 150,
@@ -386,7 +386,7 @@ export function priceToday(d: PerWattDeal) {
     },
     lender: d.lenderName,
     // As generation labels the quoted programme (proposal-generate.ts).
-    lenderProductLabel:
+    programmeLabel:
       d.product === "cash"
         ? null
         : customerProductLabel({
@@ -486,7 +486,7 @@ export function storageToday() {
       downPaymentCents: null,
     },
     lender: s.lenderName,
-    lenderProductLabel: customerProductLabel({
+    programmeLabel: customerProductLabel({
       product: "loan",
       name: s.programmeName,
       aprPct: s.aprPct,
@@ -517,7 +517,7 @@ type Row = ReturnType<typeof financeRowForProduct>;
 type Column = ReturnType<typeof compareOffers>[number];
 
 export const ladderFigures = (b: Breakdown) => ({
-  basePriceCents: b.basePriceCents,
+  baseKeptCents: b.baseKeptCents,
   basePpwCents: r4(b.basePpwCents),
   addersCents: b.adderTotalCents,
   addersOutsideRuleCents: b.onTopAdderTotalCents,
@@ -535,7 +535,7 @@ export const ladderFigures = (b: Breakdown) => ({
 
 export const unitLadderFigures = (b: UnitBreakdown) => ({
   units: b.units,
-  basePriceCents: b.basePriceCents,
+  baseKeptCents: b.baseKeptCents,
   basePerUnitCents: r4(b.basePerUnitCents),
   addersCents: b.adderTotalCents,
   grossPriceCents: b.grossPriceCents,
@@ -563,7 +563,7 @@ export const columnFigures = (c: Column) => ({
   stickerPpwCents: c.grossPpwCents,
   dealerFeePct: c.dealerFeePct,
   finalCents: c.contractPriceCents,
-  grossPpwCents: c.netPpwCents,
+  grossPpwCents: c.keptPpwCents,
   capped: c.capped,
   adderOverrun: c.adderOverrun,
   monthlyHeadlineCents: c.monthlyCents,
@@ -585,7 +585,7 @@ export const optionFigures = (o: ProposalPaymentOption) => {
     label: o.label,
     quoted: o.quoted,
     product: f.product,
-    programmeLabel: f.lenderProductLabel ?? null,
+    programmeLabel: f.programmeLabel ?? null,
     stickerPpwCents: f.baseFinalPpwCents ?? null,
     baseFinalCents: f.baseFinalCents ?? null,
     addersFinalCents: f.addersFinalCents ?? null,

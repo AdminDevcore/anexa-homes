@@ -102,7 +102,7 @@ async function main() {
           utilityEscalationPct: row.utilityEscalationPct,
           kwhPerKwYear: row.kwhPerKwYear,
           utilityMeterFeeCents: row.utilityMeterFeeCents,
-          defaultGrossPpwCents: row.defaultGrossPpwCents,
+          companyDefaultBasePpwCents: row.companyDefaultBasePpwCents,
           defaultDealerFeePct: row.defaultDealerFeePct,
           minOffsetPct: row.minOffsetPct,
           maxOffsetPct: row.maxOffsetPct,

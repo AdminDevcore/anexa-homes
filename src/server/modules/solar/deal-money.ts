@@ -57,7 +57,7 @@ const DESIGN_SELECT = {
   battery: { select: { priceCents: true } },
   // The partner's per-battery rule, read off the LENDER rather than the
   // programme row — the same place the $/W ceiling is read from.
-  lender: { select: { maxFinalPricePerBatteryCents: true, finalBatteryPriceMode: true } },
+  lender: { select: { priceRulePerBatteryCents: true, priceRuleBatteryMode: true } },
 } as const;
 
 /**
@@ -140,7 +140,7 @@ export async function dealMoneyColumns(
       systemSizeKwDc: design?.systemSizeKwDc ?? 0,
       assumptions,
       lenderProduct: toLenderProductTerms(lenderProduct),
-      targetNetPpwCents: assumptions.targetNetPpwCents,
+      targetNetPpwCents: assumptions.targetBasePpwCents,
     }
   );
 
@@ -163,8 +163,8 @@ export async function dealMoneyColumns(
           dealerFeePct: f.product === "cash" ? 0 : (rowData.dealerFeePct ?? 0),
           adderTotalCents: adders.addersInsideRuleCents,
           onTopAdderTotalCents: adders.addersOutsideRuleCents,
-          maxFinalPricePerBatteryCents: lenderBand?.maxFinalPricePerBatteryCents ?? null,
-          finalBatteryPriceMode: lenderBand?.finalBatteryPriceMode ?? "cap",
+          maxFinalPricePerBatteryCents: lenderBand?.priceRulePerBatteryCents ?? null,
+          finalBatteryPriceMode: lenderBand?.priceRuleBatteryMode ?? "cap",
           // Which price that figure fixes is the quoted programme's to say.
           batteryPriceBasis: lenderProduct?.batteryPriceBasis,
         })
@@ -213,7 +213,7 @@ export async function dealMoneyColumns(
     addersInsideRuleCents: adderTotalCents,
     addersOutsideRuleCents: onTopAdderTotalCents,
     finalPriceCents: storagePrice ? storagePrice.breakdown.contractPriceCents : contractPriceCents,
-    leaseMonthlyCents: monthlyPaymentCents,
+    leasePaymentCents: monthlyPaymentCents,
     lenderMonthlyPaymentCents: loanMonthlyPaymentCents,
   };
 }
@@ -287,7 +287,7 @@ export async function recomputeDealMoney(
       finalPriceCents: true,
       itcEstimateCents: true,
       rateMillsPerKwh: true,
-      leaseMonthlyCents: true,
+      leasePaymentCents: true,
       escalatorPct: true,
       termYears: true,
       aprPct: true,
@@ -307,7 +307,7 @@ export async function recomputeDealMoney(
     stickerPricePerBatteryCents: current.baseFinalPerBatteryCents,
     dealerFeePct: current.dealerFeePct,
     rateMillsPerKwh: current.rateMillsPerKwh,
-    monthlyPaymentCents: current.leaseMonthlyCents,
+    monthlyPaymentCents: current.leasePaymentCents,
     escalatorPct: current.escalatorPct,
     termYears: current.termYears,
     aprPct: current.aprPct,

@@ -109,7 +109,7 @@ export type AdderLine = {
    * being true; absent reads as false, which is the rule every adder followed
    * before this existed. See `capStickerToFinalPpw` for what it does to a price.
    */
-  financedOnTop?: boolean;
+  outsidePriceRule?: boolean;
 };
 
 /** Mills per watt → dollars per watt, for display. 50 → 0.05. */
@@ -253,7 +253,7 @@ export function adderTotals<L extends AdderLine>(
   // Split HERE rather than at each call site, because the two halves are priced
   // by different rules and a caller that sums them itself is one `filter` away
   // from putting a roof inside a ceiling it is supposed to sit on top of.
-  const onTopCents = priced.reduce((n, l) => n + (l.financedOnTop ? l.amountCents : 0), 0);
+  const onTopCents = priced.reduce((n, l) => n + (l.outsidePriceRule ? l.amountCents : 0), 0);
   return {
     lines: priced,
     totalCents,

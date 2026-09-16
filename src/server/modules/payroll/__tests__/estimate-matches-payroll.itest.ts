@@ -419,7 +419,7 @@ describe("BATTERIES, priced beside the array", () => {
      *
      * This is the documented rule, not an oversight — `solar-pay.ts` sends `pv`
      * and `pv_storage` down one path, and a redline is measured on
-     * `basePriceCents`, which the battery is deliberately priced outside of.
+     * `baseKeptCents`, which the battery is deliberately priced outside of.
      * The battery reaches the CONTRACT (recomputeDealMoney above puts it there)
      * without reaching the array's commission.
      *

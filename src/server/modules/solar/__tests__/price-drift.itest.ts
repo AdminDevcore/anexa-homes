@@ -63,7 +63,7 @@ async function expectedContract(): Promise<number> {
       systemType: true,
       batteryQty: true,
       battery: { select: { priceCents: true } },
-      lender: { select: { maxFinalPpwCents: true, finalPpwMode: true } },
+      lender: { select: { priceRulePpwCents: true, priceRuleMode: true } },
     },
   });
   return priceStoredPurchase({
@@ -79,8 +79,8 @@ async function expectedContract(): Promise<number> {
       dealPerBatteryCents: f.baseFinalPerBatteryCents,
       cataloguePerBatteryCents: d.battery?.priceCents ?? null,
     }),
-    maxFinalPpwCents: d.lender?.maxFinalPpwCents ?? null,
-    finalPpwMode: d.lender?.finalPpwMode,
+    maxFinalPpwCents: d.lender?.priceRulePpwCents ?? null,
+    finalPpwMode: d.lender?.priceRuleMode,
   }).breakdown.contractPriceCents;
 }
 
@@ -217,7 +217,7 @@ describe("the contract follows every input that moves it", () => {
     const added = await inSolar(() =>
       addDealAdderAction({
         leadId, label: "Trenching", basis: "flat", flatCents: 500_000, qty: 1,
-        showOnProposal: false, financedOnTop: false,
+        showOnProposal: false, outsidePriceRule: false,
       } as Parameters<typeof addDealAdderAction>[0])
     );
     expect(added.ok).toBe(true);
@@ -300,7 +300,7 @@ describe("the contract follows every input that moves it", () => {
   it("does NOT bake a lender-row ceiling into the cache — that is applied on read", async () => {
     await db.solarLender.update({
       where: { id: dearLender },
-      data: { maxFinalPpwCents: 500, finalPpwMode: "flat" },
+      data: { priceRulePpwCents: 500, priceRuleMode: "flat" },
     });
     await inSolar(() => setSolarDealLenderAction({ leadId, lenderId: dearLender }));
 
@@ -340,7 +340,7 @@ describe("a recompute never rewrites what a person typed", () => {
     await inSolar(() =>
       addDealAdderAction({
         leadId, label: "Conduit", basis: "flat", flatCents: 120_000, qty: 1,
-        showOnProposal: false, financedOnTop: false,
+        showOnProposal: false, outsidePriceRule: false,
       } as Parameters<typeof addDealAdderAction>[0])
     );
 
@@ -362,7 +362,7 @@ describe("a recompute never rewrites what a person typed", () => {
     await inSolar(() =>
       addDealAdderAction({
         leadId, label: "Nothing to price", basis: "flat", flatCents: 100_000, qty: 1,
-        showOnProposal: false, financedOnTop: false,
+        showOnProposal: false, outsidePriceRule: false,
       } as Parameters<typeof addDealAdderAction>[0])
     );
     expect(await db.solarFinance.count({ where: { leadId } })).toBe(0);

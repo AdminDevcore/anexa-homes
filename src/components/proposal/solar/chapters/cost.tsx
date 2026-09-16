@@ -249,8 +249,8 @@ export function ChapterCost({ doc }: { doc: Doc }) {
 
         {/* Third-party block — a lease has a monthly and a PPA has a rate, and
             neither has a system price. Nothing crosses over. */}
-        {f.leaseMonthlyCents != null && (
-          <DarkRow k="Monthly payment" v={usd(f.leaseMonthlyCents, 2)} strong />
+        {f.leasePaymentCents != null && (
+          <DarkRow k="Monthly payment" v={usd(f.leasePaymentCents, 2)} strong />
         )}
         {f.rateMillsPerKwh != null && (
           <DarkRow k="Rate" v={`$${(f.rateMillsPerKwh / 1000).toFixed(3)} per kWh`} strong />

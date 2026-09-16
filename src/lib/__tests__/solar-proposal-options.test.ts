@@ -22,7 +22,7 @@ const A: SolarAssumptions = {
   utilityEscalationPct: 3.5,
   kwhPerKwYear: 1450,
   utilityMeterFeeCents: 1000,
-  defaultGrossPpwCents: 350,
+  companyDefaultBasePpwCents: 350,
   defaultDealerFeePct: 18,
   minOffsetPct: 0,
   maxOffsetPct: 150,
@@ -285,7 +285,7 @@ describe("the sign today credit is frozen into the document", () => {
     const withCredit = build({ signTodayTypedCents: 2_000_00 }).financing;
     const without = build().financing;
     expect(withCredit.finalPriceCents).toBe(without.finalPriceCents);
-    expect(withCredit.leaseMonthlyCents).toBe(without.leaseMonthlyCents);
+    expect(withCredit.leasePaymentCents).toBe(without.leasePaymentCents);
   });
 });
 

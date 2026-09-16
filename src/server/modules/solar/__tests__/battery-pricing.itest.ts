@@ -156,8 +156,8 @@ beforeAll(async () => {
     data: {
       companyId,
       name: "Flat Rate Partner",
-      maxFinalPpwCents: 550,
-      finalPpwMode: "flat",
+      priceRulePpwCents: 550,
+      priceRuleMode: "flat",
     },
   });
   lenderId = lender.id;

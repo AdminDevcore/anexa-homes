@@ -16,7 +16,7 @@ const A: SolarAssumptions = {
   utilityEscalationPct: 3.5,
   kwhPerKwYear: 1450,
   utilityMeterFeeCents: 1000,
-  defaultGrossPpwCents: 350,
+  companyDefaultBasePpwCents: 350,
   defaultDealerFeePct: 18,
   minOffsetPct: 0,
   maxOffsetPct: 150,
@@ -123,7 +123,7 @@ describe("financing summary matches the product", () => {
     const s = build();
     expect(s.financing.finalPriceCents).toBe(3_500_000);
     expect(s.financing.rateMillsPerKwh).toBeNull();
-    expect(s.financing.leaseMonthlyCents).toBeNull();
+    expect(s.financing.leasePaymentCents).toBeNull();
     expect(s.financing.lender).toBe("GoodLeap");
   });
 
@@ -160,7 +160,7 @@ describe("25-year savings model", () => {
       year1ProductionKwh: 12_180,
       annualUsageKwh: 12_180, // fully offset, so no residual grid cost
       currentRateMillsPerKwh: 150,
-      leaseMonthlyCents: 18_500,
+      leasePaymentCents: 18_500,
       escalatorPct: 0,
       termYears: 25,
       assumptions: A,
@@ -179,7 +179,7 @@ describe("25-year savings model", () => {
       year1ProductionKwh: 12_180,
       annualUsageKwh: 12_180,
       currentRateMillsPerKwh: 150,
-      leaseMonthlyCents: 18_500,
+      leasePaymentCents: 18_500,
       escalatorPct: 0,
       termYears: 10,
       assumptions: A,

@@ -187,7 +187,7 @@ export function resolveReportedSystem({
       // every snapshot before v7, which reports no net at all rather than one
       // worked out from figures that were not in force.
       netAfterCreditsCents: financing.creditLadder?.netCostCents ?? null,
-      monthlyPaymentCents: financing.leaseMonthlyCents,
+      monthlyPaymentCents: financing.leasePaymentCents,
       rateMillsPerKwh: financing.rateMillsPerKwh,
     };
   }
@@ -342,7 +342,7 @@ const rung = (totalCents: number, watts: number): PriceRung => ({
  * Null on a document that quotes no price — a lease and a PPA are sold as a
  * monthly and a rate per kWh, and there is no ladder under either.
  *
- * `basePriceCents` is absent on documents generated before the base was frozen;
+ * `baseFinalCents` is absent on documents generated before the base was frozen;
  * those fall back to the total less everything priced separately, which is the
  * same reading the customer's own cost chapter takes of them.
  */
@@ -355,11 +355,11 @@ export function frozenPriceLadder(
   const watts = Math.max(0, Math.round(sizeKwDc * 1000));
   const batteryPriceCents = Math.max(0, financing.equipmentFinalCents ?? 0);
   const adderTotalCents = Math.max(0, financing.addersFinalCents ?? 0);
-  const basePriceCents =
+  const baseStickerCents =
     financing.baseFinalCents ?? contractPriceCents - adderTotalCents - batteryPriceCents;
   return {
     source: "proposal",
-    base: rung(basePriceCents, watts),
+    base: rung(baseStickerCents, watts),
     adders: rung(adderTotalCents, watts),
     batteryPriceCents,
     batteryQty: financing.batteryQty ?? (financing.batteryLabel ? 1 : 0),

@@ -90,7 +90,7 @@ describe("adders and equipment upgrades are inside the fee", () => {
   it("the customer's breakdown adds up to the contract", () => {
     const p = pricePurchase({ ...KW10, adderTotalCents: $(3_000), batteryPriceCents: $(15_000) });
     expect(p.baseStickerCents + p.adderStickerCents + p.batteryStickerCents).toBe(p.contractPriceCents);
-    expect(p.basePriceCents + p.adderTotalCents + p.batteryPriceCents).toBe(p.grossPriceCents);
+    expect(p.baseKeptCents + p.adderTotalCents + p.batteryPriceCents).toBe(p.grossPriceCents);
   });
 });
 

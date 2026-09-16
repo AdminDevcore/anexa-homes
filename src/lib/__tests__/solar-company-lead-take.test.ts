@@ -111,11 +111,11 @@ describe("company lead adjustment — exactly one method", () => {
   });
 
   it("applies to every basis — the lead came from the company either way", () => {
-    const cases: { terms: SolarPayTerms; deal: { systemWatts: number; basePriceCents: number; batteryQty?: number } }[] = [
-      { terms: redline, deal: { systemWatts: 10_000, basePriceCents: 30_000_00 } },
-      { terms: { basis: "per_watt", redlineCentsPerWatt: null, millsPerWatt: 400, redlinePerBatteryCents: null, perBatteryFlatCents: null }, deal: { systemWatts: 10_000, basePriceCents: 30_000_00 } },
-      { terms: { basis: "battery_redline", redlineCentsPerWatt: null, millsPerWatt: null, redlinePerBatteryCents: 800_000, perBatteryFlatCents: null }, deal: { systemWatts: 0, basePriceCents: 20_000_00, batteryQty: 2 } },
-      { terms: { basis: "battery_flat", redlineCentsPerWatt: null, millsPerWatt: null, redlinePerBatteryCents: null, perBatteryFlatCents: 150_000 }, deal: { systemWatts: 0, basePriceCents: 20_000_00, batteryQty: 2 } },
+    const cases: { terms: SolarPayTerms; deal: { systemWatts: number; baseKeptCents: number; batteryQty?: number } }[] = [
+      { terms: redline, deal: { systemWatts: 10_000, baseKeptCents: 30_000_00 } },
+      { terms: { basis: "per_watt", redlineCentsPerWatt: null, millsPerWatt: 400, redlinePerBatteryCents: null, perBatteryFlatCents: null }, deal: { systemWatts: 10_000, baseKeptCents: 30_000_00 } },
+      { terms: { basis: "battery_redline", redlineCentsPerWatt: null, millsPerWatt: null, redlinePerBatteryCents: 800_000, perBatteryFlatCents: null }, deal: { systemWatts: 0, baseKeptCents: 20_000_00, batteryQty: 2 } },
+      { terms: { basis: "battery_flat", redlineCentsPerWatt: null, millsPerWatt: null, redlinePerBatteryCents: null, perBatteryFlatCents: 150_000 }, deal: { systemWatts: 0, baseKeptCents: 20_000_00, batteryQty: 2 } },
     ];
     for (const { terms, deal } of cases) {
       const gross = solarRepPayCents(terms, deal).amountCents;
@@ -164,7 +164,7 @@ describe("manager overrides — all four shapes", () => {
   });
 
   it("PERCENTAGE follows the lead adjustment down", () => {
-    const gross = solarRepPayCents(redline, { systemWatts: 10_000, basePriceCents: 30_000_00 });
+    const gross = solarRepPayCents(redline, { systemWatts: 10_000, baseKeptCents: 30_000_00 });
     expect(gross.amountCents).toBe(10_000_00);
     const net = applyCompanyLeadTake(gross.amountCents, {
       companyProvided: true, mode: "percentage", takePct: 40, flatCents: null,
@@ -198,7 +198,7 @@ describe("manager overrides — all four shapes", () => {
 
 describe("worked example, end to end", () => {
   it("10 kW at $3.00/W base, $2.00/W redline, 40% company take, three managers", () => {
-    const gross = solarRepPayCents(redline, { systemWatts: 10_000, basePriceCents: 30_000_00 });
+    const gross = solarRepPayCents(redline, { systemWatts: 10_000, baseKeptCents: 30_000_00 });
     expect(gross.amountCents).toBe(10_000_00);
 
     const net = applyCompanyLeadTake(gross.amountCents, {

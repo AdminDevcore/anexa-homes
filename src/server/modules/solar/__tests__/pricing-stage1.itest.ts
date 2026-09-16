@@ -162,8 +162,8 @@ beforeAll(async () => {
       data: {
         companyId,
         name: ST.lenderName,
-        maxFinalPricePerBatteryCents: ST.maxFinalPricePerBatteryCents,
-        finalBatteryPriceMode: ST.finalBatteryPriceMode,
+        priceRulePerBatteryCents: ST.maxFinalPricePerBatteryCents,
+        priceRuleBatteryMode: ST.finalBatteryPriceMode,
       } as never,
     })
   ).id;
@@ -433,7 +433,7 @@ describe("the commission measure is frozen at signing", () => {
       basis: "redline",
       redlineCentsPerWatt: REDLINE,
       systemWatts: 10_000,
-      basePriceCents: live!.basePriceCents,
+      baseKeptCents: live!.baseKeptCents,
       batteryQty: 1,
       pricedFrom: "signature",
       pricedBasis: "signed_document",
@@ -442,7 +442,7 @@ describe("the commission measure is frozen at signing", () => {
     });
     // The document's base at sticker, less this deal's fee — the same figure
     // the live deal prices to while the two still agree.
-    expect(comp.basePriceCents).toBe(3_000_000);
+    expect(comp.baseKeptCents).toBe(3_000_000);
     // Freezing the live figure moves nothing on the day. Only the estimate's
     // provenance changes: its terms now come from the signing.
     const before = await pay(leadId, projectId);
@@ -492,13 +492,13 @@ describe("the commission measure is frozen at signing", () => {
       expect(refrozen).toMatchObject({
         redlineCentsPerWatt: REDLINE,
         systemWatts: 12_000,
-        basePriceCents: moved!.basePriceCents,
+        baseKeptCents: moved!.baseKeptCents,
         pricedProposalId: v2.id,
         pricingMatchesSignedDocument: true,
       });
       const after = await pay(leadId, projectId);
       expect(after.line?.amount).not.toBe(before.line?.amount);
-      expect(after.line?.amount).toBe(moved!.basePriceCents - REDLINE * 12_000);
+      expect(after.line?.amount).toBe(moved!.baseKeptCents - REDLINE * 12_000);
     } finally {
       await raw.user.update({ where: { id: repId }, data: { solarRedlineCentsPerWatt: REDLINE } });
     }
@@ -521,12 +521,12 @@ describe("the commission measure is frozen at signing", () => {
     // The deal now prices to $33,750 of base; the document says $30,000. The
     // customer signed the document, so that is what the rep is paid on.
     const live = await inSolar(() => loadCommissionDeal(db, companyId, leadId));
-    expect(live!.basePriceCents).toBe(3_375_000);
+    expect(live!.baseKeptCents).toBe(3_375_000);
     const comp = await raw.solarDealComp.findUniqueOrThrow({ where: { leadId } });
     expect(comp).toMatchObject({
       pricedFrom: "signature",
       pricedBasis: "signed_document",
-      basePriceCents: 3_000_000,
+      baseKeptCents: 3_000_000,
       pricingMatchesSignedDocument: false,
     });
     const log = await raw.activityLog.findFirst({
@@ -561,7 +561,7 @@ describe("a document with no priced figures falls back to the deal, and says so"
     const live = await inSolar(() => loadCommissionDeal(db, companyId, leadId));
     expect(await raw.solarDealComp.findUniqueOrThrow({ where: { leadId } })).toMatchObject({
       pricedBasis: "live_deal",
-      basePriceCents: live!.basePriceCents,
+      baseKeptCents: live!.baseKeptCents,
     });
     const log = await raw.activityLog.findFirst({
       where: { companyId, leadId, message: { contains: "carries no priced figures" } },
@@ -600,12 +600,12 @@ describe("a super admin can re-freeze the measure by hand", () => {
       expect(res).toMatchObject({
         ok: true,
         basis: "signed_document",
-        measure: { basePriceCents: frozen.basePriceCents },
+        measure: { baseKeptCents: frozen.baseKeptCents },
       });
       expect(await raw.solarDealComp.findUniqueOrThrow({ where: { leadId } })).toMatchObject({
         pricedFrom: "refreeze",
         pricedBasis: "signed_document",
-        basePriceCents: frozen.basePriceCents,
+        baseKeptCents: frozen.baseKeptCents,
         pricingMatchesSignedDocument: false,
       });
 
@@ -692,8 +692,8 @@ describe("the backfill freezes rows signed before the measure existed", () => {
     expect(held).toMatchObject({ movesPay: true, held: true });
     expect(held.outcome).toMatchObject({
       status: "would_freeze",
-      measure: { basePriceCents: 3_000_000 },
-      live: { basePriceCents: 3_375_000 },
+      measure: { baseKeptCents: 3_000_000 },
+      live: { baseKeptCents: 3_375_000 },
     });
     expect((await raw.solarDealComp.findUniqueOrThrow({ where: { leadId } })).pricedAt).toBeNull();
 
@@ -704,7 +704,7 @@ describe("the backfill freezes rows signed before the measure existed", () => {
     expect(await raw.solarDealComp.findUniqueOrThrow({ where: { leadId } })).toMatchObject({
       pricedFrom: "backfill",
       pricedBasis: "signed_document",
-      basePriceCents: 3_000_000,
+      baseKeptCents: 3_000_000,
     });
   });
 });

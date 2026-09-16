@@ -372,16 +372,16 @@ export async function generateProposalVersion(
             applyUrl: true,
             logoUpdatedAt: true,
             // The same rule counted in batteries, for a job with no array.
-            maxFinalPricePerBatteryCents: true,
-            finalBatteryPriceMode: true,
+            priceRulePerBatteryCents: true,
+            priceRuleBatteryMode: true,
             // The partner's ceiling, needed HERE and not only on the payment
             // menu below — see the re-cap immediately after this.
-            maxFinalPpwCents: true,
+            priceRulePpwCents: true,
             // …and whether that figure is a ceiling or this partner's flat
             // price. A flat partner overrides the stored sticker in BOTH
             // directions, so a document generated without it would quote a
             // cheap deal under the price list its own lender publishes.
-            finalPpwMode: true,
+            priceRuleMode: true,
             // What this partner hands back for signing today, and how it is
             // arrived at — see `solar-sign-today`.
             signTodayMode: true,
@@ -460,8 +460,8 @@ export async function generateProposalVersion(
 
   const capped = capStickerToFinalPpw({
     stickerPpwCents: finance.baseFinalPpwCents,
-    maxFinalPpwCents: dealLender?.maxFinalPpwCents ?? null,
-    mode: dealLender?.finalPpwMode,
+    maxFinalPpwCents: dealLender?.priceRulePpwCents ?? null,
+    mode: dealLender?.priceRuleMode,
     basis: quotedRow?.ppwBasis,
     systemSizeKwDc: design.systemSizeKwDc,
     dealerFeePct: finance.dealerFeePct,
@@ -529,8 +529,8 @@ export async function generateProposalVersion(
   if (isStorage && (finance.product === "cash" || finance.product === "loan")) {
     const storageCap = capStickerToFinalUnit({
       stickerPerUnitCents: finance.baseFinalPerBatteryCents,
-      maxFinalPerUnitCents: dealLender?.maxFinalPricePerBatteryCents ?? null,
-      mode: dealLender?.finalBatteryPriceMode,
+      maxFinalPerUnitCents: dealLender?.priceRulePerBatteryCents ?? null,
+      mode: dealLender?.priceRuleBatteryMode,
       basis: quotedRow?.batteryPriceBasis,
       units: design.batteryQty,
       dealerFeePct: finance.dealerFeePct,
@@ -631,14 +631,14 @@ export async function generateProposalVersion(
           applyUrl: true,
           logoUpdatedAt: true,
           // The partner's rule, counted in batteries.
-          maxFinalPricePerBatteryCents: true,
-          finalBatteryPriceMode: true,
+          priceRulePerBatteryCents: true,
+          priceRuleBatteryMode: true,
           // The partner's price rule for the final price per watt. Selected
           // here because the menu is PRICED at generation and frozen; a rule
           // missing from this select quotes a household a number the lender
           // does not fund, in a document nobody can correct afterwards.
-          maxFinalPpwCents: true,
-          finalPpwMode: true,
+          priceRulePpwCents: true,
+          priceRuleMode: true,
           // …and what it hands back for signing today. Frozen with the rest of
           // the menu for the same reason: each column is an offer from
           // whoever publishes it.
@@ -803,10 +803,10 @@ export async function generateProposalVersion(
         rank: p.lender.rank,
         applyUrl: p.lender.applyUrl,
         logoUrl: lenderLogoUrl(p.lender.id, p.lender.logoUpdatedAt),
-        maxFinalPpwCents: p.lender.maxFinalPpwCents,
-        finalPpwMode: p.lender.finalPpwMode,
-        maxFinalPricePerBatteryCents: p.lender.maxFinalPricePerBatteryCents,
-        finalBatteryPriceMode: p.lender.finalBatteryPriceMode,
+        maxFinalPpwCents: p.lender.priceRulePpwCents,
+        finalPpwMode: p.lender.priceRuleMode,
+        maxFinalPricePerBatteryCents: p.lender.priceRulePerBatteryCents,
+        finalBatteryPriceMode: p.lender.priceRuleBatteryMode,
         signTodayMode: p.lender.signTodayMode,
         signTodayFixedCents: p.lender.signTodayFixedCents,
         signTodayCapPpwCents: p.lender.signTodayCapPpwCents,
@@ -829,13 +829,13 @@ export async function generateProposalVersion(
       ),
       description: l.description,
       showOnProposal: l.showOnProposal,
-      financedOnTop: l.financedOnTop,
+      outsidePriceRule: l.outsidePriceRule,
     })),
     adderTotalCents: finance.addersInsideRuleCents,
     onTopAdderTotalCents: finance.addersOutsideRuleCents,
     batteryPriceCents,
     assumptions,
-    targetNetPpwCents: assumptions.targetNetPpwCents,
+    targetNetPpwCents: assumptions.targetBasePpwCents,
   });
 
   // The shape of the customer's year. Cache-only — see monthlyProductionForDesign.
@@ -985,10 +985,10 @@ export async function generateProposalVersion(
         ),
         description: l.description,
         showOnProposal: l.showOnProposal,
-        financedOnTop: l.financedOnTop,
+        outsidePriceRule: l.outsidePriceRule,
       })),
       rateMillsPerKwh: finance.rateMillsPerKwh,
-      monthlyPaymentCents: finance.leaseMonthlyCents,
+      monthlyPaymentCents: finance.leasePaymentCents,
       escalatorPct: finance.escalatorPct,
       termYears: finance.termYears,
       aprPct: finance.aprPct,
@@ -1013,7 +1013,7 @@ export async function generateProposalVersion(
       : null,
     loanFactors: quotedProduct,
     lenderApplyUrl: dealLender?.applyUrl ?? null,
-    lenderProductLabel: quotedProductLabel,
+    programmeLabel: quotedProductLabel,
     /**
      * The federal credits: the company's percentages and the wording, and the
      * answers this job gave about which of them it earns.

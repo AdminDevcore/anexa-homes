@@ -8,7 +8,7 @@ const A: SolarAssumptions = {
   utilityEscalationPct: 3.5,
   kwhPerKwYear: 1450,
   utilityMeterFeeCents: 1000,
-  defaultGrossPpwCents: 350,
+  companyDefaultBasePpwCents: 350,
   defaultDealerFeePct: 18,
   minOffsetPct: 0,
   maxOffsetPct: 150,
@@ -136,7 +136,7 @@ describe("a legitimate zero is a value, not an absence", () => {
 describe("defaults come from settings, never from a constant", () => {
   it("falls back to the company's PPW and dealer fee when none is given", () => {
     const row = financeRowForProduct({ product: "loan" }, CTX);
-    expect(row.grossPpwCents).toBe(A.defaultGrossPpwCents);
+    expect(row.grossPpwCents).toBe(A.companyDefaultBasePpwCents);
     expect(row.dealerFeePct).toBe(A.defaultDealerFeePct);
   });
 

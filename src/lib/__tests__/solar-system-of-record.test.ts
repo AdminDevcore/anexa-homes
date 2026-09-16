@@ -36,7 +36,7 @@ const SNAPSHOT = {
   financing: {
     product: "loan",
     finalPriceCents: 6050000,
-    leaseMonthlyCents: null,
+    leasePaymentCents: null,
     rateMillsPerKwh: null,
   },
 } as unknown as SolarProposalSnapshot;
@@ -246,7 +246,7 @@ describe("systemDrift", () => {
       financing: {
         product: "lease",
         finalPriceCents: null,
-        leaseMonthlyCents: 21500,
+        leasePaymentCents: 21500,
         rateMillsPerKwh: null,
       },
     } as unknown as SolarProposalSnapshot;
@@ -281,7 +281,7 @@ const LADDER_FINANCING = {
   equipmentFinalCents: 1900000,
   batteryQty: 2,
   finalPpwCents: 550,
-  leaseMonthlyCents: null,
+  leasePaymentCents: null,
   rateMillsPerKwh: null,
 } as unknown as SnapshotFinancing;
 
@@ -331,7 +331,7 @@ describe("frozenPriceLadder", () => {
     const lease = {
       product: "lease",
       finalPriceCents: null,
-      leaseMonthlyCents: 21500,
+      leasePaymentCents: 21500,
     } as unknown as SnapshotFinancing;
     expect(frozenPriceLadder(lease, 11)).toBeNull();
   });

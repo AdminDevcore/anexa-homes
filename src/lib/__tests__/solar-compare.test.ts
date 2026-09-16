@@ -312,7 +312,7 @@ describe("a lender's maximum price per watt reaches the comparison", () => {
   it("reports what the company keeps, because under a cap that is what moves", () => {
     const [row] = compareOffers([amos()], AMOS_BASIS);
     // $5.50/W with 65% going to the lender leaves 35% of it.
-    expect(Math.round(row.netPpwCents!)).toBe(193);
+    expect(Math.round(row.keptPpwCents!)).toBe(193);
     expect(row.maxFinalPpwCents).toBe(550);
   });
 
@@ -433,10 +433,10 @@ describe("the builder's quoted strip and the shelf above it price one deal", () 
     ).toBeLessThanOrEqual(10);
     // Paid for out of the company's side, which is the point of a flat partner:
     // the SYSTEM's share of a price that did not move shrinks by what the
-    // trenching costs. Measured on `basePriceCents` and not on the gross, which
+    // trenching costs. Measured on `baseKeptCents` and not on the gross, which
     // still carries the adder's own money and therefore barely moves.
-    expect(laden.breakdown.basePriceCents).toBeLessThan(bare.breakdown.basePriceCents);
-    expect(bare.breakdown.basePriceCents - laden.breakdown.basePriceCents).toBeGreaterThan(200_000);
+    expect(laden.breakdown.baseKeptCents).toBeLessThan(bare.breakdown.baseKeptCents);
+    expect(bare.breakdown.baseKeptCents - laden.breakdown.baseKeptCents).toBeGreaterThan(200_000);
   });
 });
 
