@@ -1,4 +1,4 @@
-import type { LedgerAccountType, Vertical } from "@prisma/client";
+import type { LedgerAccountType, Prisma, Vertical } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { normalBalance, statementOf } from "./chart";
 
@@ -47,6 +47,24 @@ export type AccountBalance = {
 
 export type Period = { startMs: number | null; endMs: number | null };
 
+/**
+ * ACCRUAL is the books as kept: an entry counts on the day it was written.
+ * CASH counts an entry only if it touched real money, which is what a tax
+ * return on the cash method wants.
+ *
+ * This is the standard small-business DERIVATION, not a second set of books,
+ * and it has a known limit worth stating: a single entry that both pays an old
+ * payable and books a new expense lands whole in the pay period, because the
+ * entry is the unit. Keeping two ledgers would be exact and would also mean two
+ * things to keep in agreement.
+ *
+ * A credit card is deliberately NOT cash — it is a liability, and paying with
+ * one is borrowing, not spending money you have.
+ */
+export type StatementBasis = "accrual" | "cash";
+
+const CASH_SUBTYPES = ["bank", "undeposited_funds"] as const;
+
 function range(period?: Period) {
   const gte = period?.startMs != null ? new Date(period.startMs) : undefined;
   const lte = period?.endMs != null ? new Date(period.endMs) : undefined;
@@ -79,16 +97,37 @@ export async function accountBalances(args: {
   companyId: string;
   period?: Period;
   vertical?: Vertical | null;
+  basis?: StatementBasis;
 }): Promise<AccountBalance[]> {
-  const { companyId, period, vertical } = args;
+  const { companyId, period, vertical, basis } = args;
   const date = range(period);
+
+  // On a cash basis the ENTRY is the unit, not the line: an entry counts when
+  // it touched real money. The cash line itself is an asset and never reaches
+  // the P&L, so there is no double count — what changes is which entries are
+  // considered at all.
+  //
+  // BUILT BY ASSIGNMENT, not by conditional spread, and typed explicitly.
+  // Spreading `...(date ? { date } : {})` into a literal makes TypeScript infer
+  // `date?: {...} | undefined`, and Prisma's `Exact<>` rejects an optional-
+  // undefined property against the relation-filter union member that requires
+  // `date?: undefined`. The compiler then degrades groupBy's return type to
+  // `{}`, so the real error surfaces four lines later as "Property 'accountId'
+  // does not exist" — which names neither the cause nor this line.
+  const entryWhere: Prisma.JournalEntryWhereInput = {};
+  if (date) entryWhere.date = date;
+  if (basis === "cash") {
+    // Spread the `as const` tuple: Prisma's `in` wants a mutable array.
+    entryWhere.lines = { some: { account: { subtype: { in: [...CASH_SUBTYPES] } } } };
+  }
+  const hasEntryFilter = Object.keys(entryWhere).length > 0;
 
   const grouped = await prisma.journalLine.groupBy({
     by: ["accountId"],
     where: {
       companyId,
       // No status filter: see the header. A void and its reversal both count.
-      ...(date ? { entry: { date } } : {}),
+      ...(hasEntryFilter ? { entry: entryWhere } : {}),
       ...(vertical ? { vertical } : {}),
     },
     _sum: { debitCents: true, creditCents: true },
@@ -175,6 +214,7 @@ export async function profitAndLoss(args: {
   companyId: string;
   period?: Period;
   vertical?: Vertical | null;
+  basis?: StatementBasis;
 }): Promise<ProfitAndLoss> {
   const rows = (await accountBalances(args)).filter(
     (r) => statementOf(r.type) === "profit_and_loss"
@@ -207,11 +247,12 @@ export async function profitAndLossByVertical(args: {
   companyId: string;
   period?: Period;
   verticals: Vertical[];
+  basis?: StatementBasis;
 }): Promise<{ combined: ProfitAndLoss; byVertical: { vertical: Vertical; pnl: ProfitAndLoss }[] }> {
   const [combined, ...each] = await Promise.all([
-    profitAndLoss({ companyId: args.companyId, period: args.period }),
+    profitAndLoss({ companyId: args.companyId, period: args.period, basis: args.basis }),
     ...args.verticals.map((v) =>
-      profitAndLoss({ companyId: args.companyId, period: args.period, vertical: v })
+      profitAndLoss({ companyId: args.companyId, period: args.period, vertical: v, basis: args.basis })
     ),
   ]);
   return {
