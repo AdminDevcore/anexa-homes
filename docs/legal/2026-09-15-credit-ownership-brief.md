@@ -57,7 +57,7 @@ Customer **Tessa Resendez**, signed **2026-09-06 22:19 UTC**, signer "TESSA RESE
 | Monthly payment on the full contract value | $464.22 |
 | **Monthly payment she was quoted** (credits applied) | **$232.11** |
 
-For reference, the price the system was sold at in the software is **$87,120.00**; the credits took the contract $3,560 below it.
+For reference, the price the system was quoted at is **$87,120.00** — the `quotedPriceCents` figure inside the credit ladder frozen into her signed document, which is also the price stored on the deal itself (`solar_finance.contractPriceCents`). The credits took the contract $3,560 below it.
 
 ### 1.4 What the company receives, and what the software records
 
