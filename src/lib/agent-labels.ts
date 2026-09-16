@@ -122,6 +122,23 @@ export function timeAgo(date: Date | string, now: Date): string {
   return `${Math.round(hours / 24)} d ago`;
 }
 
+/**
+ * The server's half of `LocalTime`: "2026-09-15 14:00 UTC", or null when the
+ * string is not an instant at all.
+ *
+ * `LocalTime` takes a `string`, which is wider than the real contract (an ISO
+ * 8601 stamp off `Date.toISOString()`). Slicing a malformed one rendered
+ * silent garbage into the visible text AND into the `dateTime` attribute,
+ * where it is invalid HTML nothing would have complained about. Read off the
+ * PARSED instant rather than sliced out of the input, so a valid time written
+ * another way still renders.
+ */
+export function utcStamp(iso: string): string | null {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return null;
+  return `${at.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+}
+
 /** "14 ms", "2.3 s", "4 min 5 s". */
 export function formatRunDuration(ms: number | null): string {
   if (ms === null) return "—";

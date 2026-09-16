@@ -30,6 +30,9 @@ export function FilterChips({
             aria-current={isActive ? "true" : undefined}
             className={cn(
               "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+              // Real links, so they are tabbed through. The browser default ring
+              // is easy to lose on a rounded chip over bg-card.
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
               isActive
                 ? "border-foreground/20 bg-foreground text-background"
                 : "border-border bg-card text-muted-foreground hover:text-foreground"

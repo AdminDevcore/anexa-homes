@@ -15,6 +15,7 @@ import type { AgentFormValues } from "@/lib/agent-labels";
 import { agentCan, canEditAgentConfig } from "./access";
 import { moveDeal, runStageEnteredAutomations, TARGET_STAGE_SELECT, type StageMove } from "./apply-changes";
 import { missingHandlerMessage, readDetail } from "./detail";
+import { MAX_AGENTS } from "./queries";
 import { handlerFor } from "./registry";
 import { AGENT_SELECT, clean, cleanDeep, createRun, executeRun, firstLine, hasRunInFlight, writeMissingHandlerRun } from "./runner";
 import { nextRunAtFor } from "./schedule";
@@ -58,6 +59,13 @@ export async function createAgentAction(input: AgentFormValues) {
 
   const taken = await prisma.agent.findFirst({ where: { companyId: user.companyId, name: v.value.name }, select: { id: true } });
   if (taken) return fail("An agent with that name already exists.");
+
+  // Nothing else bounds how many agents a company can hold — `@@unique([companyId, name])`
+  // only stops a repeat of one. The Agents list fires one last-run query PER
+  // AGENT at once, so this cap is what keeps a single page load from saturating
+  // the connection pool. See MAX_AGENTS.
+  const held = await prisma.agent.count({ where: { companyId: user.companyId } });
+  if (held >= MAX_AGENTS) return fail(`This company has reached the limit of ${MAX_AGENTS} agents.`);
 
   const row = await prisma.agent.create({
     data: {

@@ -1,24 +1,29 @@
 "use client";
 
-import * as React from "react";
-import { renderedAt, timeAgo } from "@/lib/agent-labels";
-
-const noSubscribe = () => () => {};
+import { renderedAt, timeAgo, utcStamp } from "@/lib/agent-labels";
+import { useIsClient } from "@/lib/use-is-client";
 
 /**
- * False during the server render and hydration, true after. For anything that
- * depends on the viewer's clock or time zone, which the server cannot know:
- * rendering it on the server would disagree with the browser and fail
- * hydration.
+ * "4 min ago" (or the local date and time), with the local date and time on
+ * hover. UTC until hydrated.
+ *
+ * THE RELATIVE TIME DOES NOT TICK, on purpose. `timeAgo` is computed once per
+ * render and the page is a server component with no polling, so "just now"
+ * stays "just now" on a tab left open. Every other figure on the row — the
+ * run's status, whether it is still going — is equally frozen, so a label that
+ * refreshed itself would be the one live-looking thing on a stale row, which
+ * is a worse lie than a stale one. The `title` carries the absolute time, and
+ * any real action calls router.refresh(), which re-reads the lot. If a live
+ * queue ever wants one, a shared 60s tick belongs with that queue, not here.
  */
-export function useIsClient(): boolean {
-  return React.useSyncExternalStore(noSubscribe, () => true, () => false);
-}
-
-/** "4 min ago" (or the local date and time), with the local date and time on hover. UTC until hydrated. */
 export function LocalTime({ iso, mode = "relative" }: { iso: string; mode?: "relative" | "absolute" }) {
   const client = useIsClient();
-  if (!client) return <time dateTime={iso}>{`${iso.slice(0, 16).replace("T", " ")} UTC`}</time>;
+  // The prop type `string` is wider than the real contract (an ISO instant).
+  // Slicing a malformed one rendered silent garbage into the text and an
+  // invalid `dateTime` attribute nothing would have complained about.
+  const utc = utcStamp(iso);
+  if (utc === null) return <span>—</span>;
+  if (!client) return <time dateTime={iso}>{utc}</time>;
   const local = new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
   return (
     <time dateTime={iso} title={local}>

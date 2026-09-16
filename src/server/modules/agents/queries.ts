@@ -25,6 +25,19 @@ export const RUNS_PER_AGENT_PAGE = 25;
 export const RUNS_FEED_PAGE = 50;
 const QUEUE_LIMIT = 100;
 
+/**
+ * The most agents one company may hold. `listAgents` below fires one last-run
+ * query PER AGENT, all at once, against a pool whose default size is
+ * `cpus * 2 + 1` — typically 5–9 on a serverless instance. Past a certain
+ * number the cost is not page latency, it is that one page load saturates the
+ * pool and every concurrent request queues behind it.
+ *
+ * Enforced at creation time in `createAgentAction`. Far above any real back
+ * office, and its only job is to make "agents are few" an invariant instead of
+ * a hope.
+ */
+export const MAX_AGENTS = 100;
+
 export type Viewer = { companyId: string; role: Role; verticals: Vertical[] };
 
 const held = (viewer: Viewer): Vertical[] => userVerticals(viewer);
@@ -91,7 +104,9 @@ export async function listAgents(
 
   // No nested `runs: { take: 1 }` — without the relationJoins preview, Prisma
   // fetches every run of every listed agent and applies `take` in memory.
-  // One findFirst per agent, in parallel, instead. Agents are few.
+  // One findFirst per agent, in parallel, instead. Agents are few — MAX_AGENTS
+  // is what makes that true rather than hoped for, and each lookup seeks on
+  // @@index([agentId, createdAt]) rather than sorting a history.
   //
   // `companyId` is stated here rather than relied on positionally: this is
   // safe today only because `agent.id` already came from a company- and

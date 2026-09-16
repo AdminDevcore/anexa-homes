@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vitest";
 import { PrismaClient, type Prisma, type Role } from "@prisma/client";
 import { TEST_DATABASE_URL } from "@/server/vertical/__tests__/global-setup";
+import { runInVertical } from "@/server/vertical/context";
 
 /**
  * THE AGENTS ACCESS SWITCH.
@@ -18,6 +19,7 @@ vi.mock("@/server/auth/session", () => session);
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 const { setAgentsAccessAction, updateTeamMemberAction } = await import("../actions");
+const { getUserDetail } = await import("../queries");
 
 const db = new PrismaClient({ datasources: { db: { url: TEST_DATABASE_URL } } });
 
@@ -48,6 +50,11 @@ const as = (role: Role) =>
 
 const permissionsOf = async (id: string) =>
   (await db.user.findUniqueOrThrow({ where: { id }, select: { permissions: true } })).permissions as Record<string, unknown>;
+
+// getUserDetail counts leads, tasks and knocks, all vertical-scoped models. The
+// member page always reads it inside a portal session's active workspace, so
+// the test supplies one rather than switching the boundary off.
+const detailOf = (id: string) => runInVertical("roofing", () => getUserDetail(companyId, id));
 
 beforeAll(async () => {
   companyId = (await db.company.create({ data: { name: "Agents Access Co", slug: `aa-${process.pid}-${Date.now()}` } })).id;
@@ -94,6 +101,29 @@ describe("setAgentsAccessAction", () => {
     expect(await permissionsOf(repId)).toEqual({});
     expect(await setAgentsAccessAction({ userId: outsiderId, on: true })).toEqual({ ok: false, error: "User not found." });
     expect(await permissionsOf(outsiderId)).toEqual({});
+  });
+});
+
+describe("what the member page reads", () => {
+  /**
+   * The page renders the switch from `getUserDetail`. It must not read the
+   * column a second time: `UserDetail` already has a field called
+   * `permissions` — the role's display summary — so a second, differently
+   * shaped `permissions` ten lines away on the same page is a trap.
+   */
+  it("carries the switch on the detail the page already reads", async () => {
+    expect((await detailOf(managerId))?.agentsAccess).toBe(false);
+    await setAgentsAccessAction({ userId: managerId, on: true });
+    expect((await detailOf(managerId))?.agentsAccess).toBe(true);
+  });
+
+  it("reads the column, and leaves the role summary alone", async () => {
+    await db.user.update({ where: { id: repId }, data: { permissions: SWITCH as Prisma.InputJsonValue } });
+    const detail = await detailOf(repId);
+    // hasAgentsAccess reads the column, so the raw keys DO read as on here —
+    // what keeps a rep out is agentCan's role check, tested in access.test.ts.
+    expect(detail?.agentsAccess).toBe(true);
+    expect(Array.isArray(detail?.permissions)).toBe(true);
   });
 });
 

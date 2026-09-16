@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatRunDuration, formValuesFor, productOf, timeAgo } from "../agent-labels";
+import { formatRunDuration, formValuesFor, productOf, timeAgo, utcStamp } from "../agent-labels";
 
 describe("agent labels", () => {
   const now = new Date("2026-09-15T14:00:00.000Z");
@@ -16,6 +16,18 @@ describe("agent labels", () => {
     expect(formatRunDuration(14)).toBe("14 ms");
     expect(formatRunDuration(2_300)).toBe("2.3 s");
     expect(formatRunDuration(245_000)).toBe("4 min 5 s");
+  });
+
+  it("stamps the server's UTC time, and refuses a string that is not an instant", () => {
+    expect(utcStamp("2026-09-15T14:00:00.000Z")).toBe("2026-09-15 14:00 UTC");
+    // Read off the parsed instant, not sliced out of the input, so a valid time
+    // written another way still renders.
+    expect(utcStamp("2026-09-15T14:00:00Z")).toBe("2026-09-15 14:00 UTC");
+    // A slice of any of these would have rendered silent garbage into both the
+    // text and the `dateTime` attribute.
+    expect(utcStamp("not a date")).toBeNull();
+    expect(utcStamp("")).toBeNull();
+    expect(utcStamp("2026-13-45T99:99:99.000Z")).toBeNull();
   });
 
   it("reads a NULL product as Both", () => {

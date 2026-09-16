@@ -20,7 +20,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { AgentEnabledSwitch } from "@/components/portal/agents/agent-enabled-switch";
 import { AgentTabs } from "@/components/portal/agents/agent-tabs";
 import { FilterChips } from "@/components/portal/agents/filter-chips";
-import { hrefWith } from "@/components/portal/agents/href";
+import { hrefWith } from "@/lib/agents-href";
 import { LocalTime } from "@/components/portal/agents/local-time";
 import { RunStatusPill } from "@/components/portal/agents/run-status-pill";
 
@@ -31,6 +31,13 @@ const HEAD = "text-xs font-medium uppercase tracking-wide text-muted-foreground"
 export default async function AgentsPage({
   searchParams,
 }: {
+  /**
+   * Optimistic by one step: a repeated key (`?product=solar&product=roofing`)
+   * arrives as `string[]`, which this type does not admit. `isProduct` and
+   * `isDepartment` test `typeof v === "string"` FIRST, so an array falls
+   * through to null and the page degrades to unfiltered — those guards are
+   * what make the narrow type safe. Widen the guards before widening this.
+   */
   searchParams: Promise<{ product?: string; department?: string }>;
 }) {
   const user = await requireUser();
@@ -68,13 +75,16 @@ export default async function AgentsPage({
           label="Product"
           active={product}
           options={[{ value: null, label: "All" }, ...PRODUCTS.map((p) => ({ value: p, label: PRODUCT_LABEL[p] }))]}
-          hrefFor={(value) => hrefWith("/portal/agents", current, { product: value })}
+          // Every filter link resets the page (see hrefWith). This list has no
+          // paging of its own yet; the runs list does, and the convention is
+          // what keeps a `page=5` from riding through a filter change.
+          hrefFor={(value) => hrefWith("/portal/agents", current, { product: value, page: null })}
         />
         <FilterChips
           label="Department"
           active={department}
           options={[{ value: null, label: "All" }, ...DEPARTMENTS.map((d) => ({ value: d, label: DEPARTMENT_LABEL[d] }))]}
-          hrefFor={(value) => hrefWith("/portal/agents", current, { department: value })}
+          hrefFor={(value) => hrefWith("/portal/agents", current, { department: value, page: null })}
         />
       </div>
 

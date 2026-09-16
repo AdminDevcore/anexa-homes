@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vites
 import { PrismaClient, type Prisma, type Role } from "@prisma/client";
 import { TEST_DATABASE_URL } from "@/server/vertical/__tests__/global-setup";
 import { NEW_AGENT_VALUES, type AgentFormValues } from "@/lib/agent-labels";
+import { MAX_AGENTS } from "../queries";
 import { emptyDetail, readDetail } from "../detail";
 import type { ChangeRecord } from "../types";
 
@@ -214,6 +215,28 @@ describe("creating and editing", () => {
     expect(await actions.createAgentAction({ ...NEW_AGENT_VALUES, name: "X", handlerKey: "bank.ntp_poll" })).toMatchObject({ ok: false });
     expect(await actions.createAgentAction({ ...NEW_AGENT_VALUES, name: "Y", config: '{"apiKey":"sk-live"}' })).toMatchObject({ ok: false });
     expect(await actions.createAgentAction({ ...NEW_AGENT_VALUES, name: "Hello Agent" })).toEqual({ ok: false, error: "An agent with that name already exists." });
+  });
+
+  it("refuses to create past the cap that keeps the list's one-query-per-agent loop cheap", async () => {
+    as("admin");
+    await db.agent.createMany({
+      data: Array.from({ length: MAX_AGENTS }, (_, i) => ({
+        companyId,
+        name: `Filler ${i}`,
+        handlerKey: "system.hello",
+        department: "operations" as const,
+      })),
+    });
+
+    expect(await actions.createAgentAction({ ...NEW_AGENT_VALUES, name: "One too many" })).toEqual({
+      ok: false,
+      error: `This company has reached the limit of ${MAX_AGENTS} agents.`,
+    });
+    expect(await db.agent.count({ where: { companyId, name: "One too many" } })).toBe(0);
+
+    // Scoped to this test's own rows: every later test in this file reads the
+    // same company, and `beforeEach` does not clear agents.
+    await db.agent.deleteMany({ where: { companyId, name: { startsWith: "Filler " } } });
   });
 
   it("refuses to enable an agent whose handler is not deployed", async () => {

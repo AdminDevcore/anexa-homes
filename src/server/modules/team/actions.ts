@@ -239,7 +239,12 @@ export async function updateTeamMemberAction(input: z.infer<typeof updateSchema>
   // The Agents access switch goes the same way: it was given to a manager, and
   // it does not follow them into a different job. The keys are deleted, never
   // set to false (see modules/agents/access.ts).
-  const clearAgentsAccess = roleChanged && role !== AGENT_ACCESS_ROLE;
+  //
+  // Cleared on ANY role change, a promotion INTO manager included. The switch
+  // is a deliberate per-person grant, so making the owner flip it again after a
+  // role change is the right ceremony rather than a regression — and it leaves
+  // no branch here that nothing exercises.
+  const clearAgentsAccess = roleChanged;
   await prisma.user.update({
     where: { id: target.id },
     data: {
@@ -278,6 +283,11 @@ const agentsAccessSchema = z.object({ userId: z.string().min(1), on: z.boolean()
  * resolve a run that needs a human. Never create or edit — config stays with
  * the owner and admins by role. Owner only, and only a manager can be given
  * it, because `manager` is where the solar coordinators sit today.
+ *
+ * ON and OFF ARE DELIBERATELY ASYMMETRIC. Only a manager can be GIVEN the
+ * switch; turning it OFF targets any role, so a key left on somebody by a role
+ * change racing a flip — or by a hand edit — can always be cleared. That
+ * asymmetry is the thing that keeps a stale grant recoverable.
  */
 export async function setAgentsAccessAction(input: z.infer<typeof agentsAccessSchema>) {
   const me = await requireUser();
@@ -295,7 +305,23 @@ export async function setAgentsAccessAction(input: z.infer<typeof agentsAccessSc
   if (on && target.role !== AGENT_ACCESS_ROLE) return fail("Agents access can only be given to a manager.");
 
   const permissions = on ? withAgentsAccess(target.permissions) : withoutAgentsAccess(target.permissions);
-  await prisma.user.update({ where: { id: target.id }, data: { permissions: permissions as Prisma.InputJsonValue } });
+
+  if (on) {
+    // This is a read-modify-write, so the role is re-asserted in the WHERE
+    // clause at WRITE time. Without it, a demotion landing between the read
+    // above and this write is undone by the stale grant putting the keys back
+    // — leaving a non-manager carrying Agent:read/run/approve. Only the `on`
+    // path can grant, so only it needs this; a lost `off` write merely
+    // resurrects an absence.
+    const { count } = await prisma.user.updateMany({
+      where: { id: target.id, companyId: me.companyId, role: AGENT_ACCESS_ROLE },
+      data: { permissions: permissions as Prisma.InputJsonValue },
+    });
+    if (!count) return fail("Agents access can only be given to a manager.");
+  } else {
+    await prisma.user.update({ where: { id: target.id }, data: { permissions: permissions as Prisma.InputJsonValue } });
+  }
+
   revalidatePath(`/portal/team/${target.id}`);
   return { ok: true as const };
 }

@@ -43,6 +43,12 @@ export const AGENT_CONFIG_ROLES: readonly Role[] = ["super_admin", "admin"];
 
 type WithRole = { role: Role; permissions?: Record<string, unknown> | null };
 
+/**
+ * A non-object override — an array, a string, a JSON scalar — reads as empty,
+ * and the next write of this column discards it. The column is
+ * `Json @default("{}")` and its only writers are `withAgentsAccess` and
+ * `withoutAgentsAccess`, so no legitimate path produces one.
+ */
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
