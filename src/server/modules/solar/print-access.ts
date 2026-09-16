@@ -1,7 +1,7 @@
 import { prisma } from "@/server/db/client";
 import { runUnscoped } from "@/server/vertical/context";
 import { readPrintSignature } from "./print-signature";
-import { withCustomerContact, type SolarProposalSnapshot } from "@/lib/solar-proposal";
+import { withCustomerContact, readProposalSnapshot } from "@/lib/solar-proposal";
 
 /**
  * Resolve the one proposal a print signature names, or null.
@@ -43,7 +43,7 @@ export async function proposalForPrint(sig: string) {
     // the customer's copy fills the contact block on pre-change documents. The
     // two renders would otherwise disagree about the cover.
     snapshot: withCustomerContact(
-      proposal.snapshot as unknown as SolarProposalSnapshot,
+      readProposalSnapshot(proposal.snapshot)!,
       proposal.lead,
     ),
   };

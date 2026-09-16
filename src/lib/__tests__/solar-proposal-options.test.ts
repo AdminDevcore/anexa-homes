@@ -116,9 +116,9 @@ describe("each option carries its own price and its own twenty-five years", () =
   it("prices cash below the loan, because cash pays no dealer fee", () => {
     const s = build({ alternatives: [CASH_ALT] });
     const [loan, cash] = s.options!;
-    expect(loan.financing.contractPriceCents).toBe(350 * 10_000); // $3.50/W × 10 kW
-    expect(cash.financing.contractPriceCents).toBe(287 * 10_000); // $2.87/W, no fee
-    expect(cash.financing.contractPriceCents!).toBeLessThan(loan.financing.contractPriceCents!);
+    expect(loan.financing.finalPriceCents).toBe(350 * 10_000); // $3.50/W × 10 kW
+    expect(cash.financing.finalPriceCents).toBe(287 * 10_000); // $2.87/W, no fee
+    expect(cash.financing.finalPriceCents!).toBeLessThan(loan.financing.finalPriceCents!);
   });
 
   it("models each option separately, so the cheaper one saves more", () => {
@@ -167,7 +167,7 @@ describe("each option carries its own price and its own twenty-five years", () =
     const lease = s.options!.find((o) => o.key === "lease:x")!;
     expect(lease.financing.aprPct).toBeNull();
     expect(lease.financing.escalatorPct).toBe(2.9);
-    expect(lease.financing.contractPriceCents).toBeNull();
+    expect(lease.financing.finalPriceCents).toBeNull();
     expect(lease.monthlyCents).toBe(18_500);
 
     const loan = s.options![0];
@@ -284,8 +284,8 @@ describe("the sign today credit is frozen into the document", () => {
   it("leaves the price and the payment exactly where they were", () => {
     const withCredit = build({ signTodayTypedCents: 2_000_00 }).financing;
     const without = build().financing;
-    expect(withCredit.contractPriceCents).toBe(without.contractPriceCents);
-    expect(withCredit.monthlyPaymentCents).toBe(without.monthlyPaymentCents);
+    expect(withCredit.finalPriceCents).toBe(without.finalPriceCents);
+    expect(withCredit.leaseMonthlyCents).toBe(without.leaseMonthlyCents);
   });
 });
 
@@ -316,7 +316,7 @@ describe("the sign today credit is resolved per partner", () => {
       signTodayRule: { mode: "above_cap", fixedCents: null, capPpwCents: 300 },
     });
     const ladder = s.financing.creditLadder!;
-    expect(s.financing.basePriceCents).toBe(35_000_00);
+    expect(s.financing.baseFinalCents).toBe(35_000_00);
     expect(ladder.signTodayCents).toBe(0);
   });
 

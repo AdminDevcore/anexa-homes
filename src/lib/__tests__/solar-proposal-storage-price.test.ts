@@ -79,13 +79,13 @@ const build = (over: Partial<Parameters<typeof buildProposalSnapshot>[0]> = {}) 
 describe("a storage proposal is priced by the battery", () => {
   it("quotes the batteries rather than zero installed watts", () => {
     const f = build().financing;
-    expect(f.contractPriceCents).toBe(1_800_000);
-    expect(f.basePriceCents).toBe(1_800_000);
+    expect(f.finalPriceCents).toBe(1_800_000);
+    expect(f.baseFinalCents).toBe(1_800_000);
   });
 
   it("prints no price per watt, on a job that has no watts", () => {
     const f = build().financing;
-    expect(f.grossPpwCents).toBeNull();
+    expect(f.baseFinalPpwCents).toBeNull();
     expect(f.finalPpwCents).toBeNull();
   });
 
@@ -105,7 +105,7 @@ describe("a storage proposal is priced by the battery", () => {
         aprPct: 6.99,
       },
     }).financing;
-    expect(f.contractPriceCents).toBe(1_800_000);
+    expect(f.finalPriceCents).toBe(1_800_000);
   });
 
   it("prices the extra work on top of the batteries", () => {
@@ -124,8 +124,8 @@ describe("a storage proposal is priced by the battery", () => {
         aprPct: null,
       },
     }).financing;
-    expect(f.adderTotalCents).toBe(250_000);
-    expect(f.contractPriceCents).toBe(2_050_000);
+    expect(f.addersFinalCents).toBe(250_000);
+    expect(f.finalPriceCents).toBe(2_050_000);
   });
 });
 

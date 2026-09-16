@@ -1239,3 +1239,80 @@ Nothing in this section is in the code. The current text stays everywhere until 
 The brief for counsel is `docs/legal/2026-09-15-credit-ownership-brief.md`: facts only, no recommendation on the legal question, with the production exposure counted.
 
 **Both reworks landed before Stage 2 started**, in the second commit on the branch. See the two new rows in §8.9 and findings #4 and #5 in §8.11.
+
+### 8.13 Stage 2: the exact spellings (PROPOSED — awaiting owner confirmation)
+
+§8.8 approved the vocabulary; this is the spelling of every identifier, read off what each field HOLDS today rather than off its current name. Surface: **22 schema fields across 7 models, ~2,400 references in ~122 files** (38 of them test files).
+
+**Prisma columns — code-only renames via `@map`, no column renames.**
+
+| Model.field today | What it holds | Becomes |
+|---|---|---|
+| `SolarFinance.contractPriceCents` | "Final contract price" — the quoted, fee-inclusive, pre-credit price (Tessa: $87,120) | `finalPriceCents` |
+| `SolarFinance.adderTotalCents` | adders INSIDE the partner's price, at catalogue | `addersInsideRuleCents` |
+| `SolarFinance.onTopAdderTotalCents` | adders outside it | `addersOutsideRuleCents` |
+| `SolarFinance.stickerPricePerBatteryCents` | per-battery sticker | `baseFinalPerBatteryCents` |
+| `SolarFinance.monthlyPaymentCents` | "Lease only: fixed monthly payment" | `leaseMonthlyCents` |
+| `SolarFinance.itcEstimateCents` | always null, legacy | dropped |
+| `SolarLender.maxFinalPpwCents` / `finalPpwMode` | the price rule | `priceRulePpwCents` / `priceRuleMode` |
+| `SolarLender.maxFinalPricePerBatteryCents` / `finalBatteryPriceMode` | its per-battery twins | `priceRulePerBatteryCents` / `priceRuleBatteryMode` |
+| `SolarSettings.defaultGrossPpwCents` / `targetNetPpwCents` | company defaults | `defaultBasePpwCents` / `targetBasePpwCents` |
+| `SolarSettings.creditIncentiveLabel` | unused | retired |
+| `financedOnTop` (`SolarLenderAdderRule`, `SolarEquipment`, `SolarDealAdder`) | outside the price rule | `outsidePriceRule` |
+| `CompareRow.netPpwCents` | what the company keeps per watt after the lender's cut and the adders | `grossPpwCents` |
+| `SolarLender.submissionAmountBasis` | retired by **D6, which is Stage 5** | unchanged in Stage 2 |
+| `SolarLender.batteryInsideFee` | already retired, guarded by `solar-battery-fee-retired.test.ts` | unchanged until its drop migration |
+
+**Snapshot (`SnapshotFinancing`) — 32 keys, of which these carry money.** Renaming them makes the stored JSON of **43 production documents** old-shaped, so it needs `schemaVersion: 9` plus a reader for v1–v8.
+
+| Snapshot key today | What it holds | Becomes |
+|---|---|---|
+| `financing.contractPriceCents` | the contract value the credits come off (Tessa: $167,120) | `finalPriceCents` |
+| `financing.grossPpwCents` | the **sticker** $/W, fee in — not the vocabulary's "gross" | `baseFinalPpwCents` |
+| `financing.basePriceCents` | the system AT STICKER | `baseFinalCents` |
+| `financing.adderTotalCents` | adders at sticker | `addersFinalCents` |
+| `financing.batteryPriceCents` | the battery at sticker | `equipmentFinalCents` |
+| `financing.monthlyPaymentCents` | lease monthly | `leaseMonthlyCents` |
+| `financing.itcEstimateCents`, `itcPct`, `stateIncentiveNote` | always null, legacy | dropped |
+
+The golden projections at the bottom of `pricing-golden-deals.ts` already speak this vocabulary (`baseFinalCents`, `addersFinalCents`, `equipmentFinalCents`, `finalCents`, `stickerPpwCents`), which is the seam §8.6 designed: **a rename edits a projection, never a pinned value.**
+
+**A CI guard** modelled on `solar-battery-fee-retired.test.ts` fails if any retired spelling returns to `src/`.
+
+**Three conflicts in §8.8's map, put to the owner before any editing.** See §8.14 once answered.
+
+### 8.14 Stage 2 spellings: the three conflicts, decided (2026-09-15)
+
+1. **`SolarFinance.grossPpwCents` → `baseFinalPpwCents` now; `soldBasePpwCents` at D5.** The column holds the sticker with the dealer fee inside it, so Stage 2 names it for what it holds. Stage 4 changes the stored value to the pre-fee sold base and renames it again, in the stage that moves the number. A field is never left carrying a name that is untrue.
+2. **`loanMonthlyPaymentCents` is kept, renamed `lenderMonthlyPaymentCents`.** §8.8 called it retired, but it is the lender's OWN issued figure, deliberately stored because a derived payment can contradict it on a promotional or re-amortised loan — and it is the figure the customer is quoted. Retiring it moves a customer-facing number, which is not Stage 2's to move.
+3. **The snapshot's money keys are renamed, `schemaVersion` goes to 9, and a reader maps v1–v8 on the way in.** Stored documents are never rewritten: the 43 production documents, 9 of them signed, keep the exact JSON they were issued with and render the figures they were signed against.
+
+### 8.15 A fourth correction to §8.8's map: `marginCents` is not dead
+
+§8.8 lists `marginCents` as "deleted". It is not dead and Stage 2 keeps it. It is computed in `solar-money.ts:433`, carried on both breakdown types (`:336`, `:388`), propagated through `purchaseFromUnits` (`:534`, `:1123`) and **read at `:1237`**, where a partner's percentage basis is taken as a share of it. A test pins it (`solar-money.test.ts:260`).
+
+Deleting it would remove the percentage-basis path, which moves money and is not Stage 2's to move. It keeps its name in this stage; if the vocabulary wants it renamed, that is a decision for the stage that touches the percentage basis.
+
+**Method note for the rest of Stage 2.** Renames are driven by the TYPE, never by text. A field is renamed on its type definition, `tsc` then enumerates exactly the call sites that read that field on that type, and only those are edited. Proved on `SnapshotFinancing.contractPriceCents`: one definition change, 29 errors, 12 files, no false positives. It matters here because `contractPriceCents`, `basePriceCents`, `adderTotalCents` and `grossPpwCents` each exist on `PurchaseBreakdown`, on the `SolarFinance` row AND in the stored snapshot, and the three do not rename to the same word.
+
+**Order is load-bearing in `CompareRow`**, which carries both names: rename `grossPpwCents` → `baseFinalPpwCents` FIRST, then `netPpwCents` → `grossPpwCents`. The other order collapses both into one field.
+
+### 8.16 Stage 2, slice 1: the snapshot money keys, read through one door (2026-09-15)
+
+**Landed.** The six money keys on `SnapshotFinancing` carry the §8.13 spellings, the builder stamps `schemaVersion: 9`, and `PRICING_CALCULATION_VERSION` **stays 6** — the shape moved, the arithmetic did not, which is the distinction the type's own doc comment insists on.
+
+**There was no choke point, and that is the whole finding.** Every reader cast the raw Prisma JSON straight to `SolarProposalSnapshot`, so nothing sat between the stored document and the code reading it. The rename therefore type-checked perfectly — `tsc` exit 0 — and broke 19 integration tests, because a stored v7 document answers `undefined` to every new name. `readProposalSnapshot` is now that door: it respells `financing` on the way out, hands a v9 document back uncopied, prefers the current spelling where a row carries both, and **never restamps `schemaVersion`** — a v7 page relabelled v9 would be a document claiming to be something it is not. Nine production cast sites route through it.
+
+**Two readers the compiler could not see.** `commission-pricing.ts`'s `measureFromSignedDocument` and `compareWithSignedDocument` take `snapshot: unknown` and reach for `s.financing?.basePriceCents` / `contractPriceCents` through a structural cast. Renaming the type does not touch them and no error is raised. Had this slice shipped without routing them, **every one of the 43 pre-v9 documents would have frozen the commission measure from the live deal instead of the signed document** — silently, and in direct contradiction of owner decision #2. `as unknown` and `Record<string, unknown>` defeat the type-directed method completely; only a test finds these.
+
+**Every option nests its own copy, and no fixture had one.** `ProposalPaymentOption.financing` is a whole `SnapshotFinancing` (`solar-proposal.ts:886`), not a reference to the document's — and `components/proposal/solar/index.tsx:335` reads it *there* to draw the customer's payment menu. The first cut of this reader translated only the top level, which would have left a legacy document rendering a menu of empty prices on the page a homeowner opens. Nothing caught it: **every legacy fixture in the integration suite is `financing`-only and carries no `options` array**, so the nested path was untested and the suite was green while the bug was live. The reader now respells each option's block as well. `scripts/backfill-credit-scenario.ts`, which reads that nested block for its credit maths, takes **two views of one row** — the reader's for reading, the stored object for writing back — so a frozen document is never respelled on disk by a backfill.
+
+**One site deliberately still reads raw.** `snapshotFingerprint` hashes the canonical JSON with keys sorted at every level, so respelled keys produce a different digest. Routing it through the reader would change the fingerprint hex printed on the signature certificate of every already-signed document. `proposal-signature.ts:173` keeps reading `proposal.snapshot` directly; the local variable above it is routed and independent.
+
+**Scope correction.** The snapshot's `loanMonthlyPaymentCents` → `loanMonthlyCents` is **deferred**, against the earlier intention to fold it in. Of its 21 references nearly all are the `SolarFinance` row and the `validateFinance` shape; only one is the snapshot. Running that rename beside the pending Prisma rename to `lenderMonthlyPaymentCents` would put two same-named renames in one working set. It costs one line in the reader's mapping table later.
+
+**Legacy fixtures are kept verbatim.** The old-key snapshots in the integration tests carry `schemaVersion` 2 and 7 and are the only legacy-shaped documents under test. They were not modernised — they are the regression evidence that the reader works on exactly what production holds. The one test that did change, `pricing-stage1.itest.ts`, strips a key from a *freshly generated* document to simulate an unpriced one; it now filters both spellings so it cannot silently assert against a fully priced document.
+
+**The CI text guard is deferred to the end of Stage 2.** A `solar-battery-fee-retired.test.ts`-style "no file mentions this string" assertion would fail on correct code today: `contractPriceCents` is still a live `SolarFinance` column and a Nova `ReportedPrice` field. The guard goes in once the remaining slices have landed; until then the reader's own behaviour test holds the line.
+
+**Verified at slice close.** `tsc` 0 · unit 2495/2495 · lint clean on every touched file · integration back to its baseline of 7 (`retention` ×6, `visit-crew` ×1, both pre-existing on main). The rename opened 19 integration failures and closed all 19. One further failure, `stage-history`, proved to be a parallel-contention flake: it passes 10/10 twice in isolation and touches no pricing code.

@@ -7,7 +7,7 @@ import {
   resolveReportedSystem,
   type DesignSystem,
 } from "@/lib/solar-system-of-record";
-import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
+import { readProposalSnapshot } from "@/lib/solar-proposal";
 import { resolveDeal } from "../access";
 import { NOT_SET, formatDateTime, formatKw, formatMoney, formatPct } from "../format";
 import { defineTool, z } from "./define";
@@ -117,7 +117,7 @@ export const getDeal = defineTool({
             status: proposal.status,
             at: (proposal.sentAt ?? proposal.createdAt).toISOString(),
             approved: proposal.approvedAt != null,
-            snapshot: proposal.snapshot as unknown as SolarProposalSnapshot,
+            snapshot: readProposalSnapshot(proposal.snapshot)!,
           }
         : null,
       design: designSystem,

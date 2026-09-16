@@ -100,7 +100,7 @@ function paymentOptions(s: SolarProposalSnapshot): ProposalPaymentOption[] {
       : f.product === "loan"
         ? f.loanMonthlyPaymentCents
         : f.product === "lease"
-          ? f.monthlyPaymentCents
+          ? f.leaseMonthlyCents
           : year1
             ? Math.round(year1.solarPaymentCents / 12)
             : null;
@@ -395,7 +395,7 @@ function SolarPvProposalView({
    */
   const quotedTotal = creditsApplied
     ? (option.creditsApplied?.totalCents ?? quotedTotalCents(f))
-    : (f.contractPriceCents ?? quotedTotalCents(f));
+    : (f.finalPriceCents ?? quotedTotalCents(f));
   /**
    * The same price per installed watt, derived from the total above so the two
    * printed figures always divide into each other — in either state.
@@ -456,10 +456,10 @@ function SolarPvProposalView({
   // price is derived rather than read: it is a line of its own on the sheet, so
   // leaving it inside the system price would print it twice and leave the rows
   // above the total adding up to more than the total.
-  const pricedSeparatelyCents = (f.adderTotalCents ?? 0) + (f.batteryPriceCents ?? 0);
+  const pricedSeparatelyCents = (f.addersFinalCents ?? 0) + (f.equipmentFinalCents ?? 0);
   const systemPriceCents = priceMoved
     ? quotedTotal - pricedSeparatelyCents
-    : (f.basePriceCents ?? (quotedTotal != null ? quotedTotal - pricedSeparatelyCents : null));
+    : (f.baseFinalCents ?? (quotedTotal != null ? quotedTotal - pricedSeparatelyCents : null));
   const showcased = (f.adders ?? []).filter((a) => a.showcase && a.amountCents !== 0);
   const name = firstName(s.customer.name);
 
@@ -475,7 +475,7 @@ function SolarPvProposalView({
     // exactly what the credit switch decides.
     option: { ...option, monthlyCents },
     savings: sv,
-    priceCents: f.contractPriceCents,
+    priceCents: f.finalPriceCents,
   });
   const lifetime = lifetimeFigure(sv);
   /**

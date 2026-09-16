@@ -394,24 +394,24 @@ export function SolarStorageProposalView({
                   ? `System price · ${st.batteryQty} batteries`
                   : "System price",
                 usd(
-                  quoted.financing.basePriceCents ??
-                    quoted.financing.contractPriceCents ??
+                  quoted.financing.baseFinalCents ??
+                    quoted.financing.finalPriceCents ??
                     0,
                 ),
               ],
-              ...(quoted.financing.adderTotalCents
+              ...(quoted.financing.addersFinalCents
                 ? ([
-                    ["Additional work", usd(quoted.financing.adderTotalCents)],
+                    ["Additional work", usd(quoted.financing.addersFinalCents)],
                   ] as [string, React.ReactNode][])
                 : []),
               // Only where something sits between the two. On a plain battery
               // deal the system price IS the total, and printing the same
               // figure twice under two names reads as two charges.
-              ...(quoted.financing.adderTotalCents
+              ...(quoted.financing.addersFinalCents
                 ? ([
                     [
                       "Your total",
-                      usd(quoted.financing.contractPriceCents ?? 0),
+                      usd(quoted.financing.finalPriceCents ?? 0),
                     ],
                   ] as [string, React.ReactNode][])
                 : []),

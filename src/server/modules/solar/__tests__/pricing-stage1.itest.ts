@@ -475,8 +475,14 @@ describe("the commission measure is frozen at signing", () => {
             financing: {
               ...snapshot.financing,
               // At sticker, as the document always prints it: 12 kW at 600¢/W.
-              basePriceCents: 12_000 * 600,
-              contractPriceCents: moved!.finalPriceCents,
+              //
+              // CURRENT SPELLINGS. This is a v9 document built by spreading a
+              // generated one, not a legacy row, and the reader prefers the
+              // current name wherever both are present — writing the retired
+              // ones here would leave the spread's own figures in force and the
+              // override silently ignored.
+              baseFinalCents: 12_000 * 600,
+              finalPriceCents: moved!.finalPriceCents,
             },
           },
         } as never,
@@ -539,7 +545,12 @@ describe("a document with no priced figures falls back to the deal, and says so"
     const snapshot = v1.snapshot as SolarProposalSnapshot;
     // A version as older code generated them: no priced figures on the document.
     const financing = Object.fromEntries(
-      Object.entries(snapshot.financing).filter(([k]) => k !== "basePriceCents")
+      // Both spellings: the builder writes `baseFinalCents` from v9, and a
+      // filter naming only the retired key would strip nothing and leave this
+      // test quietly asserting against a fully priced document.
+      Object.entries(snapshot.financing).filter(
+        ([k]) => k !== "baseFinalCents" && k !== "basePriceCents"
+      )
     );
     await raw.solarProposal.update({
       where: { id: v1.id },

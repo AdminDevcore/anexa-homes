@@ -210,7 +210,7 @@ export function ChapterPay({
             [
               "Amount financed",
               doc.financedAmountCents != null &&
-              doc.financedAmountCents !== f.contractPriceCents
+              doc.financedAmountCents !== f.finalPriceCents
                 ? usd(doc.financedAmountCents)
                 : null,
             ],

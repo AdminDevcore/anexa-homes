@@ -408,7 +408,7 @@ describe.each(KEYS)("golden server sites: %s", (key) => {
     expect({
       options: (snapshot.options ?? []).map(optionFigures),
       topLevel: {
-        finalCents: snapshot.financing.contractPriceCents ?? null,
+        finalCents: snapshot.financing.finalPriceCents ?? null,
         netFinalCreditsAppliedCents: snapshot.financing.creditLadder?.netCostCents ?? null,
         financedCents: snapshot.financing.financedAmountCents ?? null,
       },

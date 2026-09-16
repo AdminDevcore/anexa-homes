@@ -205,7 +205,7 @@ describe("the snapshot never renders a number the customer cannot act on", () =>
 
   it("omits the adders row entirely when there are none", () => {
     // null, not 0 — the renderer drops the row rather than printing "Adders $0".
-    expect(build().financing.adderTotalCents).toBeNull();
+    expect(build().financing.addersFinalCents).toBeNull();
   });
 
   it("never quotes an incentive — no credit is offered at all", () => {
@@ -226,8 +226,8 @@ describe("the snapshot never renders a number the customer cannot act on", () =>
     });
     expect(s.financing.aprPct).toBeNull();
     expect(s.financing.lender).toBeNull();
-    expect(s.financing.contractPriceCents).toBeNull();
-    expect(s.financing.monthlyPaymentCents).toBe(17_500);
+    expect(s.financing.finalPriceCents).toBeNull();
+    expect(s.financing.leaseMonthlyCents).toBe(17_500);
   });
 
   it("records the layout only when one was actually attached", () => {

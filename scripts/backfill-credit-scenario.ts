@@ -37,7 +37,11 @@
  * DATABASE_URL must point at the environment you mean.
  */
 import { PrismaClient, type Prisma } from "@prisma/client";
-import { savingsModel, type SolarProposalSnapshot } from "../src/lib/solar-proposal";
+import {
+  readProposalSnapshot,
+  savingsModel,
+  type SolarProposalSnapshot,
+} from "../src/lib/solar-proposal";
 
 /**
  * A PLAIN client, not `@/server/db/client`.
@@ -86,7 +90,7 @@ function creditsAppliedFor(s: Snapshot, o: Option): Option["creditsApplied"] | n
     assumptions: s.assumptions,
     years,
     vppCredits: s.vpp ?? [],
-    purchasePriceCents: f.contractPriceCents,
+    purchasePriceCents: f.finalPriceCents,
     creditReliefCents: reliefCents,
     loan:
       f.product === "loan"
@@ -121,8 +125,17 @@ async function main() {
       signed++;
       continue;
     }
-    const s = row.snapshot as unknown as Snapshot | null;
-    if (!s || !Array.isArray(s.options) || s.options.length === 0) {
+    /**
+     * TWO VIEWS OF ONE ROW, deliberately. `s` is the document read through the
+     * v9 reader, so the credit maths finds a price whatever spelling the row was
+     * written in. `stored` is the row exactly as the database holds it, and it
+     * is what gets written back: respelling a frozen document's keys on the way
+     * out would rewrite paperwork a household has already signed, which is the
+     * one thing the reader exists to avoid.
+     */
+    const stored = row.snapshot as unknown as Snapshot | null;
+    const s = readProposalSnapshot(row.snapshot) as Snapshot | null;
+    if (!s || !stored || !Array.isArray(s.options) || s.options.length === 0) {
       skipped++;
       continue;
     }
@@ -132,22 +145,25 @@ async function main() {
     }
 
     let touched = false;
-    const options = s.options.map((o) => {
+    const storedOptions = (stored.options ?? []) as NonNullable<Snapshot["options"]>;
+    const options = storedOptions.map((storedOption, i) => {
+      // Read from the translated option, write onto the stored one.
+      const o = s.options![i];
       if (o.creditsApplied) {
         already++;
-        return o;
+        return storedOption;
       }
       if (!o.financing.creditLadder) {
         noLadder++;
-        return o;
+        return storedOption;
       }
       const creditsApplied = creditsAppliedFor(s, o);
       if (!creditsApplied) {
         skipped++;
-        return o;
+        return storedOption;
       }
       touched = true;
-      return { ...o, creditsApplied };
+      return { ...storedOption, creditsApplied };
     });
 
     if (!touched) continue;
@@ -159,7 +175,7 @@ async function main() {
 
     await prisma.solarProposal.update({
       where: { id: row.id },
-      data: { snapshot: { ...s, options } as unknown as Prisma.InputJsonValue },
+      data: { snapshot: { ...stored, options } as unknown as Prisma.InputJsonValue },
     });
   }
 

@@ -164,7 +164,7 @@ export function ChapterCost({ doc }: { doc: Doc }) {
    * second name, and the row above carries the emphasis instead.
    */
   const showTotal =
-    totalCents != null && (f.adderTotalCents != null || systemPriceCents !== totalCents);
+    totalCents != null && (f.addersFinalCents != null || systemPriceCents !== totalCents);
 
   return (
     <Chapter
@@ -200,16 +200,16 @@ export function ChapterCost({ doc }: { doc: Doc }) {
           money nobody itemised at the time.
         */}
         {isPurchase &&
-          f.adderTotalCents != null &&
+          f.addersFinalCents != null &&
           (f.adders?.length ? (
             <>
               {f.adders.map((a, i) => (
                 <DarkRow key={`${a.label}-${i}`} k={a.label} v={usd(a.amountCents)} muted />
               ))}
-              <DarkRow k="Additional work" v={usd(f.adderTotalCents)} />
+              <DarkRow k="Additional work" v={usd(f.addersFinalCents)} />
             </>
           ) : (
-            <DarkRow k="Additional work" v={usd(f.adderTotalCents)} />
+            <DarkRow k="Additional work" v={usd(f.addersFinalCents)} />
           ))}
 
         {/*
@@ -220,7 +220,7 @@ export function ChapterCost({ doc }: { doc: Doc }) {
           already named the same hardware two pages earlier. Only on documents
           that charged for one — absent, not zero, on every other.
         */}
-        {isPurchase && f.batteryPriceCents != null && f.batteryPriceCents > 0 && (
+        {isPurchase && f.equipmentFinalCents != null && f.equipmentFinalCents > 0 && (
           <DarkRow
             k={
               f.batteryLabel
@@ -229,7 +229,7 @@ export function ChapterCost({ doc }: { doc: Doc }) {
                   : f.batteryLabel
                 : "Battery storage"
             }
-            v={usd(f.batteryPriceCents)}
+            v={usd(f.equipmentFinalCents)}
           />
         )}
 
@@ -249,8 +249,8 @@ export function ChapterCost({ doc }: { doc: Doc }) {
 
         {/* Third-party block — a lease has a monthly and a PPA has a rate, and
             neither has a system price. Nothing crosses over. */}
-        {f.monthlyPaymentCents != null && (
-          <DarkRow k="Monthly payment" v={usd(f.monthlyPaymentCents, 2)} strong />
+        {f.leaseMonthlyCents != null && (
+          <DarkRow k="Monthly payment" v={usd(f.leaseMonthlyCents, 2)} strong />
         )}
         {f.rateMillsPerKwh != null && (
           <DarkRow k="Rate" v={`$${(f.rateMillsPerKwh / 1000).toFixed(3)} per kWh`} strong />

@@ -707,10 +707,10 @@ export type YieldBasis = {
 export type SnapshotFinancing = {
   product: FinanceProduct;
   /** Cash/loan only. */
-  contractPriceCents: number | null;
-  grossPpwCents: number | null;
-  basePriceCents: number | null;
-  adderTotalCents: number | null;
+  finalPriceCents: number | null;
+  baseFinalPpwCents: number | null;
+  baseFinalCents: number | null;
+  addersFinalCents: number | null;
   /**
    * The extra work, named, as it was priced on the day.
    *
@@ -750,13 +750,13 @@ export type SnapshotFinancing = {
    * on every document generated before storage was charged for, which reads as
    * none — exactly what those documents were priced with.
    */
-  batteryPriceCents?: number;
+  equipmentFinalCents?: number;
   /** What that money buys, named the way the System chapter names it. */
   batteryLabel?: string;
   batteryQty?: number;
   finalPpwCents: number | null;
   /** Lease/PPA only. */
-  monthlyPaymentCents: number | null;
+  leaseMonthlyCents: number | null;
   rateMillsPerKwh: number | null;
   escalatorPct: number | null;
   termYears: number | null;
@@ -992,7 +992,7 @@ export function optionSavings(o: ProposalPaymentOption, creditsApplied: boolean)
  * price is still what the system is being sold for.
  */
 export function quotedTotalCents(f: SnapshotFinancing): number | null {
-  return f.creditLadder ? f.creditLadder.quotedPriceCents : f.contractPriceCents;
+  return f.creditLadder ? f.creditLadder.quotedPriceCents : f.finalPriceCents;
 }
 
 /**
@@ -1029,8 +1029,13 @@ export type SolarProposalSnapshot = {
    * v8 models each option's horizon TWICE — with the household's credits
    * claimed and without — so the document's tax-credit switch moves the
    * year-by-year table with the headline instead of only the headline.
+   * v9 RESPELLS the price keys and adds nothing: `contractPriceCents` became
+   * `finalPriceCents`, and four others with it, so a key says WHAT a figure is
+   * instead of where it once sat in the arithmetic. No number moved. Every
+   * document written before this still carries the old spellings and is
+   * translated on the way out by `readProposalSnapshot`.
    */
-  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
   /**
    * Which revision of the pricing arithmetic produced these figures.
    *
@@ -1277,6 +1282,105 @@ export type SolarProposalSnapshot = {
   /** `incentive` only ever appears on legacy snapshots; nothing renders it. */
   disclaimers: { incentive?: string; estimate: string };
 };
+
+/**
+ * The price keys as they were spelled before v9, paired with what they are
+ * called now. Order is irrelevant; every pair is independent.
+ */
+const LEGACY_FINANCING_KEYS = [
+  ["contractPriceCents", "finalPriceCents"],
+  ["grossPpwCents", "baseFinalPpwCents"],
+  ["basePriceCents", "baseFinalCents"],
+  ["adderTotalCents", "addersFinalCents"],
+  ["batteryPriceCents", "equipmentFinalCents"],
+  ["monthlyPaymentCents", "leaseMonthlyCents"],
+] as const;
+
+/**
+ * A STORED DOCUMENT, READ THROUGH ONE DOOR.
+ *
+ * Every snapshot in the database was written by the builder of its day, and v9
+ * respelled the price keys. The documents already signed DO NOT CHANGE: a
+ * frozen page is the household's copy of what they agreed to, and rewriting one
+ * to suit a later vocabulary is the single thing a snapshot exists to prevent.
+ *
+ * So the translation happens on the way OUT, here, at the one place a stored
+ * snapshot becomes a typed one. A pre-v9 document read through this function
+ * answers to today's names; a v9 document passes through untouched; and a row
+ * carrying both spellings — which nothing writes, but a hand-edited row could —
+ * is answered by the current one, because that is the one a writer meant last.
+ *
+ * `schemaVersion` IS NOT RESTAMPED. It records the shape the document was
+ * WRITTEN in, renderers still branch on it, and a v7 page relabelled v9 would
+ * be a document claiming to be something it is not. This function changes how a
+ * key is spelled on the way to a caller, never what the stored row says it is.
+ *
+ * NOT OPTIONAL AT THE CALL SITE. The stored JSON is `unknown` as far as the
+ * compiler is concerned, so a reader that goes straight to `financing` type-
+ * checks perfectly and then reads `undefined` off every document written before
+ * this release. That failure is invisible to `tsc` and visible only in a test,
+ * which is exactly how it was found.
+ *
+ * RETURNS NULL for a row holding no document. `SolarProposal.snapshot` is a
+ * required column, so the callers reading one of those rows assert the result —
+ * exactly as the double cast this replaced already did, only visibly — while
+ * the callers that genuinely branch on absence keep their own null check.
+ */
+export function readProposalSnapshot(raw: unknown): SolarProposalSnapshot | null {
+  if (raw == null) return null;
+  if (typeof raw !== "object") return raw as SolarProposalSnapshot;
+
+  const snapshot = raw as Record<string, unknown>;
+  const financing = respellFinancing(snapshot.financing);
+
+  /**
+   * EVERY OPTION CARRIES ITS OWN COPY of the same block — `options[].financing`
+   * is a whole `SnapshotFinancing`, not a reference to the one above — and the
+   * payment menu on the customer's page reads it there. Translating only the
+   * top level leaves a legacy document rendering a menu of empty prices, which
+   * is the homeowner-facing half of this bug and the half no fixture had.
+   */
+  const storedOptions = snapshot.options;
+  let options: unknown[] | null = null;
+  if (Array.isArray(storedOptions)) {
+    let touched = false;
+    const next = storedOptions.map((option) => {
+      if (option == null || typeof option !== "object") return option;
+      const respelled = respellFinancing((option as Record<string, unknown>).financing);
+      if (!respelled) return option;
+      touched = true;
+      return { ...(option as Record<string, unknown>), financing: respelled };
+    });
+    if (touched) options = next;
+  }
+
+  // A v9 document is handed back as it came, rather than as a copy: nothing was
+  // translated, and a needless clone of a large frozen object helps no one.
+  if (!financing && !options) return raw as SolarProposalSnapshot;
+  return {
+    ...snapshot,
+    ...(financing ? { financing } : {}),
+    ...(options ? { options } : {}),
+  } as unknown as SolarProposalSnapshot;
+}
+
+/**
+ * One financing block with its price keys respelled, or null when there was
+ * nothing to respell — which lets each caller hand back the object it was given
+ * rather than an equal copy.
+ */
+function respellFinancing(financing: unknown): Record<string, unknown> | null {
+  if (financing == null || typeof financing !== "object") return null;
+  const next = { ...(financing as Record<string, unknown>) };
+  let respelled = false;
+  for (const [legacy, current] of LEGACY_FINANCING_KEYS) {
+    if (!(legacy in next)) continue;
+    if (next[current] === undefined) next[current] = next[legacy];
+    delete next[legacy];
+    respelled = true;
+  }
+  return respelled ? next : null;
+}
 
 /**
  * Which revision of the pricing arithmetic a document was built by.
@@ -1794,16 +1898,16 @@ function priceOption(args: {
   const financing: SnapshotFinancing = {
     product: finance.product,
     // THE PRICE THE DOCUMENT QUOTES.
-    contractPriceCents: purchase ? documentPriceCents : null,
+    finalPriceCents: purchase ? documentPriceCents : null,
     // Null on storage rather than the row's zero: there are no installed watts
     // for a rate to be per, and a renderer handed 0 prints "$0.00/W".
-    grossPpwCents: purchase && !isStorage ? finance.grossPpwCents : null,
+    baseFinalPpwCents: purchase && !isStorage ? finance.grossPpwCents : null,
     // The system AT STICKER — the dealer fee included — because these three
     // rows are read as arithmetic by a homeowner: system price, plus extra
     // work, equals total. Quoting the pre-fee figure here would leave the
     // customer's own breakdown several thousand dollars short of the total
     // printed under it.
-    basePriceCents: purchase?.baseStickerCents ?? null,
+    baseFinalCents: purchase?.baseStickerCents ?? null,
     // Likewise at sticker: the lender takes its percentage of the re-roof as
     // well as of the array, so the re-roof appears on the contract carrying
     // its share of the fee — unless it is financed ON TOP, in which case it
@@ -1811,7 +1915,7 @@ function priceOption(args: {
     // already holds. Null, not 0, when there are no adders — the renderer omits
     // the row rather than printing an "Adders $0" line the customer has to
     // parse.
-    adderTotalCents:
+    addersFinalCents:
       purchase && purchase.adderStickerCents > 0 ? purchase.adderStickerCents : null,
     // Only lines that cost something, and only on a purchase. A lease or a
     // PPA has no system price for an adder to sit on top of, and a $0 line
@@ -1873,7 +1977,7 @@ function priceOption(args: {
           // What the HOUSEHOLD pays for it, so the rows on their breakdown —
           // system, work, battery — still add up to the total. The catalogue
           // price itself unless the partner takes its fee on the battery.
-          batteryPriceCents: purchase.batteryStickerCents,
+          equipmentFinalCents: purchase.batteryStickerCents,
           batteryQty: design.batteryQty,
           ...(design.batteryLabel ? { batteryLabel: design.batteryLabel } : {}),
         }
@@ -1891,7 +1995,7 @@ function priceOption(args: {
     // Lease/PPA carry no APR. Gating here as well as at the write means a
     // stale value left on the row by a product switch can never reach a
     // customer as a fabricated lender term.
-    monthlyPaymentCents: isPurchase ? null : finance.monthlyPaymentCents,
+    leaseMonthlyCents: isPurchase ? null : finance.monthlyPaymentCents,
     rateMillsPerKwh: finance.product === "ppa" ? finance.rateMillsPerKwh : null,
     escalatorPct: isPurchase ? null : finance.escalatorPct,
     termYears: finance.termYears,
@@ -1961,7 +2065,7 @@ function priceOption(args: {
       : finance.product === "loan"
         ? financing.loanMonthlyPaymentCents
         : finance.product === "lease"
-          ? financing.monthlyPaymentCents
+          ? financing.leaseMonthlyCents
           : year1
             ? Math.round(year1.solarPaymentCents / 12)
             : null;
@@ -2246,7 +2350,7 @@ export function buildProposalSnapshot(args: {
       : null;
 
   return {
-    schemaVersion: 8,
+    schemaVersion: 9,
     calculationVersion: PRICING_CALCULATION_VERSION,
     systemType,
     // Null on anything that is not a storage deal, so a PV document cannot

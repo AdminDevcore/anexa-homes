@@ -1,6 +1,7 @@
 import type { FinanceProduct } from "@prisma/client";
 import type { Db } from "@/server/db/types";
 import { priceStoredPurchase, priceStorageStored, batteryChargeCents } from "@/lib/solar-money";
+import { readProposalSnapshot } from "@/lib/solar-proposal";
 
 /**
  * WHAT A SOLAR COMMISSION IS MEASURED ON — the deal's size and the base price it
@@ -250,13 +251,17 @@ export function compareWithSignedDocument(
   live: Pick<CommissionDeal, "systemType" | "systemWatts" | "batteryQty" | "finalPriceCents">,
   snapshot: unknown
 ): { matches: boolean | null; differences: string[] } {
-  const s = (snapshot ?? {}) as {
-    financing?: { contractPriceCents?: unknown; batteryQty?: unknown };
+  // THROUGH THE READER, never straight at the stored JSON. Every document
+  // signed before v9 spells this `contractPriceCents`, and reading today's name
+  // off one of those rows yields undefined — which this function would report,
+  // perfectly quietly, as a document that matches the deal in every particular.
+  const s = (readProposalSnapshot(snapshot) ?? {}) as {
+    financing?: { finalPriceCents?: unknown; batteryQty?: unknown };
     system?: { sizeKwDc?: unknown };
     storage?: { batteryQty?: unknown };
   };
   const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
-  const documentFinal = num(s.financing?.contractPriceCents);
+  const documentFinal = num(s.financing?.finalPriceCents);
   // A storage job has no watts; its design can still carry a stale size.
   const documentWatts = live.systemType === "storage" ? null : num(s.system?.sizeKwDc);
   // The charged battery count where the price carries one, else the storage block's.
@@ -313,12 +318,15 @@ export function measureFromSignedDocument(
     systemType: "pv" | "pv_storage" | "storage";
   }
 ): Omit<CommissionMeasure, "frozen"> | null {
-  const s = (snapshot ?? {}) as {
-    financing?: { basePriceCents?: unknown; batteryQty?: unknown };
+  // Through the reader, for the reason given on `compareWithSignedDocument`:
+  // every proposal signed to date predates v9, and freezing the measure from
+  // the document is the whole point of this function.
+  const s = (readProposalSnapshot(snapshot) ?? {}) as {
+    financing?: { baseFinalCents?: unknown; batteryQty?: unknown };
     system?: { sizeKwDc?: unknown };
     storage?: { batteryQty?: unknown };
   };
-  const baseStickerCents = snapshotNumber(s.financing?.basePriceCents);
+  const baseStickerCents = snapshotNumber(s.financing?.baseFinalCents);
   if (baseStickerCents == null) return null;
 
   // The guard `priceUnits` applies, applied identically: cash carries no fee,

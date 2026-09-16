@@ -39,7 +39,7 @@ import {
   type SystemSpecs,
   type SpecSource,
 } from "@/components/portal/solar-operations";
-import { hasCreditSwitch, type SolarProposalSnapshot } from "@/lib/solar-proposal";
+import { hasCreditSwitch, readProposalSnapshot, type SolarProposalSnapshot } from "@/lib/solar-proposal";
 import {
   blockPanelCount,
   panelCorners,
@@ -583,7 +583,7 @@ export default async function LeadDetailPage({
    * part of the quote. Both are labelled in the UI rather than passed off as
    * part of the frozen document.
    */
-  const reportedSnapshot = (reportedProposal?.snapshot ?? null) as SolarProposalSnapshot | null;
+  const reportedSnapshot = readProposalSnapshot(reportedProposal?.snapshot ?? null);
 
   /**
    * WHICH SYSTEM THIS DEAL IS — resolved ONCE, for every card that reports it.

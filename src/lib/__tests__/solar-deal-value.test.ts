@@ -116,8 +116,8 @@ describe("what gets stamped onto Lead.value", () => {
   it("reads the ladder out of a frozen document, a level down", () => {
     const f = {
       product: "loan",
-      contractPriceCents: 8_266_000,
-      monthlyPaymentCents: null,
+      finalPriceCents: 8_266_000,
+      leaseMonthlyCents: null,
       rateMillsPerKwh: null,
       creditLadder: { netCostCents: 4_133_000 },
     } as unknown as SnapshotFinancing;
@@ -246,9 +246,9 @@ describe("contract revenue is the gross, never the after-credit net", () => {
   it("reads the contract straight off a frozen snapshot", () => {
     const financing = {
       product: "loan",
-      contractPriceCents: CONTRACT,
+      finalPriceCents: CONTRACT,
       creditLadder: { netCostCents: NET_AFTER_30PCT_ITC },
-      monthlyPaymentCents: null,
+      leaseMonthlyCents: null,
       rateMillsPerKwh: null,
     } as unknown as SnapshotFinancing;
     expect(solarContractRevenueCents(snapshotPriceSource(financing))).toBe(CONTRACT);
