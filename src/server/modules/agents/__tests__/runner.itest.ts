@@ -118,6 +118,14 @@ const t = vi.hoisted(() => {
         return { status: "success", summary: "Logged a lot" };
       },
     },
+    "test.date_detail": {
+      key: "test.date_detail" as AgentHandler["key"],
+      label: "date in detail",
+      parseConfig: anyConfig,
+      async run(ctx) {
+        return { status: "success", summary: "Timestamped", detail: { at: ctx.deps.now() } };
+      },
+    },
   };
   return { state, handlers };
 });
@@ -304,6 +312,13 @@ describe("executeRun", () => {
     expect(detail.log[MAX_LOG_LINES]).toBe("… further lines dropped");
     expect(detail.log[0]).toHaveLength(MAX_LOG_LINE_CHARS);
     for (const line of detail.log) expect(line.length).toBeLessThanOrEqual(MAX_LOG_LINE_CHARS);
+  });
+
+  it("keeps a Date in the handler's own detail as its ISO string, not {}", async () => {
+    const { row, detail } = await runOf("test.date_detail");
+    expect(row.status).toBe("success");
+    expect(typeof (detail.handler as { at: unknown })?.at).toBe("string");
+    expect((detail.handler as { at: string }).at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
   });
 });
 

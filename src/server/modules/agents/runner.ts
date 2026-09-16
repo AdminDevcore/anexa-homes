@@ -63,16 +63,25 @@ function clean(s: string): string {
   return s.replace(/\u0000/g, "");
 }
 
-/** `clean`, recursively, for anything headed into a jsonb column. */
+/**
+ * `clean`, recursively, for anything headed into a jsonb column.
+ *
+ * Routed through JSON.stringify/parse rather than walked by hand: a `Date`
+ * has no own enumerable key, so rebuilding an object from `Object.entries`
+ * (as an earlier version of this function did) turned one into `{}` — and a
+ * `Map`, `Set` or `Buffer` the same way. `JSON.stringify` instead calls a
+ * value's own `toJSON` before the replacer ever sees it, so a `Date` keeps
+ * its ISO string, which is exactly what the pg driver would have written for
+ * it anyway: this is what the jsonb column actually stores, not an
+ * approximation of it. The replacer still runs on every string anywhere in
+ * the tree — a key's value, an array element, nested arbitrarily deep — so
+ * NUL-stripping covers exactly what the hand-written walk covered.
+ * `undefined` properties are dropped and an `undefined` array element
+ * becomes `null`, both `JSON.stringify`'s own behaviour and so, again, what
+ * would have been written regardless.
+ */
 function cleanDeep<T>(value: T): T {
-  if (typeof value === "string") return clean(value) as unknown as T;
-  if (Array.isArray(value)) return value.map((v) => cleanDeep(v)) as unknown as T;
-  if (value !== null && typeof value === "object") {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = cleanDeep(v);
-    return out as T;
-  }
-  return value;
+  return JSON.parse(JSON.stringify(value, (_key, v: unknown) => (typeof v === "string" ? clean(v) : v)));
 }
 
 /** The handler `log` callback keeps at most this many lines, so an unbounded loop cannot grow `detail` without limit. */
@@ -175,6 +184,11 @@ export async function executeRun(runId: string, opts: ExecuteOptions = {}): Prom
     if (claimed.count === 0) return null;
   }
 
+  // A throw here, right after a successful claim above, leaves the row
+  // `running` with nothing yet run and no ctx to write a verdict from; the
+  // reaper is what eventually closes it. A narrow window (this is a single
+  // read, immediately after the write that opened it), and a database error
+  // is the only thing that lands in it.
   const run = await prisma.agentRun.findUnique({ where: { id: runId }, select: RUN_SELECT });
   if (!run) return null;
   // A caller claiming ownership (the tick) created this run itself as
