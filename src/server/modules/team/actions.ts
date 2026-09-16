@@ -7,7 +7,7 @@ import { prisma } from "@/server/db/client";
 import { leadAdjustColumns } from "@/lib/solar-pay";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
-import { isPayEligible, PAY_ELIGIBLE_ROLES } from "@/server/rbac/matrix";
+import { isPayEligible, PAY_ELIGIBLE_ROLES, ROLES } from "@/server/rbac/matrix";
 import { sendEmail } from "@/server/modules/notifications/delivery";
 import { inviteEmailTemplate } from "@/server/modules/notifications/email-templates";
 import { emailBrandFor } from "@/server/modules/notifications/brand";
@@ -132,7 +132,21 @@ export async function setTeamNameAction(input: z.infer<typeof teamNameSchema>) {
   return { ok: true as const };
 }
 
-const ROLE_VALUES = ["super_admin", "admin", "manager", "sales_rep", "canvasser", "marketing", "installer", "accounting"] as const;
+/**
+ * THE LIST, not a copy of the list.
+ *
+ * This was a hand-typed tuple of eight roles. `ROLES` gained a ninth —
+ * `accountant_readonly` — and this copy did not, so the invite dropdown (which
+ * reads `assignableRolesFor`) offered a role that this schema then rejected:
+ * a role that existed everywhere except the one place that had to accept it,
+ * and nothing failed to build, because every string in a re-typed array is
+ * still a valid string.
+ *
+ * `ROLES` deliberately excludes the retired `customer` value, which is exactly
+ * what an invite enum wants. assignable-roles.test.ts compares these lists so a
+ * future copy cannot drift back apart.
+ */
+const ROLE_VALUES = ROLES;
 const STATUS_VALUES = ["active", "invited", "suspended", "disabled"] as const;
 
 const updateSchema = z.object({

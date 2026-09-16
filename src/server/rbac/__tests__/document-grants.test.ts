@@ -40,7 +40,10 @@ describe("who may send a document for signature", () => {
     expect([...holders].sort()).toEqual([...SENDERS].sort());
   });
 
-  it.each(["canvasser", "marketing", "installer", "accounting"] as Role[])(
+  // `accountant_readonly` is listed for the same reason it was added to ROLES:
+  // a role absent from a ratchet's list holds whatever it holds while the test
+  // passes vacuously. The outside CPA has no Document grant and must not.
+  it.each(["canvasser", "marketing", "installer", "accounting", "accountant_readonly"] as Role[])(
     "refuses %s",
     (role) => {
       expect(roleCan(role, "create", "Document")).toBe(false);

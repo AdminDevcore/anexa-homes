@@ -10,6 +10,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useFormat, useBranding } from "@/components/portal/branding-provider";
 import { initials } from "@/lib/format";
 import { formatEmployeeNo } from "@/lib/employee";
+import { ASSIGNABLE_ROLES } from "@/lib/roles";
 
 type Member = {
   id: string;
@@ -26,7 +27,18 @@ type Member = {
   team: string | null;
 };
 
-const ROLE_ORDER = ["super_admin", "admin", "manager", "sales_rep", "canvasser", "marketing", "installer", "accounting"];
+/**
+ * Hierarchy order for the role column and the grouped view.
+ *
+ * Derived rather than re-typed. The hand-written copy this replaces was missing
+ * `accountant_readonly`, and the GROUPED view maps over this array to build its
+ * sections — so a member holding a role absent from it rendered nowhere at all.
+ * Not a sort glitch: the person was simply not on the page.
+ *
+ * (`roleRank` below survives an unknown role by ranking it last, so sorting was
+ * never the problem. Only the grouping was.)
+ */
+const ROLE_ORDER: string[] = ASSIGNABLE_ROLES;
 const roleRank = (r: string) => { const i = ROLE_ORDER.indexOf(r); return i === -1 ? 99 : i; };
 type SortCol = "name" | "role" | "team" | "title" | "status" | "createdAt";
 
