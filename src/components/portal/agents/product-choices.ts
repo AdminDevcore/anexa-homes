@@ -1,3 +1,4 @@
+import "server-only";
 import type { Product } from "@/lib/agent-labels";
 import { companyVerticals, userVerticals } from "@/server/auth/vertical";
 

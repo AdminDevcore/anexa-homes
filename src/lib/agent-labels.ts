@@ -111,6 +111,39 @@ export function formValuesFor(agent: {
   };
 }
 
+/**
+ * Mirrors validate-agent.ts's cap. Deliberately a copy: that module is server
+ * side (it reaches for the handler registry), so the browser cannot import it.
+ * The parity test in validate-agent.test.ts keeps the two from drifting.
+ */
+const MAX_CONFIG_CHARS = 30_000;
+
+/**
+ * What is wrong with a config as typed, or null if nothing is.
+ *
+ * The client's half of validate-agent.ts's config checks — only the ones whose
+ * answer is visible while someone types — in the SAME SENTENCES, so one
+ * problem never has two wordings. The server still re-checks all of it, and
+ * checks the things a browser cannot: secret-looking values, and the handler's
+ * own schema.
+ */
+export function configError(config: string): string | null {
+  const raw = config.trim();
+  if (raw.length > MAX_CONFIG_CHARS) return "Keep config under 30,000 characters.";
+  // An empty box saves as {}, exactly as the server reads it.
+  if (!raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return "Config is not valid JSON.";
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return "Config must be a JSON object, like {}.";
+  }
+  return null;
+}
+
 /** "just now", "4 min ago", "3 h ago", "2 d ago". */
 export function timeAgo(date: Date | string, now: Date): string {
   const seconds = Math.max(0, Math.round((now.getTime() - new Date(date).getTime()) / 1000));

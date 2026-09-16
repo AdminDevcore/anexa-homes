@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatRunDuration, formValuesFor, productOf, timeAgo, utcStamp } from "../agent-labels";
+import { configError, formatRunDuration, formValuesFor, productOf, timeAgo, utcStamp } from "../agent-labels";
 
 describe("agent labels", () => {
   const now = new Date("2026-09-15T14:00:00.000Z");
@@ -34,6 +34,22 @@ describe("agent labels", () => {
     expect(productOf(null)).toBe("both");
     expect(productOf("solar")).toBe("solar");
     expect(productOf("others")).toBe("both");
+  });
+
+  it("says what is wrong with a config while it is being typed", () => {
+    expect(configError('{"greeting":"hi"}')).toBeNull();
+    // An empty box is not an error: it saves as {}, the way the server reads it.
+    expect(configError("")).toBeNull();
+    expect(configError("   ")).toBeNull();
+    expect(configError("{nope")).toBe("Config is not valid JSON.");
+    // Valid JSON, wrong shape — each of these parses, and none is settings.
+    expect(configError("[]")).toBe("Config must be a JSON object, like {}.");
+    expect(configError("null")).toBe("Config must be a JSON object, like {}.");
+    expect(configError("42")).toBe("Config must be a JSON object, like {}.");
+    expect(configError('"hi"')).toBe("Config must be a JSON object, like {}.");
+    // The cap is read off the TRIMMED text, and comes before the parse, so a
+    // huge malformed config is refused for its size rather than its syntax.
+    expect(configError(`{"blob":"${"x".repeat(40_000)}"}`)).toBe("Keep config under 30,000 characters.");
   });
 
   it("turns an agent into the strings its form edits", () => {

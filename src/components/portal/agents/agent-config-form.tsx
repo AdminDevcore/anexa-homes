@@ -17,7 +17,7 @@ import {
   ToggleRow,
   useDraft,
 } from "@/components/portal/settings-kit";
-import { DEPARTMENTS, DEPARTMENT_LABEL, PRODUCT_LABEL, type AgentFormValues, type Product } from "@/lib/agent-labels";
+import { configError, DEPARTMENTS, DEPARTMENT_LABEL, PRODUCT_LABEL, type AgentFormValues, type Product } from "@/lib/agent-labels";
 import { useIsClient } from "@/lib/use-is-client";
 import { createAgentAction, updateAgentAction } from "@/server/modules/agents/actions";
 import { SCHEDULE_PRESETS, upcomingRuns, validateSchedule } from "@/server/modules/agents/schedule";
@@ -45,7 +45,12 @@ export function AgentConfigForm({
 }) {
   const router = useRouter();
   const client = useIsClient();
-  const { draft, set, dirty, reset } = useDraft(initial);
+  // `enabled` is the header switch's business, not this form's: edit mode never
+  // renders it, and updateAgentAction overrides it from the database anyway.
+  // Keeping it out of the seed means flipping that switch — which refreshes the
+  // page — cannot change useDraft's signature and silently throw away an edit
+  // somebody is halfway through.
+  const { draft, set, dirty, reset } = useDraft(mode.kind === "edit" ? { ...initial, enabled: false } : initial);
   const [customMode, setCustomMode] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
 
@@ -53,6 +58,9 @@ export function AgentConfigForm({
   const custom = customMode || (trimmed !== "" && !isPreset(trimmed));
   const scheduleChoice = custom ? CUSTOM : trimmed === "" ? NONE : trimmed;
   const checked = trimmed ? validateSchedule(trimmed) : null;
+  // Same shape as `checked`, and the server's own sentences: a typo in the box
+  // below should not cost a round trip to discover.
+  const badConfig = React.useMemo(() => configError(draft.config), [draft.config]);
   // The next runs are in the VIEWER's time zone, which the server cannot know,
   // so they wait for hydration rather than failing it.
   const upcoming = client && checked?.ok ? upcomingRuns(checked.schedule, 3) : [];
@@ -204,13 +212,16 @@ export function AgentConfigForm({
       </Panel>
 
       <Panel title="Config">
-        <TextAreaField
-          label="Config (JSON)"
-          value={draft.config}
-          onChange={(v) => set("config", v)}
-          rows={6}
-          hint="Settings for the handler, checked when you save. Never a password or key — name where it lives instead, like env:AGENT_BANK_TOKEN."
-        />
+        <div className="space-y-1.5">
+          <TextAreaField
+            label="Config (JSON)"
+            value={draft.config}
+            onChange={(v) => set("config", v)}
+            rows={6}
+            hint="Settings for the handler, checked when you save. Never a password or key — name where it lives instead, like env:AGENT_BANK_TOKEN."
+          />
+          {badConfig && <p className="text-xs text-destructive">{badConfig}</p>}
+        </div>
       </Panel>
 
       {mode.kind === "create" ? (

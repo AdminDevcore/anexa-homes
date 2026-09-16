@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { NEW_AGENT_VALUES, type AgentFormValues } from "@/lib/agent-labels";
+import { configError, NEW_AGENT_VALUES, type AgentFormValues } from "@/lib/agent-labels";
 import { findSecretValues } from "../config-guard";
 import { validateAgentInput } from "../validate-agent";
 
@@ -46,6 +46,18 @@ describe("validateAgentInput", () => {
     const r = validateAgentInput(hello(over));
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toMatch(message);
+  });
+
+  it("refuses a bad config in the SAME words the form shows while it is typed", () => {
+    // configError is a copy of the checks below, in the browser, where the
+    // server module cannot be imported. If anyone reworded one of these
+    // sentences, a person would meet two wordings for one problem — so the two
+    // are compared here rather than trusted to stay in step.
+    for (const config of ["{nope", "[]", `{"blob":"${"x".repeat(40_000)}"}`]) {
+      const r = validateAgentInput(hello({ config }));
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error).toBe(configError(config));
+    }
   });
 
   it("still saves an agent whose handler was removed, while the handler is not being changed — but never a secret", () => {
