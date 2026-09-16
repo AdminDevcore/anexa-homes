@@ -63,6 +63,12 @@ export const RESOURCES = [
   "Canvassing", // door-to-door knocking + territories
   "StormIntelligence", // NOAA/SPC storm data targeting (canvassing companion)
   "Bookkeeping", // lightweight ledger / P&L (accounting + owner only)
+  // MOVING MONEY OUT, deliberately NOT folded into Bookkeeping. `accounting`
+  // holds Bookkeeping: ALL, so gating payments there would have granted "can
+  // send money" to everyone who already had `manage` on the ledger — privilege
+  // granted by inheritance rather than by decision. Reading the books and
+  // paying a vendor are different powers and are named separately.
+  "Payment",
   "Knowledge", // training library / knowledge base (role-gated)
   "Scope", // scope-of-work job cost calculator (costs management-only)
   "Proposal", // customer-facing roofing presentation / proposal builder
@@ -138,6 +144,7 @@ export function isAdmin(role: Role): boolean {
 // and `roleCan` reads a missing entry as "no grants" — deny by default.
 const GRANTS: Partial<Record<Role, Grant>> = {
   super_admin: {
+    Payment: ALL,
     Chat: ALL,
     Canvassing: ALL,
     StormIntelligence: ALL,
@@ -287,6 +294,11 @@ const GRANTS: Partial<Record<Role, Grant>> = {
     ContractorInvoice: ["read", "export", "update", "approve"],
     Report: ["read", "export"],
     Bookkeeping: ALL,
+    // Raise a payment, and approve one — but NOT `delete`: a payment that moved
+    // is reversed, never erased. Holding both `create` and `approve` does not
+    // let one person do both on the SAME payment; maker-checker is enforced in
+    // code, because a role cannot express "somebody other than you".
+    Payment: ["create", "read", "update", "approve"],
     Knowledge: ["read"],
     Scope: ["read"],
     Proposal: ["read"],
@@ -325,6 +337,19 @@ const GRANTS: Partial<Record<Role, Grant>> = {
    */
   accountant_readonly: {
     Bookkeeping: ["read", "export"],
+    /**
+     * Payments are readable, and this is a narrower grant than it looks.
+     *
+     * `Report` was refused this role because it gates some thirty sales-floor
+     * routes carrying customer and rep-by-name data. `Payment` gates exactly
+     * one surface, and it is squarely accounting's: every payment is ALREADY
+     * visible to this role as a journal entry in the ledger they can read, so
+     * withholding it would hide nothing and merely break the page an outside
+     * accountant needs to reconcile accounts payable.
+     *
+     * Read and export only. Nothing here can raise or approve a payment.
+     */
+    Payment: ["read", "export"],
   },
 };
 
