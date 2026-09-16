@@ -1562,6 +1562,9 @@ export function SolarFinancePanel({
         quotedLabel={
           chosen ? [lender?.name, chosen.name].filter(Boolean).join(" · ") || lenderProductLabel(chosen) : null
         }
+        // Live, not the saved row: quoting a PPA column hides the price before
+        // the save that would have zeroed it.
+        quotedProduct={product}
         canEdit={canEdit}
         onChange={setBasePpwCents}
       />

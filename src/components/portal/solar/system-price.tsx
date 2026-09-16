@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import type { FinanceProduct } from "@prisma/client";
 import { Check, Minus, Pencil, Plus, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -87,6 +88,7 @@ export function SystemPriceCard({
   quotedPpwBasis = "final",
   quotedMinBasePpwCents,
   quotedLabel,
+  quotedProduct,
   canEdit,
   onChange,
 }: {
@@ -153,6 +155,12 @@ export function SystemPriceCard({
    */
   quotedMinBasePpwCents: number | null;
   quotedLabel: string | null;
+  /**
+   * What the deal is quoted as. A lease or a PPA has no system price, so the
+   * card says that instead of offering one — see the return below the hooks.
+   * Optional: a caller that does not say is pricing a purchase.
+   */
+  quotedProduct?: FinanceProduct;
   canEdit: boolean;
   onChange: (cents: number | null) => void;
 }) {
@@ -227,6 +235,51 @@ export function SystemPriceCard({
   const [editing, setEditing] = React.useState(false);
   const ppwRef = React.useRef<HTMLInputElement>(null);
   const totalRef = React.useRef<HTMLInputElement>(null);
+
+  /**
+   * A LEASE OR A PPA HAS NO SYSTEM PRICE — 2026-09-16.
+   *
+   * The household pays for the power, or rents the array, at the programme's
+   * rate; nobody buys the system. The save knows it and writes the price
+   * columns as zero (`financeRowForProduct`), and the rep is paid per watt on
+   * this paper, so there is no base to redline either.
+   *
+   * This card did not know it. It opened the editor, the save said "Financing
+   * saved", and the next load found $0 and fell back to the company default —
+   * reported on an Axess PPA as "it keeps going back to the old one". So it
+   * offers no price here, and says why. Quoting a cash or loan column below
+   * brings the price back at once: `product` moves before anything is saved.
+   *
+   * Returned AFTER the hooks, so switching the quote between a loan and a PPA
+   * does not change how many hooks this component calls.
+   */
+  if (quotedProduct === "lease" || quotedProduct === "ppa") {
+    const isPpa = quotedProduct === "ppa";
+    return (
+      <section
+        aria-labelledby="system-price-heading"
+        className="overflow-hidden rounded-xl border border-border bg-card"
+      >
+        <header className="border-b border-border/70 px-4 py-2.5">
+          <h3
+            id="system-price-heading"
+            className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+          >
+            System price
+          </h3>
+        </header>
+        <div className="space-y-1 p-4">
+          <p className="text-sm font-medium">No system price on a {isPpa ? "PPA" : "lease"}</p>
+          <p className="text-xs text-muted-foreground">
+            {isPpa
+              ? "The homeowner buys the power, not the system, and pays for it per kWh at the programme’s rate."
+              : "The homeowner leases the system for a monthly payment set by the programme."}{" "}
+            To price the system, quote a cash or loan programme below.
+          </p>
+        </div>
+      </section>
+    );
+  }
 
   /** Open on the box the rep actually clicked, with the cursor already in it. */
   const open = (which: "ppw" | "total") => {
