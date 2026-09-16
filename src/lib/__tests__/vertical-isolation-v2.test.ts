@@ -70,6 +70,40 @@ describe("shared modules stay shared", () => {
     expect(classify("Commission")).toBe("tagged");
     expect(classify("Invoice")).toBe("tagged");
   });
+
+  /**
+   * The bank feed is SHARED, and the reason is worth stating because "it has a
+   * companyId, so scope it" is the intuitive and wrong answer.
+   *
+   * A bank login and the rows it delivers arrive from OUTSIDE. They have no
+   * department until a human or a rule decides one. Tagging them on write would
+   * stamp whichever workspace happened to be active when the cron fired — a
+   * provenance that means nothing, recorded as though it meant something.
+   *
+   * The vertical belongs on the JournalLine the feed eventually produces, which
+   * is exactly where the TAGGED class already puts it.
+   */
+  it("bank connections and feed rows are shared, not scoped or tagged", () => {
+    expect(classify("BankConnection")).toBe("shared");
+    expect(classify("BankFeedTransaction")).toBe("shared");
+  });
+
+  // Infrastructure, and often company-less until the payload has been read.
+  // Scoping it would make a delivery invisible to the session that must process it.
+  it("webhook receipts are shared", () => {
+    expect(classify("WebhookEvent")).toBe("shared");
+  });
+
+  // The books they feed are shared for the same reason, restated here so a
+  // future edit that scopes one has to break a test that explains why.
+  it("the chart of accounts and bank accounts stay shared", () => {
+    expect(classify("LedgerAccount")).toBe("shared");
+    expect(classify("BankAccount")).toBe("shared");
+    expect(classify("JournalEntry")).toBe("shared");
+    // …while the LINE is tagged, which is what lets one cheque pay a roofing
+    // sub and a solar sub and still break out by department.
+    expect(classify("JournalLine")).toBe("tagged");
+  });
 });
 
 describe("report ledger filter", () => {

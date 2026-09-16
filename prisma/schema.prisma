@@ -408,6 +408,10 @@ model Company {
   chargebacks        Chargeback[]
   payrollAdjustments PayrollAdjustment[]
 
+  bankConnections      BankConnection[]
+  bankFeedTransactions BankFeedTransaction[]
+  webhookEvents        WebhookEvent[]
+
   @@map("companies")
   solarContractUnlocks SolarContractUnlock[]
 
@@ -2902,6 +2906,8 @@ model JournalEntry {
 
   lines       JournalLine[]
   attachments FileAsset[]
+  /// The feed rows this entry was made from, kept as the evidence for it.
+  feedTransactions BankFeedTransaction[]
 
   /// The duplicate guard. Postgres treats NULLs as distinct, so any number of
   /// hand-written entries (sourceId NULL) coexist while a keyed source can
@@ -3044,13 +3050,207 @@ model BankAccount {
 
   active Boolean @default(true)
 
-  reconciliations BankReconciliation[]
+  /// The feed this account arrives on, when it is connected to one. NULL is a
+  /// perfectly ordinary account somebody keys by hand or imports from a file —
+  /// a bank connection is an optional convenience, never the source of truth.
+  bankConnectionId String?
+  bankConnection   BankConnection? @relation(fields: [bankConnectionId], references: [id], onDelete: SetNull)
+  /// The provider's id for this account, so a feed row can find its home.
+  providerAccountId String?
+
+  reconciliations  BankReconciliation[]
+  feedTransactions BankFeedTransaction[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([companyId, providerAccountId])
   @@index([companyId, active])
+  @@index([bankConnectionId])
   @@map("bank_accounts")
+}
+
+/// A live connection to a financial institution.
+///
+/// SHARED, not tagged: a bank login belongs to the legal entity, exactly like
+/// the BankAccount and the chart of accounts it feeds. There is no sense in
+/// which a set of credentials is "solar" or "roofing" — the department shows up
+/// on the JournalLine that the feed eventually produces, which is where the
+/// TAGGED class already puts it.
+model BankConnection {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  /// Which implementation of the provider interface produced this.
+  provider String @default("plaid")
+  /// The provider's id for the connection ("item" at Plaid).
+  providerItemId String
+  institutionId   String?
+  institutionName String?
+
+  /// THE CREDENTIAL, encrypted at rest with FINANCE_ENC_KEY (`v1.fin:iv:tag:ct`).
+  /// Never logged, never returned to a client, never sent to the browser. Read
+  /// only by the sync and only on the server.
+  accessTokenEnc String
+
+  /// The provider's opaque sync cursor. Persisted after EVERY page, so a sync
+  /// that dies half way resumes instead of re-ingesting two years of history.
+  cursor String?
+
+  status       BankConnectionStatus @default(active)
+  /// Set when the institution needs the user to re-authenticate. The feed keeps
+  /// its history and its cursor; only the credential is refreshed.
+  needsReconnectAt DateTime?
+  lastSyncedAt DateTime?
+  /// The last failure, for the operator. Never contains the access token.
+  lastError    String?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  accounts     BankAccount[]
+  transactions BankFeedTransaction[]
+
+  /// One row per connection per company. Reconnecting REUSES this row rather
+  /// than creating a second one — a fresh connection would start its own cursor
+  /// and re-ingest everything as if it were new.
+  @@unique([companyId, provider, providerItemId])
+  @@index([companyId, status])
+  @@map("bank_connections")
+}
+
+/// A transaction as the BANK reported it — raw, unposted, and not yet accounting.
+///
+/// SHARED for the same reason as the connection: this row arrives from outside
+/// and has no department until a human or a rule decides one. Stamping it with
+/// whichever workspace happened to be active when the cron ran would record a
+/// provenance that means nothing. The vertical lands on the JournalLine.
+///
+/// The row is kept forever, including after it posts, because it is the evidence
+/// for the entry: "why is this in the books?" is answered by the bank's own
+/// description, amount and date, not by our summary of them.
+model BankFeedTransaction {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  bankConnectionId String?
+  bankConnection   BankConnection? @relation(fields: [bankConnectionId], references: [id], onDelete: SetNull)
+
+  /// Resolved from `providerAccountId` at ingest. Null means the feed reported
+  /// an account nobody has mapped yet, which is visible rather than dropped.
+  bankAccountId String?
+  bankAccount   BankAccount? @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+
+  /// The provider's own id. THE dedupe key — an at-least-once feed will deliver
+  /// the same transaction more than once.
+  providerTransactionId String
+  providerAccountId     String
+
+  /// The date the BANK posted it, which is what a statement shows and what
+  /// reconciliation matches on.
+  postedAt DateTime
+  /// SIGNED cents, account holder's view: negative left the account. The
+  /// provider adapter normalises this; see bank-feeds/types.ts.
+  amountCents Int
+  description String
+  merchantName String?
+  /// A pending row is shown but never posted: posting an authorisation books
+  /// money that may never move.
+  pending     Boolean @default(false)
+  /// The provider's category guess. Advisory — it never selects an account on
+  /// its own.
+  category    String[]
+  checkNumber String?
+  currency    String   @default("USD")
+
+  status BankFeedTransactionStatus @default(review)
+
+  /// The entry this became, once someone accepted it.
+  journalEntryId String?
+  journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
+
+  /// Set when the bank RETRACTS a transaction it already reported. The row stays
+  /// and any entry made from it is reversed, never deleted.
+  removedAt DateTime?
+
+  decidedById String?
+  decidedAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([companyId, providerTransactionId])
+  @@index([companyId, status, postedAt])
+  @@index([bankAccountId, postedAt])
+  @@index([journalEntryId])
+  @@map("bank_feed_transactions")
+}
+
+/// An inbound webhook delivery, recorded before it is acted on.
+///
+/// SHARED: infrastructure, with no department and often no company until the
+/// payload has been read. Exists so that an at-least-once delivery becomes
+/// exactly-once processing — the unique `eventId` is the whole mechanism.
+model WebhookEvent {
+  id       String @id @default(uuid())
+  provider String
+
+  /// The provider's event id, or a key DERIVED from the verified body when the
+  /// provider does not send one (Plaid does not). Unique per provider, which is
+  /// what makes a replayed delivery a no-op.
+  eventId String
+
+  /// Resolved from the payload where possible; a delivery for an unknown
+  /// connection is still recorded rather than discarded.
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  code    String
+  payload Json
+
+  status      WebhookEventStatus @default(received)
+  receivedAt  DateTime           @default(now())
+  processedAt DateTime?
+  error       String?
+
+  @@unique([provider, eventId])
+  @@index([status, receivedAt])
+  @@map("webhook_events")
+}
+
+enum BankConnectionStatus {
+  active
+  /// The institution wants the user to re-authenticate. History and cursor are
+  /// intact; only the credential is stale.
+  needs_reconnect
+  /// Deliberately disconnected by a user. Rows are kept; the feed stops.
+  disconnected
+  /// Repeated failures that are not an auth problem.
+  error
+}
+
+enum BankFeedTransactionStatus {
+  /// In the "for review" queue, awaiting a decision.
+  review
+  /// Accepted and posted to the journal.
+  posted
+  /// Matched to an entry that already existed, rather than creating a new one.
+  matched
+  /// Deliberately not accounting — a transfer already booked from the other
+  /// side, or a personal charge on a mixed account.
+  excluded
+  /// Retracted by the bank.
+  removed
+}
+
+enum WebhookEventStatus {
+  received
+  processed
+  /// Verified and recorded, but we do not act on this code.
+  ignored
+  failed
 }
 
 /// One lock date per company: everything dated on or before `lockedThrough` is
