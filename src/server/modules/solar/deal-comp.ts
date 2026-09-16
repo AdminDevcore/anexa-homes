@@ -1,5 +1,6 @@
 import { prisma } from "@/server/db/client";
 import { resolveSolarPay } from "@/lib/solar-pay";
+import { freezeCommissionMeasure } from "./commission-pricing";
 
 /**
  * The compensation terms one solar deal is paid on, frozen at signing.
@@ -65,6 +66,11 @@ async function dealTerms(companyId: string, leadId: string, repId: string) {
  * thing that may change this row, and it goes through `reassignSolarDealRep`
  * so it leaves a trail.
  *
+ * THE MEASURE IS RE-FROZEN ON EVERY SIGNATURE. What the rates multiply — the
+ * watts, the base price, the battery count — is copied off the deal each time
+ * a version is signed and checked against that version, because a change
+ * order signed at a new size is a new measure. See `commission-pricing.ts`.
+ *
  * BEST-EFFORT FOR THE CUSTOMER, FAIL-SAFE FOR THE MONEY. It is called from the
  * customer's own signing request, and a customer must never see their signature
  * fail because the company had not finished configuring a rep's redline.
@@ -80,13 +86,18 @@ export async function snapshotSolarDealComp(args: {
   companyId: string;
   leadId: string;
   signedAt: Date;
+  /** The proposal just signed, which the frozen measure is checked against. */
+  proposalId?: string | null;
 }): Promise<{ written: boolean; reason?: string }> {
   try {
     const existing = await prisma.solarDealComp.findUnique({
       where: { leadId: args.leadId },
       select: { id: true },
     });
-    if (existing) return { written: false, reason: "already frozen" };
+    if (existing) {
+      await freezeSignedMeasure(args);
+      return { written: false, reason: "already frozen" };
+    }
 
     const lead = await prisma.lead.findFirst({
       where: { id: args.leadId, companyId: args.companyId },
@@ -143,6 +154,7 @@ export async function snapshotSolarDealComp(args: {
         },
       });
     }
+    await freezeSignedMeasure(args);
     return { written: true, reason: terms ? undefined : "needs review" };
   } catch (err) {
     // Never fails a customer's signature. A missing snapshot degrades to the
@@ -150,6 +162,55 @@ export async function snapshotSolarDealComp(args: {
     // not broken; a thrown error here would lose the signature itself.
     console.error(`[solar-comp] could not freeze terms for lead ${args.leadId}:`, err);
     return { written: false, reason: "error" };
+  }
+}
+
+/**
+ * Freeze what the commission is measured on, and say so on the deal when the
+ * deal no longer agrees with the document the customer just signed.
+ *
+ * Called inside `snapshotSolarDealComp`'s try, so it can never fail a signature,
+ * and a disagreement never blocks pay: it is logged for a person to review.
+ */
+async function freezeSignedMeasure(args: {
+  companyId: string;
+  leadId: string;
+  signedAt: Date;
+  proposalId?: string | null;
+}) {
+  const outcome = await freezeCommissionMeasure(prisma, {
+    companyId: args.companyId,
+    leadId: args.leadId,
+    proposalId: args.proposalId,
+    pricedFrom: "signature",
+    now: args.signedAt,
+  });
+  // A document with no priced figures on it — generated before the snapshot
+  // carried them. The measure falls back to the deal, and says so.
+  if (outcome.status === "frozen" && outcome.basis === "live_deal") {
+    await prisma.activityLog.create({
+      data: {
+        companyId: args.companyId,
+        type: "system",
+        message:
+          "Commission measure frozen from the deal itself: the signed proposal carries no priced " +
+          "figures for it to be read from.",
+        leadId: args.leadId,
+      },
+    });
+  }
+  if (outcome.status === "frozen" && outcome.matches === false) {
+    await prisma.activityLog.create({
+      data: {
+        companyId: args.companyId,
+        type: "system",
+        message:
+          `The deal does not match signed proposal v${outcome.proposalVersion}, which this deal's ` +
+          `commission measure is frozen from: ${outcome.differences.join("; ")}. Payroll pays on the ` +
+          `signed document — review this before the deal pays.`,
+        leadId: args.leadId,
+      },
+    });
   }
 }
 

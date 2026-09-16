@@ -13,6 +13,7 @@ import {
   type ProposalPaymentOption,
 } from "@/lib/solar-proposal";
 import { usd } from "./format";
+import { withoutDealerFee } from "@/lib/solar-lender-product";
 
 /**
  * The close: one system, and every way this household can pay for it.
@@ -142,7 +143,7 @@ export function PaymentMenu({
                 How you pay
               </p>
               <p className="mt-1.5 font-display text-xl font-semibold leading-snug">
-                {selected.label}
+                {withoutDealerFee(selected.label)}
               </p>
             </>
           )}
@@ -276,7 +277,7 @@ function OptionPicker({
         >
           {options.map((o) => (
             <option key={o.key} value={o.key}>
-              {o.label}
+              {withoutDealerFee(o.label)}
               {optionMonthlyCents(o, creditsApplied) != null
                 ? ` — ${usd(optionMonthlyCents(o, creditsApplied)!, 0)}/mo`
                 : ""}

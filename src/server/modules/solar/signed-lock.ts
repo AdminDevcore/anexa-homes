@@ -153,6 +153,79 @@ export async function checkSignedLock(
   };
 }
 
+/** A live unlock, as `activeUnlock` returns it. */
+export type LiveUnlock = NonNullable<Awaited<ReturnType<typeof activeUnlock>>>;
+
+export type EconomicWriteVerdict =
+  /** Not signed, or somebody has reopened it. `unlock` is null when unsigned. */
+  | { blocked: false; unlock: LiveUnlock | null }
+  /** Signed and closed. Nothing may recompute this deal's money. */
+  | { blocked: true; signedAt: Date };
+
+/**
+ * IS THIS DEAL OPEN FOR ECONOMIC WRITES RIGHT NOW?
+ *
+ * The question `checkSignedLock` asks about a PERSON, asked about the DEAL
+ * instead — no user, no role, no permission, because the derivations this
+ * protects (`recomputeDealMoney`, `recomputeDesignFigures`) do not have one.
+ * They are called from eight places and run with whatever authority their
+ * caller had, so a caller that forgot to ask was a signed contract that could
+ * be re-priced by anyone who could reach any screen that moves the design.
+ *
+ * A GUARD PER CALL SITE IS ONE NEW CALL SITE AWAY FROM BEING ABSENT. This one
+ * lives underneath all of them, and the callers keep their own checks: theirs
+ * refuse the person with a sentence they can act on, this one refuses the
+ * WRITE. Nothing relies on either alone.
+ */
+export async function economicWritesAllowed(
+  companyId: string,
+  leadId: string
+): Promise<EconomicWriteVerdict> {
+  const signedAt = await dealSignedAt(companyId, leadId);
+  if (!signedAt) return { blocked: false, unlock: null };
+  const unlock = await activeUnlock(companyId, leadId);
+  return unlock ? { blocked: false, unlock } : { blocked: true, signedAt };
+}
+
+/**
+ * Record a DERIVED write that landed on a signed contract under an unlock.
+ *
+ * The same trail `auditSignedEdit` leaves, for the writes no person made
+ * directly: a recompute is a consequence of an edit, and on a signed deal the
+ * consequence is as much a change to the contract as the edit was. Attributed
+ * to whoever opened the unlock, because that is whose decision it was.
+ *
+ * Best-effort, like every other line here: the write is already committed, and
+ * losing the log must not fail it.
+ */
+export async function auditDerivedWrite(
+  companyId: string,
+  leadId: string,
+  unlock: { reason: string; unlockedById: string },
+  what: string,
+  changes: { field: string; before: unknown; after: unknown }[]
+): Promise<void> {
+  const moved = changes.filter((c) => c.before !== c.after);
+  if (moved.length === 0) return;
+  const show = (v: unknown) => (v === null || v === undefined ? "—" : String(v));
+  try {
+    await prisma.activityLog.create({
+      data: {
+        companyId,
+        type: "system",
+        message:
+          `Recomputed ${what} on a SIGNED contract — ` +
+          moved.map((c) => `${c.field} ${show(c.before)} → ${show(c.after)}`).join("; ") +
+          ` — reason: ${unlock.reason}`,
+        actorId: unlock.unlockedById,
+        leadId,
+      },
+    });
+  } catch (err) {
+    console.error(`[solar] could not record a derived write on signed deal ${leadId}`, err);
+  }
+}
+
 /**
  * Record a super admin rewriting a signed contract.
  *

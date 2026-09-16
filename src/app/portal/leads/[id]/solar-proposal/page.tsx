@@ -103,11 +103,44 @@ export default async function SolarProposalBuilderPage({
    */
   const signedAt = await dealSignedAt(user.companyId, lead.id);
   const liveUnlock = signedAt ? await activeUnlock(user.companyId, lead.id) : null;
+  /**
+   * WHAT THIS DEAL'S COMMISSION IS MEASURED ON, read only to say so — and, for a
+   * super admin, to offer the one manual way to move it. The measure is frozen
+   * off the signed proposal; see `commission-pricing.ts`.
+   */
+  const dealComp = signedAt
+    ? await prisma.solarDealComp.findUnique({
+        where: { leadId: lead.id },
+        select: {
+          pricedAt: true,
+          pricedBasis: true,
+          pricedProposalId: true,
+          pricingMatchesSignedDocument: true,
+        },
+      })
+    : null;
+  const measuredVersion = dealComp?.pricedProposalId
+    ? (
+        await prisma.solarProposal.findFirst({
+          where: { id: dealComp.pricedProposalId, companyId: user.companyId },
+          select: { version: true },
+        })
+      )?.version ?? null
+    : null;
+
   const contractLock = {
     signedAt: signedAt?.toISOString() ?? null,
     canOverride: user.role === "super_admin",
     unlock: liveUnlock
       ? { reason: liveUnlock.reason, expiresAt: liveUnlock.expiresAt.toISOString() }
+      : null,
+    measure: dealComp
+      ? {
+          frozenAt: dealComp.pricedAt?.toISOString() ?? null,
+          basis: dealComp.pricedBasis,
+          proposalVersion: measuredVersion,
+          matchesDocument: dealComp.pricingMatchesSignedDocument,
+        }
       : null,
   };
   // Locked = signed and not currently reopened. A super admin with no live

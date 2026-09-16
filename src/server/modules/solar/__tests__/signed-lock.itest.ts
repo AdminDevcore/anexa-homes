@@ -26,6 +26,9 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 const { saveSolarFinanceAction, setSolarDealLenderAction, setSolarCreditClaimsAction } =
   await import("../actions");
 const { setSolarDesignEquipmentAction } = await import("../equipment-actions");
+const { saveSolarLayoutAction } = await import("../layout-actions");
+const { repriceProposalAction } = await import("../proposal-reprice-actions");
+const { recomputeDealMoney } = await import("../deal-money");
 const { addDealAdderAction } = await import("../adder-actions");
 const { dealSignedAt } = await import("../signed-lock");
 const { unlockSignedContractAction, relockSignedContractAction } =
@@ -384,6 +387,94 @@ describe("a super admin must reopen the contract, and say why", () => {
     await savePrice(600);
     const logs = await db.activityLog.findMany({ where: { leadId, message: { contains: "SIGNED contract" } } });
     expect(logs).toHaveLength(0);
+  });
+});
+
+describe("nothing zeroes a signed deal — the shape of deal 5886e6ac", () => {
+  /**
+   * The one real signed customer deal in production: a signed v1 with a NEWER
+   * UNSIGNED version behind it. That pairing is what made the live re-price
+   * reachable — it refused a signed PROPOSAL and never asked about the DEAL.
+   */
+  let draftId: string;
+  beforeEach(async () => {
+    await sign();
+    const draft = await db.solarProposal.create({
+      data: { companyId, leadId, version: 3, status: "generated", snapshot: { schemaVersion: 7 } as never },
+      select: { id: true },
+    });
+    draftId = draft.id;
+    actAs("sales_rep");
+  });
+
+  const LAYOUT = [
+    { id: "b1", originE: 0, originN: 0, rotationDeg: 0, cols: 5, rows: 4,
+      orientation: "portrait" as const, omitted: [], azimuthDeg: 180, tiltDeg: 20 },
+  ];
+
+  it("REFUSES a rep re-pricing the signed DEAL through its unsigned next version", async () => {
+    const before = await finance();
+    const res = await inSolar(() => repriceProposalAction({ proposalId: draftId, grossPpwCents: 0 }));
+    expect(res.ok).toBe(false);
+    expect("error" in res && res.error).toMatch(/signed/i);
+    expect(await finance()).toEqual(before);
+  });
+
+  it("REFUSES a rep wiping the array from the layout designer", async () => {
+    const before = await design();
+    const res = await inSolar(() => saveSolarLayoutAction({ leadId, blocks: [] }));
+    expect(res.ok).toBe(false);
+    expect(await design()).toEqual(before);
+  });
+
+  it("REFUSES a rep redrawing it, too — the size is what the price is made of", async () => {
+    const before = await design();
+    const res = await inSolar(() => saveSolarLayoutAction({ leadId, blocks: LAYOUT }));
+    expect(res.ok).toBe(false);
+    expect("error" in res && res.error).toMatch(/signed/i);
+    expect(await design()).toEqual(before);
+  });
+
+  it("refuses an empty drawing even on an UNSIGNED deal — a zero is not a price", async () => {
+    await unsign();
+    const res = await inSolar(() => saveSolarLayoutAction({ leadId, blocks: [] }));
+    expect(res.ok).toBe(false);
+    expect("error" in res && res.error).toMatch(/no panels/i);
+  });
+
+  it("holds even when a caller forgets to ask: the recompute itself refuses", async () => {
+    // An adder written straight to the table, past the guarded action. The
+    // contract would move the moment anything recomputed.
+    await db.solarDealAdder.create({
+      data: { companyId, leadId, qty: 1, sortOrder: 0, label: "Trenching", basis: "flat", flatCents: 500_000 },
+    });
+    const before = await finance();
+    expect(await inSolar(() => recomputeDealMoney(companyId, leadId))).toMatchObject({
+      changed: false,
+      blocked: true,
+    });
+    expect(await finance()).toEqual(before);
+  });
+
+  it("lets it through under an unlock, and says what moved", async () => {
+    await db.solarDealAdder.create({
+      data: { companyId, leadId, qty: 1, sortOrder: 0, label: "Trenching", basis: "flat", flatCents: 500_000 },
+    });
+    const before = (await finance())!.contractPriceCents;
+    actAs("super_admin");
+    await inSolar(() => unlockSignedContractAction({ leadId, reason: "Lender correction — re-issued" }));
+
+    expect(await inSolar(() => recomputeDealMoney(companyId, leadId))).toMatchObject({ changed: true });
+    const after = (await finance())!.contractPriceCents;
+    expect(after).not.toBe(before);
+
+    const log = await db.activityLog.findFirst({
+      where: { leadId, message: { contains: "Recomputed the deal's money on a SIGNED contract" } },
+    });
+    expect(log?.message).toContain(String(before));
+    expect(log?.message).toContain(String(after));
+    expect(log?.message).toContain("Lender correction — re-issued");
+    expect(log?.actorId).toBe(users.super_admin);
   });
 });
 

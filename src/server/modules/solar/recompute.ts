@@ -19,6 +19,7 @@ import { systemTotals } from "@/lib/solar-arrays";
 import { offsetPct } from "@/lib/solar-money";
 import { effectiveUsageKwh } from "@/lib/solar-energy";
 import { recomputeDealMoney } from "./deal-money";
+import { economicWritesAllowed, auditDerivedWrite } from "./signed-lock";
 
 /**
  * Everything the design's stored figures are derived from, in one place.
@@ -40,6 +41,15 @@ import { recomputeDealMoney } from "./deal-money";
  * an inverter still sent deals to its lender with the slot empty.
  */
 export async function recomputeDesignFigures(companyId: string, leadId: string) {
+  /**
+   * THE CHOKEPOINT, the other half. The size drives the price, so a signed
+   * deal's figures are as locked as its money — and this function is what the
+   * layout designer, the equipment picker and the live re-price all end in.
+   * Returns null, the shape callers already handle for "nothing to recompute".
+   */
+  const open = await economicWritesAllowed(companyId, leadId);
+  if (open.blocked) return null;
+
   const [lead, design] = await Promise.all([
     prisma.lead.findFirst({
       where: { companyId, id: leadId },
@@ -51,6 +61,9 @@ export async function recomputeDesignFigures(companyId: string, leadId: string) 
       where: { leadId },
       select: {
         layoutBlocks: true,
+        // As they stand, so a write under an unlock can be told old → new.
+        moduleQty: true,
+        systemSizeKwDc: true,
         moduleId: true,
         inverterId: true,
         annualUsageKwh: true,
@@ -217,6 +230,14 @@ export async function recomputeDesignFigures(companyId: string, leadId: string) 
         : {}),
     },
   });
+
+  if (open.unlock) {
+    await auditDerivedWrite(companyId, leadId, open.unlock, "the system design's figures", [
+      { field: "moduleQty", before: design.moduleQty, after: panelCount(blocks) },
+      { field: "systemSizeKwDc", before: design.systemSizeKwDc, after: totals.systemSizeKwDc },
+      { field: "batteryQty", before: design.batteryQty, after: sizedBattery?.qty ?? design.batteryQty },
+    ]);
+  }
 
   // The size just moved, so the adders that are TRIGGERED by size have to be
   // re-decided before they are re-priced: a small-system charge comes off the

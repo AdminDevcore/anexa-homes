@@ -1,0 +1,83 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`golden: the lender requested amount > pins every golden document on every basis 1`] = `
+{
+  "cappedPartner": {
+    "after_credits": {
+      "requestedAmount": "207126.00",
+      "termMonths": 360,
+    },
+    "contract_value": {
+      "requestedAmount": "295894.29",
+      "termMonths": 360,
+    },
+    "customer_obligation": {
+      "requestedAmount": "295894.29",
+      "termMonths": 360,
+    },
+  },
+  "storageOnly": {
+    "after_credits": {
+      "refused": {
+        "error": "This deal is missing information the lender requires.",
+        "kind": "deal",
+        "ok": false,
+        "problems": [
+          "The proposal quotes no annual production. Draw the array and generate it again.",
+          "This proposal shows no saving on the electricity bill, and the lender will not accept an application without one. Check the usage, the rate and the array before sending it.",
+        ],
+      },
+    },
+    "contract_value": {
+      "refused": {
+        "error": "This deal is missing information the lender requires.",
+        "kind": "deal",
+        "ok": false,
+        "problems": [
+          "The proposal quotes no annual production. Draw the array and generate it again.",
+          "This proposal shows no saving on the electricity bill, and the lender will not accept an application without one. Check the usage, the rate and the array before sending it.",
+        ],
+      },
+    },
+    "customer_obligation": {
+      "refused": {
+        "error": "This deal is missing information the lender requires.",
+        "kind": "deal",
+        "ok": false,
+        "problems": [
+          "The proposal quotes no annual production. Draw the array and generate it again.",
+          "This proposal shows no saving on the electricity bill, and the lender will not accept an application without one. Check the usage, the rate and the array before sending it.",
+        ],
+      },
+    },
+  },
+  "workedExample": {
+    "after_credits": {
+      "requestedAmount": "45453.33",
+      "termMonths": 300,
+    },
+    "contract_value": {
+      "requestedAmount": "64933.33",
+      "termMonths": 300,
+    },
+    "customer_obligation": {
+      "requestedAmount": "64933.33",
+      "termMonths": 300,
+    },
+  },
+  "workedExampleSignToday250": {
+    "after_credits": {
+      "requestedAmount": "45453.33",
+      "termMonths": 300,
+    },
+    "contract_value": {
+      "requestedAmount": "64933.33",
+      "termMonths": 300,
+    },
+    "customer_obligation": {
+      "requestedAmount": "64933.33",
+      "termMonths": 300,
+    },
+  },
+}
+`;

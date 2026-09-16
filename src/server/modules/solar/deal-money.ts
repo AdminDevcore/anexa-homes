@@ -4,6 +4,7 @@ import { financeRowForProduct, type FinanceInput } from "@/lib/solar-finance-row
 import { toLenderProductTerms, LENDER_TERMS_SELECT } from "./lender-terms";
 import { resolveAdderTotal } from "./adders";
 import { getSolarSettings } from "./settings";
+import { economicWritesAllowed, auditDerivedWrite } from "./signed-lock";
 
 /**
  * THE ONE DERIVATION OF WHAT A SOLAR DEAL COSTS.
@@ -206,7 +207,16 @@ const DERIVED_KEYS = [
 export async function recomputeDealMoney(
   companyId: string,
   leadId: string
-): Promise<{ changed: boolean }> {
+): Promise<{ changed: boolean; blocked?: boolean }> {
+  /**
+   * THE CHOKEPOINT. A signed contract's money is a record, and a recompute is
+   * the one way it used to move without anybody deciding to move it: the
+   * layout designer, the live re-price and anything else that changed the
+   * design ended here, carrying whatever authority they happened to have.
+   */
+  const open = await economicWritesAllowed(companyId, leadId);
+  if (open.blocked) return { changed: false, blocked: true };
+
   const current = await prisma.solarFinance.findUnique({
     where: { leadId },
     select: {
@@ -259,5 +269,19 @@ export async function recomputeDealMoney(
   if (Object.keys(data).length === 0) return { changed: false };
 
   await prisma.solarFinance.update({ where: { leadId }, data });
+  // On a reopened contract, every figure that moved, with both values.
+  if (open.unlock) {
+    await auditDerivedWrite(
+      companyId,
+      leadId,
+      open.unlock,
+      "the deal's money",
+      Object.keys(data).map((field) => ({
+        field,
+        before: (current as Record<string, unknown>)[field],
+        after: data[field],
+      }))
+    );
+  }
   return { changed: true };
 }
