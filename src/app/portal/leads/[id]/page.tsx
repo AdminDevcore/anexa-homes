@@ -628,17 +628,17 @@ export default async function LeadDetailPage({
       ? priceStoredPurchase({
           product: solarFinance.product,
           systemSizeKwDc: solarDesign.systemSizeKwDc,
-          stickerPpwCents: solarFinance.grossPpwCents,
+          stickerPpwCents: solarFinance.baseFinalPpwCents,
           dealerFeePct: solarFinance.dealerFeePct,
-          adderTotalCents: solarFinance.adderTotalCents,
-          onTopAdderTotalCents: solarFinance.onTopAdderTotalCents,
+          adderTotalCents: solarFinance.addersInsideRuleCents,
+          onTopAdderTotalCents: solarFinance.addersOutsideRuleCents,
           // The storage rides on top of the rate, so it is on this ladder too.
           // Left out, this card would quote a deal $40,000 under the proposal
           // the household is holding.
           batteryPriceCents: batteryChargeCents({
             systemType: solarDesign.systemType,
             batteryQty: solarDesign.batteryQty,
-            dealPerBatteryCents: solarFinance.stickerPricePerBatteryCents,
+            dealPerBatteryCents: solarFinance.baseFinalPerBatteryCents,
             cataloguePerBatteryCents: solarDesign.battery?.priceCents ?? null,
           }),
           maxFinalPpwCents: designLenderRow?.maxFinalPpwCents ?? null,
@@ -728,9 +728,9 @@ export default async function LeadDetailPage({
         batteryQty: solarDesign.batteryQty,
         product: solarFinance?.product ?? null,
         contractPriceCents:
-          workingPrice?.breakdown.contractPriceCents ?? solarFinance?.contractPriceCents ?? null,
+          workingPrice?.breakdown.contractPriceCents ?? solarFinance?.finalPriceCents ?? null,
         netAfterCreditsCents: workingLadder?.netCostCents ?? null,
-        monthlyPaymentCents: solarFinance?.monthlyPaymentCents ?? null,
+        monthlyPaymentCents: solarFinance?.leaseMonthlyCents ?? null,
         rateMillsPerKwh: solarFinance?.rateMillsPerKwh ?? null,
       }
     : null;
@@ -1233,7 +1233,7 @@ export default async function LeadDetailPage({
           // the working one by construction — see `solarMoney.ladder`.
           contractPriceCents: solarMoney?.ladder?.final.totalCents ?? null,
           netAfterCreditsCents: workingLadder?.netCostCents ?? null,
-          monthlyPaymentCents: solarFinance?.monthlyPaymentCents ?? null,
+          monthlyPaymentCents: solarFinance?.leaseMonthlyCents ?? null,
           rateMillsPerKwh: solarFinance?.rateMillsPerKwh ?? null,
         });
         return working.kind !== "none"
@@ -1279,8 +1279,8 @@ export default async function LeadDetailPage({
           ? (creditApp.stipulations as unknown[]).filter((s): s is string => typeof s === "string")
           : [],
         downPaymentCents: solarFinance?.downPaymentCents ?? null,
-        loanMonthlyPaymentCents: solarFinance?.loanMonthlyPaymentCents ?? null,
-        monthlyPaymentCents: solarFinance?.monthlyPaymentCents ?? null,
+        loanMonthlyPaymentCents: solarFinance?.lenderMonthlyPaymentCents ?? null,
+        monthlyPaymentCents: solarFinance?.leaseMonthlyCents ?? null,
         escalatorPct: solarFinance?.escalatorPct ?? null,
         rateMillsPerKwh: solarFinance?.rateMillsPerKwh ?? null,
       }
@@ -2028,10 +2028,10 @@ export default async function LeadDetailPage({
                     // either figure alone.
                     contractPriceCents={
                       workingPrice?.breakdown.contractPriceCents ??
-                      solarFinance?.contractPriceCents ??
+                      solarFinance?.finalPriceCents ??
                       null
                     }
-                    monthlyPaymentCents={solarFinance?.monthlyPaymentCents ?? null}
+                    monthlyPaymentCents={solarFinance?.leaseMonthlyCents ?? null}
                     rateMillsPerKwh={solarFinance?.rateMillsPerKwh ?? null}
                     canBuild={can(user, "create", "Proposal") || can(user, "update", "Proposal")}
                     canEdit={can(user, "create", "Proposal")}

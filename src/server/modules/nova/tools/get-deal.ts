@@ -68,7 +68,7 @@ export const getDeal = defineTool({
       }),
       prisma.solarFinance.findUnique({
         where: { leadId },
-        select: { product: true, monthlyPaymentCents: true, rateMillsPerKwh: true },
+        select: { product: true, leaseMonthlyCents: true, rateMillsPerKwh: true },
       }),
       // The deal page's own question: the approved version, else the newest.
       prisma.solarProposal.findFirst({
@@ -105,7 +105,7 @@ export const getDeal = defineTool({
           // contract price, and Nova says so.
           contractPriceCents: null,
           netAfterCreditsCents: null,
-          monthlyPaymentCents: finance?.monthlyPaymentCents ?? null,
+          monthlyPaymentCents: finance?.leaseMonthlyCents ?? null,
           rateMillsPerKwh: finance?.rateMillsPerKwh ?? null,
         }
       : null;

@@ -381,9 +381,9 @@ export async function applyAutoAdders(
  */
 export type AdderSplit = {
   /** Inside the partner's price: grosses up by the fee, eats into a ceiling. */
-  adderTotalCents: number;
+  addersInsideRuleCents: number;
   /** On top of the partner's $/W (dealer fee still applied). A roof on a flat-rate partner. */
-  onTopAdderTotalCents: number;
+  addersOutsideRuleCents: number;
 };
 
 export async function resolveAdderTotal(
@@ -395,7 +395,7 @@ export async function resolveAdderTotal(
     prisma.solarDesign.findUnique({ where: { leadId }, select: { systemSizeKwDc: true } }),
     prisma.solarFinance.findUnique({
       where: { leadId },
-      select: { adderTotalCents: true, onTopAdderTotalCents: true },
+      select: { addersInsideRuleCents: true, addersOutsideRuleCents: true },
     }),
   ]);
   // The legacy branch keeps BOTH stored figures, not just the one: a deal with
@@ -403,14 +403,14 @@ export async function resolveAdderTotal(
   // them from an empty table would move the customer's price.
   if (lines.length === 0) {
     return {
-      adderTotalCents: finance?.adderTotalCents ?? 0,
-      onTopAdderTotalCents: finance?.onTopAdderTotalCents ?? 0,
+      addersInsideRuleCents: finance?.addersInsideRuleCents ?? 0,
+      addersOutsideRuleCents: finance?.addersOutsideRuleCents ?? 0,
     };
   }
   const totals = adderTotals(lines, Math.round((design?.systemSizeKwDc ?? 0) * 1000));
   return {
-    adderTotalCents: totals.financedInCents,
-    onTopAdderTotalCents: totals.onTopCents,
+    addersInsideRuleCents: totals.financedInCents,
+    addersOutsideRuleCents: totals.onTopCents,
   };
 }
 
@@ -432,15 +432,15 @@ export async function recomputeAdderTotal(
     }),
     prisma.solarFinance.findUnique({
       where: { leadId },
-      select: { id: true, adderTotalCents: true, onTopAdderTotalCents: true },
+      select: { id: true, addersInsideRuleCents: true, addersOutsideRuleCents: true },
     }),
   ]);
 
   const watts = Math.round((design?.systemSizeKwDc ?? 0) * 1000);
   const { financedInCents, onTopCents } = adderTotals(lines, watts);
   const next: AdderSplit = {
-    adderTotalCents: financedInCents,
-    onTopAdderTotalCents: onTopCents,
+    addersInsideRuleCents: financedInCents,
+    addersOutsideRuleCents: onTopCents,
   };
 
   /**
@@ -471,16 +471,16 @@ export async function recomputeAdderTotal(
 
   // The legacy case: a typed total, nothing itemised, and nobody has touched
   // the adders. Leave it exactly as it is.
-  if (!opts.force && lines.length === 0 && finance.adderTotalCents > 0) {
+  if (!opts.force && lines.length === 0 && finance.addersInsideRuleCents > 0) {
     return {
-      adderTotalCents: finance.adderTotalCents,
-      onTopAdderTotalCents: finance.onTopAdderTotalCents,
+      addersInsideRuleCents: finance.addersInsideRuleCents,
+      addersOutsideRuleCents: finance.addersOutsideRuleCents,
     };
   }
 
   if (
-    finance.adderTotalCents !== next.adderTotalCents ||
-    finance.onTopAdderTotalCents !== next.onTopAdderTotalCents
+    finance.addersInsideRuleCents !== next.addersInsideRuleCents ||
+    finance.addersOutsideRuleCents !== next.addersOutsideRuleCents
   ) {
     await prisma.solarFinance.update({ where: { leadId }, data: next });
   }

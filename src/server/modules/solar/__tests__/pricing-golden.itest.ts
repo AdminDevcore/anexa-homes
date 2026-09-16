@@ -61,12 +61,12 @@ let partnerLenderId: string;
 const deals = {} as Record<Key, { leadId: string; projectId: string }>;
 
 const MONEY_SELECT = {
-  grossPpwCents: true,
-  stickerPricePerBatteryCents: true,
+  baseFinalPpwCents: true,
+  baseFinalPerBatteryCents: true,
   dealerFeePct: true,
-  adderTotalCents: true,
-  onTopAdderTotalCents: true,
-  contractPriceCents: true,
+  addersInsideRuleCents: true,
+  addersOutsideRuleCents: true,
+  finalPriceCents: true,
   itcEstimateCents: true,
 } as const;
 
@@ -255,7 +255,7 @@ beforeAll(async () => {
       });
     }
     await raw.solarFinance.create({
-      data: { companyId, leadId: lead.id, vertical: "solar", contractPriceCents: 0, ...finance } as never,
+      data: { companyId, leadId: lead.id, vertical: "solar", finalPriceCents: 0, ...finance } as never,
     });
     deals[key] = { leadId: lead.id, projectId: project.id };
   }
@@ -278,7 +278,7 @@ beforeAll(async () => {
     {
       product: "loan",
       lenderProductId: workedProgramme,
-      grossPpwCents: 400,
+      baseFinalPpwCents: 400,
       dealerFeePct: we.feePct,
       aprPct: we.aprPct,
       loanTermMonths: we.termMonths,
@@ -307,7 +307,7 @@ beforeAll(async () => {
     {
       product: "loan",
       lenderProductId: partnerProgramme,
-      grossPpwCents: 551, // grossPpwFromNet(193, 65)
+      baseFinalPpwCents: 551, // grossPpwFromNet(193, 65)
       dealerFeePct: cp.feePct,
       aprPct: cp.aprPct,
       loanTermMonths: cp.termMonths,
@@ -328,7 +328,7 @@ beforeAll(async () => {
       offsetPct: Math.round((production(cash.kw) / cash.usageKwh) * 100),
       lenderId: null,
     },
-    { product: "cash", grossPpwCents: cash.basePpwCents, dealerFeePct: 0, signTodayCreditCents: cash.signTodayTypedCents },
+    { product: "cash", baseFinalPpwCents: cash.basePpwCents, dealerFeePct: 0, signTodayCreditCents: cash.signTodayTypedCents },
     [{ label: "Critter guard", basis: "flat", flatCents: 150_000 }],
     cash.usageKwh,
     cash.billCents
@@ -349,8 +349,8 @@ beforeAll(async () => {
     {
       product: "loan",
       lenderProductId: storageProgramme,
-      grossPpwCents: 0,
-      stickerPricePerBatteryCents: 2_000_000, // grossPpwFromNet(1,000,000, 50)
+      baseFinalPpwCents: 0,
+      baseFinalPerBatteryCents: 2_000_000, // grossPpwFromNet(1,000,000, 50)
       dealerFeePct: st.feePct,
       aprPct: st.aprPct,
       loanTermMonths: st.termMonths,
@@ -377,14 +377,14 @@ describe.each(KEYS)("golden server sites: %s", (key) => {
     const columns = await inSolar(() =>
       dealMoneyColumns(companyId, leadId, {
         product: f.product,
-        grossPpwCents: f.grossPpwCents,
+        grossPpwCents: f.baseFinalPpwCents,
         dealerFeePct: f.dealerFeePct,
-        adderTotalCents: f.adderTotalCents,
-        onTopAdderTotalCents: f.onTopAdderTotalCents,
+        adderTotalCents: f.addersInsideRuleCents,
+        onTopAdderTotalCents: f.addersOutsideRuleCents,
         aprPct: f.aprPct,
         loanTermMonths: f.loanTermMonths,
         lenderProductId: f.lenderProductId,
-        stickerPricePerBatteryCents: f.stickerPricePerBatteryCents,
+        stickerPricePerBatteryCents: f.baseFinalPerBatteryCents,
       })
     );
     expect({ recompute, rowAfterRecompute: row, columns: pickMoney(columns) }).toMatchSnapshot();

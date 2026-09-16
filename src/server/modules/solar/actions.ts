@@ -766,9 +766,9 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
     ? (
         await prisma.solarFinance.findUnique({
           where: { leadId: f.leadId },
-          select: { contractPriceCents: true },
+          select: { finalPriceCents: true },
         })
-      )?.contractPriceCents ?? null
+      )?.finalPriceCents ?? null
     : null;
 
   /**
@@ -798,12 +798,12 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
     },
     update: data,
     select: {
-      product: true, grossPpwCents: true, stickerPricePerBatteryCents: true,
-      dealerFeePct: true, adderTotalCents: true,
-      onTopAdderTotalCents: true,
-      contractPriceCents: true, itcEstimateCents: true, rateMillsPerKwh: true,
-      monthlyPaymentCents: true, escalatorPct: true, termYears: true, aprPct: true,
-      loanTermMonths: true, downPaymentCents: true, loanMonthlyPaymentCents: true,
+      product: true, baseFinalPpwCents: true, baseFinalPerBatteryCents: true,
+      dealerFeePct: true, addersInsideRuleCents: true,
+      addersOutsideRuleCents: true,
+      finalPriceCents: true, itcEstimateCents: true, rateMillsPerKwh: true,
+      leaseMonthlyCents: true, escalatorPct: true, termYears: true, aprPct: true,
+      loanTermMonths: true, downPaymentCents: true, lenderMonthlyPaymentCents: true,
       lenderProductId: true,
     },
   });
@@ -813,7 +813,7 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
     await auditSignedEdit(user, lead.id, {
       what: "the contract price",
       before: priceBefore,
-      after: saved.contractPriceCents,
+      after: saved.finalPriceCents,
       reason: lock_saveSolarFinanceAction.override.reason,
     });
   }

@@ -69,14 +69,14 @@ async function expectedContract(): Promise<number> {
   return priceStoredPurchase({
     product: f.product as "cash" | "loan",
     systemSizeKwDc: d.systemSizeKwDc,
-    stickerPpwCents: f.grossPpwCents,
+    stickerPpwCents: f.baseFinalPpwCents,
     dealerFeePct: f.dealerFeePct,
-    adderTotalCents: f.adderTotalCents,
-    onTopAdderTotalCents: f.onTopAdderTotalCents,
+    adderTotalCents: f.addersInsideRuleCents,
+    onTopAdderTotalCents: f.addersOutsideRuleCents,
     batteryPriceCents: batteryChargeCents({
       systemType: d.systemType,
       batteryQty: d.batteryQty,
-      dealPerBatteryCents: f.stickerPricePerBatteryCents,
+      dealPerBatteryCents: f.baseFinalPerBatteryCents,
       cataloguePerBatteryCents: d.battery?.priceCents ?? null,
     }),
     maxFinalPpwCents: d.lender?.maxFinalPpwCents ?? null,
@@ -86,7 +86,7 @@ async function expectedContract(): Promise<number> {
 
 /** The assertion this whole file exists for. */
 async function expectInStep() {
-  const stored = (await finance()).contractPriceCents;
+  const stored = (await finance()).finalPriceCents;
   expect(stored).toBe(await expectedContract());
   return stored;
 }
@@ -264,7 +264,7 @@ describe("the contract follows every input that moves it", () => {
     const f = await finance();
     const d = await design();
     expect(d.batteryQty).toBe(2);
-    const arrayOnly = Math.round(d.systemSizeKwDc * 1000) * f.grossPpwCents;
+    const arrayOnly = Math.round(d.systemSizeKwDc * 1000) * f.baseFinalPpwCents;
     const fee = f.dealerFeePct > 0 && f.dealerFeePct < 100 ? f.dealerFeePct / 100 : 0;
     expect(after - arrayOnly).toBe(Math.round((2 * 1_400_000) / (1 - fee)));
     expect(before).toBeGreaterThan(0);
@@ -308,21 +308,21 @@ describe("the contract follows every input that moves it", () => {
     const d = await design();
     const watts = Math.round(d.systemSizeKwDc * 1000);
     // Stored: the uncapped sticker the rep typed.
-    expect(f.grossPpwCents).toBe(350);
+    expect(f.baseFinalPpwCents).toBe(350);
     // Read: the partner's own figure, applied by priceStoredPurchase.
     const onScreen = priceStoredPurchase({
       product: "loan",
       systemSizeKwDc: d.systemSizeKwDc,
-      stickerPpwCents: f.grossPpwCents,
+      stickerPpwCents: f.baseFinalPpwCents,
       dealerFeePct: f.dealerFeePct,
-      adderTotalCents: f.adderTotalCents,
-      onTopAdderTotalCents: f.onTopAdderTotalCents,
+      adderTotalCents: f.addersInsideRuleCents,
+      onTopAdderTotalCents: f.addersOutsideRuleCents,
       batteryPriceCents: 0,
       maxFinalPpwCents: 500,
       finalPpwMode: "flat",
     }).breakdown.contractPriceCents;
     expect(onScreen).toBe(watts * 500);
-    expect(onScreen).not.toBe(f.contractPriceCents);
+    expect(onScreen).not.toBe(f.finalPriceCents);
   });
 });
 
@@ -345,13 +345,13 @@ describe("a recompute never rewrites what a person typed", () => {
     );
 
     const after = await finance();
-    expect(after.grossPpwCents).toBe(typed.grossPpwCents);
+    expect(after.baseFinalPpwCents).toBe(typed.baseFinalPpwCents);
     expect(after.dealerFeePct).toBe(typed.dealerFeePct);
     expect(after.aprPct).toBe(typed.aprPct);
     expect(after.loanTermMonths).toBe(typed.loanTermMonths);
     expect(after.downPaymentCents).toBe(typed.downPaymentCents);
     // …and the derived figure did move, which is the point.
-    expect(after.contractPriceCents).not.toBe(typed.contractPriceCents);
+    expect(after.finalPriceCents).not.toBe(typed.finalPriceCents);
     await expectInStep();
   });
 
@@ -379,15 +379,15 @@ describe("the figure a lender is asked to underwrite", () => {
         downPaymentCents: 100_000,
       } as Parameters<typeof saveSolarFinanceAction>[0])
     );
-    const before = (await finance()).contractPriceCents;
+    const before = (await finance()).finalPriceCents;
 
     await growTheRoof(11);
 
     const f = await finance();
-    expect(f.contractPriceCents).not.toBe(before);
-    expect(f.contractPriceCents).toBe(await expectedContract());
+    expect(f.finalPriceCents).not.toBe(before);
+    expect(f.finalPriceCents).toBe(await expectedContract());
     // The amount that would cross the wire, spelled out.
-    expect(f.contractPriceCents - (f.downPaymentCents ?? 0)).toBe(
+    expect(f.finalPriceCents - (f.downPaymentCents ?? 0)).toBe(
       (await expectedContract()) - 100_000
     );
   });

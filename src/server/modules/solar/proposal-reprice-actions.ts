@@ -296,18 +296,18 @@ export async function repriceProposalAction(
       // is even sellable; that belongs in the builder, with the validation
       // that goes with it.
       product: lenderProduct?.product ?? finance.product,
-      grossPpwCents: d.grossPpwCents ?? finance.grossPpwCents,
+      grossPpwCents: d.grossPpwCents ?? finance.baseFinalPpwCents,
       dealerFeePct: finance.dealerFeePct,
       rateMillsPerKwh: finance.rateMillsPerKwh,
-      monthlyPaymentCents: finance.monthlyPaymentCents,
+      monthlyPaymentCents: finance.leaseMonthlyCents,
       escalatorPct: finance.escalatorPct,
       termYears: finance.termYears,
       aprPct: finance.aprPct,
       loanTermMonths: finance.loanTermMonths,
       downPaymentCents: finance.downPaymentCents,
-      loanMonthlyPaymentCents: finance.loanMonthlyPaymentCents,
+      loanMonthlyPaymentCents: finance.lenderMonthlyPaymentCents,
       lenderProductId,
-      stickerPricePerBatteryCents: finance.stickerPricePerBatteryCents,
+      stickerPricePerBatteryCents: finance.baseFinalPerBatteryCents,
     });
 
     // ── The guard rails ───────────────────────────────────────────────────
@@ -326,7 +326,7 @@ export async function repriceProposalAction(
       // readiness check asks, asked here before the write for the reason above.
       if (
         underBaseFloor(
-          row.stickerPricePerBatteryCents,
+          row.baseFinalPerBatteryCents,
           row.dealerFeePct,
           design.lender?.minBasePricePerBatteryCents
         )
@@ -338,9 +338,9 @@ export async function repriceProposalAction(
       // $/W band that used to be asked here as well went on 2026-09-02 — what a
       // deal may price at is a property of the loan product, not of the app.
       const floor = design.lender?.minBasePpwCents ?? null;
-      if (underBaseFloor(row.grossPpwCents, row.dealerFeePct, floor)) {
+      if (underBaseFloor(row.baseFinalPpwCents, row.dealerFeePct, floor)) {
         return fail(
-          `That leaves $${(basePpwFromSticker(row.grossPpwCents, row.dealerFeePct) / 100).toFixed(2)}/W before the lender's cut, under this lender's $${((floor ?? 0) / 100).toFixed(2)}/W minimum.`
+          `That leaves $${(basePpwFromSticker(row.baseFinalPpwCents, row.dealerFeePct) / 100).toFixed(2)}/W before the lender's cut, under this lender's $${((floor ?? 0) / 100).toFixed(2)}/W minimum.`
         );
       }
     }

@@ -398,13 +398,12 @@ model Company {
   dealFeedPosts            DealFeedPost[]
   projectAssignees         ProjectAssignee[]
 
-  solarDealComps     SolarDealComp[]
-  chargebacks        Chargeback[]
-  payrollAdjustments PayrollAdjustment[]
-
-  @@map("companies")
+  solarDealComps       SolarDealComp[]
+  chargebacks          Chargeback[]
+  payrollAdjustments   PayrollAdjustment[]
   solarContractUnlocks SolarContractUnlock[]
 
+  @@map("companies")
 }
 
 model CompanySettings {
@@ -605,28 +604,28 @@ model User {
   createdAt                   DateTime             @default(now())
   updatedAt                   DateTime             @updatedAt
 
-  leadsAssigned   Lead[]               @relation("LeadAssignedRep")
-  leadsSet        Lead[]               @relation("LeadSetter")
-  leadsCreated    Lead[]               @relation("LeadCreatedBy")
-  customerLeads   Lead[]               @relation("LeadCustomerUser")
-  projectsManaged Project[]            @relation("ProjectManager")
-  tasksAssigned   Task[]               @relation("TaskAssignee")
-  tasksCreated    Task[]               @relation("TaskCreatedBy")
-  notes           Note[]
-  filesUploaded   FileAsset[]
-  dailyReports    DailyReport[]
-  commissions     Commission[]         @relation("CommissionUser")
-  contractorPays  ContractorPay[]      @relation("ContractorPayContractor")
-  overridesEarned CommissionOverride[] @relation("OverrideBeneficiary")
-  overridesOnMe   CommissionOverride[] @relation("OverrideSource")
-  payrollItems    PayrollItem[]
-  activityLogs    ActivityLog[]
-  stageMoves      LeadStageEvent[]     @relation("LeadStageEventMovedBy")
+  leadsAssigned    Lead[]                      @relation("LeadAssignedRep")
+  leadsSet         Lead[]                      @relation("LeadSetter")
+  leadsCreated     Lead[]                      @relation("LeadCreatedBy")
+  customerLeads    Lead[]                      @relation("LeadCustomerUser")
+  projectsManaged  Project[]                   @relation("ProjectManager")
+  tasksAssigned    Task[]                      @relation("TaskAssignee")
+  tasksCreated     Task[]                      @relation("TaskCreatedBy")
+  notes            Note[]
+  filesUploaded    FileAsset[]
+  dailyReports     DailyReport[]
+  commissions      Commission[]                @relation("CommissionUser")
+  contractorPays   ContractorPay[]             @relation("ContractorPayContractor")
+  overridesEarned  CommissionOverride[]        @relation("OverrideBeneficiary")
+  overridesOnMe    CommissionOverride[]        @relation("OverrideSource")
+  payrollItems     PayrollItem[]
+  activityLogs     ActivityLog[]
+  stageMoves       LeadStageEvent[]            @relation("LeadStageEventMovedBy")
   appointmentMoves LeadAppointmentReschedule[] @relation("LeadAppointmentRescheduleMovedBy")
-  crewMemberships CrewMember[]
-  invitationsSent Invitation[]         @relation("InviteInviter")
-  passwordResets  PasswordResetToken[]
-  notifications   Notification[]
+  crewMemberships  CrewMember[]
+  invitationsSent  Invitation[]                @relation("InviteInviter")
+  passwordResets   PasswordResetToken[]
+  notifications    Notification[]
 
   conversationsCreated    Conversation[]       @relation("ConversationCreator")
   conversationMembers     ConversationMember[] @relation("ConvMemberUser")
@@ -887,22 +886,22 @@ enum StageMilestone {
 }
 
 model PipelineStage {
-  id                    String        @id @default(uuid())
+  id                    String          @id @default(uuid())
   pipelineId            String
-  pipeline              Pipeline      @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  pipeline              Pipeline        @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
   name                  String
   key                   String
-  position              Int           @default(0)
-  color                 String        @default("#A1A1AA")
-  isWon                 Boolean       @default(false)
-  isLost                Boolean       @default(false)
+  position              Int             @default(0)
+  color                 String          @default("#A1A1AA")
+  isWon                 Boolean         @default(false)
+  isLost                Boolean         @default(false)
   /// Where the SALE is booked: deals at or past this stage count as won on the
   /// team leaderboard. Separate from `isWon`, which marks the end of the job
   /// (Paid / System Activated) and is read by the backlog and cycle-time
   /// reports — a company sells in month one and gets paid in month four, and
   /// one flag cannot honestly mark both. Unset on every stage falls back to the
   /// stage NAMED for the signature, then to `isWon`. See lib/sold-stage.ts.
-  countsAsSold          Boolean       @default(false)
+  countsAsSold          Boolean         @default(false)
   /// The business milestone this stage IS, independent of its name and key. A
   /// stage can be renamed, and a hand-made one gets an auto-suffixed key, so
   /// neither is a safe thing to enforce a rule against. At most one stage per
@@ -910,29 +909,29 @@ model PipelineStage {
   milestone             StageMilestone?
   /// Whether we control completion (hard SLA) or are waiting on someone else
   /// (follow-up cadence). See StageType.
-  stageType             StageType     @default(internally_owned)
+  stageType             StageType       @default(internally_owned)
   /// The DEPARTMENT ROLE that owns this stage's work — a key from
   /// STAGE_OWNERS in src/lib/solar-pipeline.ts, never a named person, so work
   /// keeps routing correctly as staff change.
   ownerRole             String?
   /// externally_blocked only: chase every N days. 0 = no cadence.
-  followUpDays          Int           @default(0)
+  followUpDays          Int             @default(0)
   /// True for "action required" sub-states (redlines, corrections) — the ball is
   /// in someone's court and the deal cannot advance until it is cleared.
-  isActionRequired      Boolean       @default(false)
+  isActionRequired      Boolean         @default(false)
   /// Who a deal landing here is waiting on by default. Copied onto the deal on
   /// entry; a coordinator can override per deal.
   defaultBlocker        BlockerParty?
   // SLA / stage-duration tracking. targetDays 0 = no tracking on this stage.
   // internally_owned only — an externally_blocked stage must never carry a
   // completion deadline.
-  targetDays            Int           @default(0)
-  escalationDays        Int           @default(0)
-  notificationRecipient String        @default("none") // none | assigned_user | team_manager | project_owner | department_manager | everyone
-  sendInApp             Boolean       @default(true)
-  sendEmail             Boolean       @default(false)
-  markOverdue           Boolean       @default(false)
-  createdAt             DateTime      @default(now())
+  targetDays            Int             @default(0)
+  escalationDays        Int             @default(0)
+  notificationRecipient String          @default("none") // none | assigned_user | team_manager | project_owner | department_manager | everyone
+  sendInApp             Boolean         @default(true)
+  sendEmail             Boolean         @default(false)
+  markOverdue           Boolean         @default(false)
+  createdAt             DateTime        @default(now())
 
   leads       Lead[]
   stageEvents LeadStageEvent[]
@@ -1133,7 +1132,7 @@ model Lead {
   activityLogs           ActivityLog[]
   stageEvents            LeadStageEvent[]
   appointmentReschedules LeadAppointmentReschedule[]
-  knocks                 Knock[]                 @relation("KnockLead")
+  knocks                 Knock[]                     @relation("KnockLead")
   scope                  ScopeOfWork?
   estimate               Estimate?
   proposals              Proposal[]
@@ -1147,6 +1146,7 @@ model Lead {
   solarDealAdders        SolarDealAdder[]
   feedPosts              DealFeedPost[]
   automationRuns         AutomationRun[]
+  solarContractUnlocks   SolarContractUnlock[]
 
   @@index([companyId, stageId])
   @@index([companyId, assignedRepId])
@@ -1154,8 +1154,6 @@ model Lead {
   @@index([companyId, status])
   @@index([companyId, vertical], map: "leads_companyId_industry_idx")
   @@map("leads")
-  solarContractUnlocks SolarContractUnlock[]
-
 }
 
 model Project {
@@ -3477,8 +3475,8 @@ model SolarSettings {
   // ── Validation bounds ───────────────────────────────────────────────────
   // A rep must not be able to generate a physically impossible proposal.
   // These are the guard rails; see src/lib/solar-validation.ts.
-  minOffsetPct Float @default(0)
-  maxOffsetPct Float @default(150)
+  minOffsetPct        Float   @default(0)
+  maxOffsetPct        Float   @default(150)
   /// Whether somebody has DECIDED the minimum offset. `minOffsetPct` defaults to 0,
   /// so a zero alone cannot tell "no minimum, deliberately" from "never set up".
   ///   configured + min > 0  -> enforced: generation is blocked below it
@@ -4632,29 +4630,29 @@ model SolarFinance {
 
   // ── Cash / Loan ─────────────────────────────────────────────────────────
   /// Sticker price per watt, cents. Includes the dealer fee on a LOAN.
-  grossPpwCents               Int   @default(0)
+  baseFinalPpwCents        Int   @default(0) @map("grossPpwCents")
   /// What ONE battery stickers at — the partner's fee already inside it,
-  /// exactly as `grossPpwCents` carries it above. Zero on every PV deal.
-  stickerPricePerBatteryCents Int   @default(0)
+  /// exactly as `baseFinalPpwCents` carries it above. Zero on every PV deal.
+  baseFinalPerBatteryCents Int   @default(0) @map("stickerPricePerBatteryCents")
   /// Lender fee as a % of gross. Zero for cash by definition.
-  dealerFeePct                Float @default(0)
+  dealerFeePct             Float @default(0)
   /// Sum of the selected adders that sit INSIDE the partner's price, cents.
-  /// See `onTopAdderTotalCents` — the two are disjoint and together they are
+  /// See `addersOutsideRuleCents` — the two are disjoint and together they are
   /// the whole catalogue price of the extra work on this deal.
-  adderTotalCents             Int   @default(0)
+  addersInsideRuleCents    Int   @default(0) @map("adderTotalCents")
   /// Sum of the adders financed ON TOP of a partner's fixed or maximum $/W,
   /// cents. Zero on every deal carrying none, which is nearly all of them.
   ///
   /// SEPARATE COLUMN rather than a flag summed at read time, for the same
-  /// reason `adderTotalCents` is cached at all: pricing, commissions and the
+  /// reason `addersInsideRuleCents` is cached at all: pricing, commissions and the
   /// customer's proposal all read it, and none of them should have to sum a
   /// table to find out what the customer signs. `SolarDealAdder.financedOnTop`
   /// is the truth both are recomputed from.
-  onTopAdderTotalCents        Int   @default(0)
+  addersOutsideRuleCents   Int   @default(0) @map("onTopAdderTotalCents")
   /// Final contract price, cents.
-  contractPriceCents          Int   @default(0)
+  finalPriceCents          Int   @default(0) @map("contractPriceCents")
   /// Estimated federal credit, cents. An ESTIMATE — see SolarSettings.
-  itcEstimateCents            Int   @default(0)
+  itcEstimateCents         Int   @default(0)
 
   /// Which federal credits this address and this equipment actually earn.
   ///
@@ -4683,28 +4681,28 @@ model SolarFinance {
   /// monthly payment, the deal's value and the rep's commission are all
   /// untouched by it — what moves is the net-cost-after-credits figure the
   /// proposal shows behind its tax-credit switch.
-  signTodayCreditCents Int     @default(0)
+  signTodayCreditCents Int @default(0)
 
   // ── Lease / PPA ─────────────────────────────────────────────────────────
   /// PPA only: price per kWh in tenths of a cent (e.g. 145 = $0.145/kWh).
-  rateMillsPerKwh     Int?
+  rateMillsPerKwh   Int?
   /// Lease only: fixed monthly payment, cents.
-  monthlyPaymentCents Int?
+  leaseMonthlyCents Int?   @map("monthlyPaymentCents")
   /// Annual payment/rate increase, %. Applies to lease and PPA.
-  escalatorPct        Float?
-  termYears           Int?
+  escalatorPct      Float?
+  termYears         Int?
 
   // ── Loan terms (from the approved credit application) ────────────────────
-  aprPct                  Float?
-  loanTermMonths          Int?
+  aprPct                    Float?
+  loanTermMonths            Int?
   /// Cash the customer puts down, reducing the financed amount. Cents.
-  downPaymentCents        Int?
+  downPaymentCents          Int?
   /// The lender's OWN monthly payment figure, cents. Deliberately STORED and
   /// never derived from amount + APR + term: promotional periods, fees and
   /// re-amortisation all mean a computed figure can contradict the real one,
   /// and the number a customer is quoted has to be the number the lender
-  /// issued. Distinct from `monthlyPaymentCents` above, which is LEASE-only.
-  loanMonthlyPaymentCents Int?
+  /// issued. Distinct from `leaseMonthlyCents` above, which is LEASE-only.
+  lenderMonthlyPaymentCents Int?   @map("loanMonthlyPaymentCents")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -4960,7 +4958,7 @@ enum SolarAdderBasis {
 
 /// One piece of extra work on a solar deal, and what it costs.
 ///
-/// NEW DATA. `SolarFinance.adderTotalCents` held a single number a rep typed
+/// NEW DATA. `SolarFinance.addersInsideRuleCents` held a single number a rep typed
 /// into a box called "Adders $", which cannot say what the money is FOR, cannot
 /// be checked against the catalogue, and goes stale the moment the array
 /// changes — a $0.05/W steep-roof charge is right for the 8 kW system it was
@@ -5246,21 +5244,21 @@ model SolarDealComp {
   /// Null on a row frozen before these columns existed, until
   /// `scripts/backfill-deal-comp-pricing.ts` sets them. Null means "read the
   /// live deal", which is what payroll did before.
-  systemWatts    Int?
+  systemWatts                  Int?
   /// The BASE price, cents: after the lender's cut, before adders and storage.
   /// What a redline is measured against. Payroll's `basePriceCents`.
-  basePriceCents Int?
-  batteryQty     Int?
-  pricedAt       DateTime?
+  basePriceCents               Int?
+  batteryQty                   Int?
+  pricedAt                     DateTime?
   /// "signature", "backfill" or "refreeze".
-  pricedFrom     String?
+  pricedFrom                   String?
   /// WHERE the frozen numbers came from: "signed_document" — the proposal the
   /// customer put their name to, which is the rule — or "live_deal", the
   /// fallback for a document that carries no priced figures (a version
   /// generated before the snapshot recorded them, or a lease or PPA).
-  pricedBasis    String?
+  pricedBasis                  String?
   /// The signed proposal the frozen price was checked against.
-  pricedProposalId String?
+  pricedProposalId             String?
   /// Whether the live price at freezing matched that signed document: the final
   /// price, and the watts and battery count where the document carries them.
   /// False is logged on the deal for review and does not block pay. Null when

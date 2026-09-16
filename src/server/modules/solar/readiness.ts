@@ -170,7 +170,7 @@ export async function readSolarReadiness(
       },
       finance: {
         systemType: design.systemType,
-        stickerPricePerBatteryCents: finance.stickerPricePerBatteryCents,
+        stickerPricePerBatteryCents: finance.baseFinalPerBatteryCents,
         batteryQty: design.batteryQty,
         minBasePricePerBatteryCents: design.lender?.minBasePricePerBatteryCents ?? null,
         // Whether the QUOTED programme funds a storage-only job. Undefined when
@@ -178,15 +178,15 @@ export async function readSolarReadiness(
         // an unpriced deal already has its own.
         financesStorageOnly: quotedProduct?.financesStorageOnly,
         product: finance.product,
-        grossPpwCents: finance.grossPpwCents,
+        grossPpwCents: finance.baseFinalPpwCents,
         dealerFeePct: finance.dealerFeePct,
-        contractPriceCents: finance.contractPriceCents,
+        contractPriceCents: finance.finalPriceCents,
         rateMillsPerKwh: finance.rateMillsPerKwh,
-        monthlyPaymentCents: finance.monthlyPaymentCents,
+        monthlyPaymentCents: finance.leaseMonthlyCents,
         escalatorPct: finance.escalatorPct,
         termYears: finance.termYears,
         downPaymentCents: finance.downPaymentCents,
-        loanMonthlyPaymentCents: finance.loanMonthlyPaymentCents,
+        loanMonthlyPaymentCents: finance.lenderMonthlyPaymentCents,
         aprPct: finance.aprPct,
         loanTermMonths: finance.loanTermMonths,
         minBasePpwCents: design.lender?.minBasePpwCents ?? null,

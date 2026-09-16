@@ -1316,3 +1316,39 @@ Deleting it would remove the percentage-basis path, which moves money and is not
 **The CI text guard is deferred to the end of Stage 2.** A `solar-battery-fee-retired.test.ts`-style "no file mentions this string" assertion would fail on correct code today: `contractPriceCents` is still a live `SolarFinance` column and a Nova `ReportedPrice` field. The guard goes in once the remaining slices have landed; until then the reader's own behaviour test holds the line.
 
 **Verified at slice close.** `tsc` 0 · unit 2495/2495 · lint clean on every touched file · integration back to its baseline of 7 (`retention` ×6, `visit-crew` ×1, both pre-existing on main). The rename opened 19 integration failures and closed all 19. One further failure, `stage-history`, proved to be a parallel-contention flake: it passes 10/10 twice in isolation and touches no pricing code.
+
+### 8.17 Two more corrections to §8.13's map, found before slice 2 edited anything
+
+§8.13 heads its Prisma table "code-only renames via `@map`, no column renames", then lists two rows that are not renames at all. Both are wrong, and both stay as they are in Stage 2.
+
+1. **`SolarSettings.creditIncentiveLabel` is NOT unused.** §8.13 says "unused | retired". It is read at `src/app/portal/leads/[id]/page.tsx:690` (`incentiveLabel: solarSettings.creditIncentiveLabel`) and it has a live text input bound to it in `src/components/portal/solar-settings-form.tsx` (`:68`, `:196`, `:495`). Retiring it would delete a setting the company edits by hand.
+2. **`SolarFinance.itcEstimateCents` is not free to drop.** §8.13 says "always null, legacy | dropped". It is a declared prop on `solar-panels.tsx:289` and pinned by three tests — and one of those, `solar-money.test.ts:298`, is a GUARD asserting the pricing source no longer mentions it. Dropping a column is also a destructive migration against production, which is neither a rename nor Stage 2's to do: "Stage 2 changes no numbers and no paperwork."
+
+Together with §8.15's `marginCents` correction this is the **third** row of §8.13/§8.8 that does not survive contact with the code. Treat that map as a proposal to be verified field by field, never as a worklist: check every "retired"/"dropped" claim against `git grep` before touching it.
+
+**Also incomplete:** §8.13's table does not list `SolarFinance.grossPpwCents` or `loanMonthlyPaymentCents` at all — their spellings come from §8.14's decisions (1) and (2). The Prisma slice renames seven `SolarFinance` fields, not the five the table shows.
+
+### 8.18 Stage 2, slice 2: the SolarFinance columns, renamed behind `@map` (2026-09-16)
+
+**Landed.** Seven `SolarFinance` fields take their §8.13/§8.14 spellings — `baseFinalPpwCents`, `baseFinalPerBatteryCents`, `addersInsideRuleCents`, `addersOutsideRuleCents`, `finalPriceCents`, `leaseMonthlyCents`, `lenderMonthlyPaymentCents`. Every one carries `@map("<old column>")`.
+
+**No column was renamed, and that is proven rather than asserted.** `prisma migrate diff` after the rename is byte-identical to the baseline captured before it, and mentions `solar_finance`, `RENAME COLUMN` and `DROP COLUMN` exactly **zero** times. No migration is produced; production is untouched. Capture the baseline FIRST — this repo has pre-existing drift, so "clean" is not the empty string.
+
+**`SolarFinanceView` and `AdderSplit` follow the row**, and are not scope creep: the first is field-for-field the row's shape, the second is handed straight to `solarFinance.update` as its `data`. Leaving them would have meant writing `grossPpwCents: row.baseFinalPpwCents` at every construction site — the two-vocabularies rot this rework exists to delete. The other named types (`PurchaseBreakdown`, `PurchaseInput`, `CompareRow`, `CompareBasis`, `FinanceRow`, `FinanceInput`, `SolarPriceSource`, `ReportedPrice`) keep their spellings: §8.13 specifies none of them, and renaming them would be inventing vocabulary nobody approved.
+
+**TWO DEFECTS THE COMPILER COULD NOT SEE.** Both shipped past `tsc` 0, unit 2495 green and lint clean. Only the integration suite found them.
+
+1. **`dealMoneyColumns` returned one vocabulary and three callers wrote it to another.** `DERIVED_KEYS` made it worse by serving three duties at once — the read key for the derivation's answer, the read key for the STORED row, and the write key into Prisma. After the rename it read `undefined` off the row, so every column compared as changed (quietly breaking that function's own "writes only when a figure moved" promise), and then wrote a column Prisma does not have. Fixed by translating once at that function's exit, which also repaired `proposal-reprice-actions.ts:348` — a write **no failing test covered**.
+2. **Every adder on every deal silently priced at zero.** `financeRowForProduct({ ...f, ...adders, batteryPriceCents })`: `AdderSplit` had just been renamed to the column vocabulary, and `FinanceInput`'s adder fields are **optional**. So the spread contributed two keys nothing reads and omitted the two that are read, leaving `?? 0`. This is the one derivation that prices every deal. **A spread is exempt from excess-property checking and a missing optional is not an error**, so no type system anywhere could have reported it; the only symptom is the contract price ceasing to follow the adders. Now mapped explicitly.
+
+**Two corrections to claims made while working this slice.** (a) The Prisma write blindness was first attributed to spreads skipping excess-property checks; at *that* site the real cause was the explicit `Record<string, unknown>` widening plus a `readonly string[]` key list. (b) The spread mechanism is nonetheless real — it is what caused the adder zeroing, a different site entirely. Both statements were made before the evidence justified them.
+
+**A known sibling, not a live bug.** `property/owner-records.ts:83` builds `const data: Record<string, unknown> = {}` and passes it to `prisma.knock.update`. Structurally identical to the `DERIVED_KEYS` trap. `Knock` is untouched by this rename, so nothing is broken today — but it is waiting for whichever rename reaches that model.
+
+**Method note, earned the hard way.** Four separate structural regexes over call syntax produced false negatives or false positives in this slice — lexical containment could not find spread-built payloads, `[^}]*` could not cross a nested `{ leadId }`, and a positional diff of a snapshot reported 44 phantom value changes that were only alphabetical reordering. What actually worked: the **runtime error's own file:line**, a **type sweep for `Record<string, unknown>`**, **`tsc` after renaming a type definition**, and **key-aware** comparison. Prefer a detector that cannot silently return empty.
+
+**Goldens: only names moved.** 13 snapshot blocks, **0 values moved, 0 keys missing**, verified key-by-key against the committed file rather than positionally. A strong check here, because the adder defect had zeroed these very figures mid-slice and they returned identical.
+
+**Pre-existing, NOT touched: `payroll_items_commissionId_idx`.** The index exists in the database and `schema.prisma` does not declare it, so `migrate diff` proposes dropping it — exactly the hazard `SolarFinance`'s `@@index([lenderProductId])` comment was written to warn about ("which is how an index quietly leaves production"). It is not a rename, so it is not this slice's to fix. **For the owner's attention.**
+
+**Verified at slice close.** `tsc` 0 · unit 2495/2495 · lint clean on all 27 changed files · integration back to its baseline of 7 (`retention` ×6, `visit-crew` ×1) · `migrate diff` unchanged.

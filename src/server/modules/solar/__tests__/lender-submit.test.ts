@@ -147,7 +147,7 @@ beforeEach(() => {
   designFindFirst.mockReset().mockResolvedValue(DESIGN)
   financeFindFirst
     .mockReset()
-    .mockResolvedValue({ contractPriceCents: 5000000, downPaymentCents: 125000, loanTermMonths: 300 })
+    .mockResolvedValue({ finalPriceCents: 5000000, downPaymentCents: 125000, loanTermMonths: 300 })
   // A generated document by default. Both doors onto a submission live ON a
   // proposal, so a deal without one is not a state a customer can reach — and
   // the lender's savings analysis has nowhere else to come from.
@@ -245,7 +245,7 @@ describe('submitDealToLender', () => {
   it('refuses a deal with no financed amount', async () => {
     proposalFindFirst.mockResolvedValue({ snapshot: NO_FROZEN_MONEY })
     financeFindFirst.mockResolvedValue({
-      contractPriceCents: 0,
+      finalPriceCents: 0,
       downPaymentCents: 0,
       loanTermMonths: 300,
     })
@@ -255,7 +255,7 @@ describe('submitDealToLender', () => {
   it('refuses a deal with no term', async () => {
     proposalFindFirst.mockResolvedValue({ snapshot: NO_FROZEN_MONEY })
     financeFindFirst.mockResolvedValue({
-      contractPriceCents: 5000000,
+      finalPriceCents: 5000000,
       downPaymentCents: 0,
       loanTermMonths: null,
     })
@@ -311,7 +311,7 @@ describe('submitDealToLender', () => {
    * THE AMOUNT COMES OFF THE DOCUMENT, NOT THE PRICING ROWS.
    *
    * On a partner carrying a programme contribution those are two different
-   * numbers: `SolarFinance.contractPriceCents` is the household's own price,
+   * numbers: `SolarFinance.finalPriceCents` is the household's own price,
    * while the sheet in front of them quotes its payment from the contract value
    * the partner's paper is written at. Reading the rows asked Amos for $70,180
    * against a proposal that says $150,180.
@@ -480,7 +480,7 @@ describe('readLenderSubmission', () => {
   it('reports not-ready when the deal has no price yet', async () => {
     proposalFindFirst.mockResolvedValue({ snapshot: NO_FROZEN_MONEY })
     financeFindFirst.mockResolvedValue({
-      contractPriceCents: 0,
+      finalPriceCents: 0,
       downPaymentCents: 0,
       loanTermMonths: 300,
     })

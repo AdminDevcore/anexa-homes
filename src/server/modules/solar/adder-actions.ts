@@ -119,7 +119,7 @@ async function adderGrandTotal(companyId: string, leadId: string): Promise<numbe
    * See `recomputeDealMoney`.
    */
   await recomputeDealMoney(companyId, leadId);
-  return split.adderTotalCents + split.onTopAdderTotalCents;
+  return split.addersInsideRuleCents + split.addersOutsideRuleCents;
 }
 
 /** Everything that has to be re-rendered once the money moves. */

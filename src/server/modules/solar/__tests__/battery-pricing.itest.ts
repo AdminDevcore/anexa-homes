@@ -201,9 +201,9 @@ beforeAll(async () => {
       leadId,
       product: "loan",
       lenderProductId: product.id,
-      grossPpwCents: 550,
+      baseFinalPpwCents: 550,
       dealerFeePct: 65,
-      contractPriceCents: ARRAY_CENTS,
+      finalPriceCents: ARRAY_CENTS,
       aprPct: 0,
       loanTermMonths: 360,
     },
@@ -222,7 +222,7 @@ beforeEach(async () => {
   });
   await db.solarFinance.update({
     where: { leadId },
-    data: { stickerPricePerBatteryCents: 0 },
+    data: { baseFinalPerBatteryCents: 0 },
   });
 });
 
@@ -287,9 +287,9 @@ describe("the battery reaches the contract", () => {
     await generate();
     const row = await db.solarFinance.findUniqueOrThrow({
       where: { leadId },
-      select: { contractPriceCents: true },
+      select: { finalPriceCents: true },
     });
-    expect(row.contractPriceCents).toBe(ARRAY_CENTS + sticker(POWERWALL_CENTS));
+    expect(row.finalPriceCents).toBe(ARRAY_CENTS + sticker(POWERWALL_CENTS));
   });
 
   it("charges for every battery on the roof", async () => {
@@ -352,7 +352,7 @@ describe("what a catalogue edit may and may not move", () => {
     // Settings says this week.
     await db.solarFinance.update({
       where: { leadId },
-      data: { stickerPricePerBatteryCents: 32_000_00 },
+      data: { baseFinalPerBatteryCents: 32_000_00 },
     });
     const res = await generate();
     if (!res.ok) throw new Error(res.error);
@@ -389,8 +389,8 @@ describe("a storage-only deal is not billed twice", () => {
     await db.solarFinance.update({
       where: { leadId },
       data: {
-        stickerPricePerBatteryCents: POWERWALL_CENTS,
-        grossPpwCents: 0,
+        baseFinalPerBatteryCents: POWERWALL_CENTS,
+        baseFinalPpwCents: 0,
         lenderProductId: storageProduct.id,
       },
     });
@@ -433,8 +433,8 @@ describe("the runtime a storage proposal freezes", () => {
     await db.solarFinance.update({
       where: { leadId },
       data: {
-        stickerPricePerBatteryCents: POWERWALL_CENTS,
-        grossPpwCents: 0,
+        baseFinalPerBatteryCents: POWERWALL_CENTS,
+        baseFinalPpwCents: 0,
         lenderProductId: product.id,
       },
     });

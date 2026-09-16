@@ -279,22 +279,22 @@ export type SolarDesignView = {
 
 export type SolarFinanceView = {
   product: FinanceProduct;
-  grossPpwCents: number;
+  baseFinalPpwCents: number;
   /** The storage sticker, per battery. Zero on every PV deal. */
-  stickerPricePerBatteryCents: number;
+  baseFinalPerBatteryCents: number;
   dealerFeePct: number;
-  adderTotalCents: number;
-  onTopAdderTotalCents: number;
-  contractPriceCents: number;
+  addersInsideRuleCents: number;
+  addersOutsideRuleCents: number;
+  finalPriceCents: number;
   itcEstimateCents: number;
   rateMillsPerKwh: number | null;
-  monthlyPaymentCents: number | null;
+  leaseMonthlyCents: number | null;
   escalatorPct: number | null;
   termYears: number | null;
   aprPct: number | null;
   loanTermMonths: number | null;
   downPaymentCents: number | null;
-  loanMonthlyPaymentCents: number | null;
+  lenderMonthlyPaymentCents: number | null;
   /// Which rate-sheet row this was quoted from. Provenance: the terms above are
   /// copies taken when the rep chose it.
   lenderProductId: string | null;
@@ -865,7 +865,7 @@ export function SolarFinancePanel({
   const seed = (f: SolarFinanceView) => ({
     dealerFeePct: num(f?.dealerFeePct),
     rate: num(f?.rateMillsPerKwh, 1000, 3),
-    monthly: num(f?.monthlyPaymentCents, 100),
+    monthly: num(f?.leaseMonthlyCents, 100),
     escalatorPct: num(f?.escalatorPct),
     termYears: num(f?.termYears),
     aprPct: num(f?.aprPct),
@@ -932,8 +932,8 @@ export function SolarFinancePanel({
     // been asked for one — so an unpriced storage deal opens EMPTY rather than
     // on a $/W figure that would read as $3.50 a Powerwall.
     const stored = systemType === "storage"
-      ? (finance?.stickerPricePerBatteryCents ?? 0)
-      : (finance?.grossPpwCents ?? 0);
+      ? (finance?.baseFinalPerBatteryCents ?? 0)
+      : (finance?.baseFinalPpwCents ?? 0);
     if (stored > 0) return Math.round(stored * (1 - (finance?.dealerFeePct ?? 0) / 100));
     return systemType === "storage" ? null : defaultBasePpwCents;
   });
@@ -949,7 +949,7 @@ export function SolarFinancePanel({
   const batteryPriceCents = batteryChargeCents({
     systemType,
     batteryQty,
-    dealPerBatteryCents: finance?.stickerPricePerBatteryCents,
+    dealPerBatteryCents: finance?.baseFinalPerBatteryCents,
     cataloguePerBatteryCents: batteryUnitPriceCents,
   });
 
@@ -965,14 +965,14 @@ export function SolarFinancePanel({
   const adderSplit = React.useMemo(() => {
     if (adderLines.length === 0) {
       return {
-        adderTotalCents: finance?.adderTotalCents ?? 0,
-        onTopAdderTotalCents: finance?.onTopAdderTotalCents ?? 0,
+        adderTotalCents: finance?.addersInsideRuleCents ?? 0,
+        onTopAdderTotalCents: finance?.addersOutsideRuleCents ?? 0,
       };
     }
     const t = adderTotals(adderLines, Math.round(systemSizeKwDc * 1000));
     return { adderTotalCents: t.financedInCents, onTopAdderTotalCents: t.onTopCents };
   }, [
-    adderLines, finance?.adderTotalCents, finance?.onTopAdderTotalCents, systemSizeKwDc,
+    adderLines, finance?.addersInsideRuleCents, finance?.addersOutsideRuleCents, systemSizeKwDc,
   ]);
   const { adderTotalCents, onTopAdderTotalCents } = adderSplit;
 
@@ -1457,8 +1457,8 @@ export function SolarFinancePanel({
       setProduct(res.finance.product);
       setLenderProductId(res.finance.lenderProductId ?? "");
       const storedSticker = isStorage
-        ? res.finance.stickerPricePerBatteryCents
-        : res.finance.grossPpwCents;
+        ? res.finance.baseFinalPerBatteryCents
+        : res.finance.baseFinalPpwCents;
       if (storedSticker > 0) {
         setBasePpwCents(
           Math.round(storedSticker * (1 - (res.finance.dealerFeePct ?? 0) / 100))
@@ -1469,7 +1469,7 @@ export function SolarFinancePanel({
     router.refresh();
   }
 
-  const dirty = finance != null && liveContractCents != null && finance.contractPriceCents !== liveContractCents;
+  const dirty = finance != null && liveContractCents != null && finance.finalPriceCents !== liveContractCents;
 
   return (
     <div className="space-y-6">
@@ -1559,7 +1559,7 @@ export function SolarFinancePanel({
         catalogue={adderCatalogue}
         lines={adderLines}
         systemWatts={Math.round(systemSizeKwDc * 1000)}
-        storedTotalCents={(finance?.adderTotalCents ?? 0) + (finance?.onTopAdderTotalCents ?? 0)}
+        storedTotalCents={(finance?.addersInsideRuleCents ?? 0) + (finance?.addersOutsideRuleCents ?? 0)}
       />
 
       {/* The rate sheets ARE the interface. Four abstract product types used to
@@ -1748,7 +1748,7 @@ export function SolarFinancePanel({
           </Button>
           {dirty && (
             <p className="text-[11px] text-muted-foreground">
-              Saved at {money(finance!.contractPriceCents)} — this quote comes to{" "}
+              Saved at {money(finance!.finalPriceCents)} — this quote comes to{" "}
               <span className="font-medium tabular-nums text-foreground">
                 {money(liveContractCents!)}
               </span>

@@ -425,7 +425,7 @@ export async function generateProposalVersion(
   const batteryPriceCents = batteryChargeCents({
     systemType: design.systemType,
     batteryQty: design.batteryQty,
-    dealPerBatteryCents: finance.stickerPricePerBatteryCents,
+    dealPerBatteryCents: finance.baseFinalPerBatteryCents,
     cataloguePerBatteryCents: design.battery?.priceCents ?? null,
   });
 
@@ -459,7 +459,7 @@ export async function generateProposalVersion(
     : null;
 
   const capped = capStickerToFinalPpw({
-    stickerPpwCents: finance.grossPpwCents,
+    stickerPpwCents: finance.baseFinalPpwCents,
     maxFinalPpwCents: dealLender?.maxFinalPpwCents ?? null,
     mode: dealLender?.finalPpwMode,
     basis: quotedRow?.ppwBasis,
@@ -467,7 +467,7 @@ export async function generateProposalVersion(
     dealerFeePct: finance.dealerFeePct,
     // The adders the partner's figure is a price FOR. A roof financed on top
     // rides above it and is added back by `pricePurchase` below.
-    adderTotalCents: finance.adderTotalCents,
+    adderTotalCents: finance.addersInsideRuleCents,
   });
   /**
    * PRICED UNCONDITIONALLY, WRITTEN BACK WHEN SOMETHING MOVED.
@@ -490,28 +490,28 @@ export async function generateProposalVersion(
   ) {
     const stickerPpwCents = capped.capped
       ? capped.stickerPpwCents
-      : finance.grossPpwCents;
+      : finance.baseFinalPpwCents;
     const contractPriceCents = pricePurchase({
       product: finance.product,
       systemSizeKwDc: design.systemSizeKwDc,
       stickerPpwCents,
       dealerFeePct: finance.dealerFeePct,
-      adderTotalCents: finance.adderTotalCents,
-      onTopAdderTotalCents: finance.onTopAdderTotalCents,
+      adderTotalCents: finance.addersInsideRuleCents,
+      onTopAdderTotalCents: finance.addersOutsideRuleCents,
       batteryPriceCents,
     }).contractPriceCents;
 
     if (
-      stickerPpwCents !== finance.grossPpwCents ||
-      contractPriceCents !== finance.contractPriceCents
+      stickerPpwCents !== finance.baseFinalPpwCents ||
+      contractPriceCents !== finance.finalPriceCents
     ) {
-      finance.grossPpwCents = stickerPpwCents;
-      finance.contractPriceCents = contractPriceCents;
+      finance.baseFinalPpwCents = stickerPpwCents;
+      finance.finalPriceCents = contractPriceCents;
       await prisma.solarFinance.update({
         where: { leadId },
         data: {
-          grossPpwCents: finance.grossPpwCents,
-          contractPriceCents: finance.contractPriceCents,
+          baseFinalPpwCents: finance.baseFinalPpwCents,
+          finalPriceCents: finance.finalPriceCents,
         },
       });
     }
@@ -528,13 +528,13 @@ export async function generateProposalVersion(
    */
   if (isStorage && (finance.product === "cash" || finance.product === "loan")) {
     const storageCap = capStickerToFinalUnit({
-      stickerPerUnitCents: finance.stickerPricePerBatteryCents,
+      stickerPerUnitCents: finance.baseFinalPerBatteryCents,
       maxFinalPerUnitCents: dealLender?.maxFinalPricePerBatteryCents ?? null,
       mode: dealLender?.finalBatteryPriceMode,
       basis: quotedRow?.batteryPriceBasis,
       units: design.batteryQty,
       dealerFeePct: finance.dealerFeePct,
-      adderTotalCents: finance.adderTotalCents,
+      adderTotalCents: finance.addersInsideRuleCents,
     });
 
     const priced = priceStoragePurchase({
@@ -542,8 +542,8 @@ export async function generateProposalVersion(
       batteryQty: design.batteryQty,
       stickerPricePerBatteryCents: storageCap.stickerPerUnitCents,
       dealerFeePct: finance.dealerFeePct,
-      adderTotalCents: finance.adderTotalCents,
-      onTopAdderTotalCents: finance.onTopAdderTotalCents,
+      adderTotalCents: finance.addersInsideRuleCents,
+      onTopAdderTotalCents: finance.addersOutsideRuleCents,
     });
 
     // Written back for the same reason the per-watt block writes back: the deal
@@ -551,16 +551,16 @@ export async function generateProposalVersion(
     // something actually moved — an unconditional write would touch every row
     // on every generation for nothing.
     if (
-      storageCap.stickerPerUnitCents !== finance.stickerPricePerBatteryCents ||
-      priced.contractPriceCents !== finance.contractPriceCents
+      storageCap.stickerPerUnitCents !== finance.baseFinalPerBatteryCents ||
+      priced.contractPriceCents !== finance.finalPriceCents
     ) {
-      finance.stickerPricePerBatteryCents = storageCap.stickerPerUnitCents;
-      finance.contractPriceCents = priced.contractPriceCents;
+      finance.baseFinalPerBatteryCents = storageCap.stickerPerUnitCents;
+      finance.finalPriceCents = priced.contractPriceCents;
       await prisma.solarFinance.update({
         where: { leadId },
         data: {
-          stickerPricePerBatteryCents: finance.stickerPricePerBatteryCents,
-          contractPriceCents: finance.contractPriceCents,
+          baseFinalPerBatteryCents: finance.baseFinalPerBatteryCents,
+          finalPriceCents: finance.finalPriceCents,
         },
       });
     }
@@ -792,7 +792,7 @@ export async function generateProposalVersion(
       // design and the menu must not suppress that lender's loan underneath a
       // cash quote that never mentioned them.
       lenderId: dealLender?.id ?? null,
-      grossPpwCents: finance.grossPpwCents,
+      grossPpwCents: finance.baseFinalPpwCents,
       dealerFeePct: finance.dealerFeePct,
     },
     programmes: programmes.map((p): CatalogueProgramme => ({
@@ -818,7 +818,7 @@ export async function generateProposalVersion(
     storage: isStorage
       ? {
           batteryQty: design.batteryQty,
-          stickerPricePerBatteryCents: finance.stickerPricePerBatteryCents,
+          stickerPricePerBatteryCents: finance.baseFinalPerBatteryCents,
         }
       : null,
     adders: adderLines.map((l) => ({
@@ -831,8 +831,8 @@ export async function generateProposalVersion(
       showOnProposal: l.showOnProposal,
       financedOnTop: l.financedOnTop,
     })),
-    adderTotalCents: finance.adderTotalCents,
-    onTopAdderTotalCents: finance.onTopAdderTotalCents,
+    adderTotalCents: finance.addersInsideRuleCents,
+    onTopAdderTotalCents: finance.addersOutsideRuleCents,
     batteryPriceCents,
     assumptions,
     targetNetPpwCents: assumptions.targetNetPpwCents,
@@ -966,14 +966,14 @@ export async function generateProposalVersion(
         : null,
     finance: {
       product: finance.product,
-      grossPpwCents: finance.grossPpwCents,
+      grossPpwCents: finance.baseFinalPpwCents,
       // The unit a storage deal is actually priced by. Without it the document
       // prices the whole system at zero installed watts — see the field's note.
-      stickerPricePerBatteryCents: finance.stickerPricePerBatteryCents,
+      stickerPricePerBatteryCents: finance.baseFinalPerBatteryCents,
       batteryPriceCents,
       dealerFeePct: finance.dealerFeePct,
-      adderTotalCents: finance.adderTotalCents,
-      onTopAdderTotalCents: finance.onTopAdderTotalCents,
+      adderTotalCents: finance.addersInsideRuleCents,
+      onTopAdderTotalCents: finance.addersOutsideRuleCents,
       // Named and priced HERE, then frozen into the snapshot. Reading them back
       // through the catalogue at render time would let a later rename retitle a
       // line on a document a homeowner has already been shown.
@@ -988,7 +988,7 @@ export async function generateProposalVersion(
         financedOnTop: l.financedOnTop,
       })),
       rateMillsPerKwh: finance.rateMillsPerKwh,
-      monthlyPaymentCents: finance.monthlyPaymentCents,
+      monthlyPaymentCents: finance.leaseMonthlyCents,
       escalatorPct: finance.escalatorPct,
       termYears: finance.termYears,
       aprPct: finance.aprPct,
@@ -998,7 +998,7 @@ export async function generateProposalVersion(
       // only once the layout renders it. The proposal now shows a monthly for a
       // loan — the lender's approved figure when one exists, otherwise the
       // product's terms amortised — and these are what it is computed from.
-      loanMonthlyPaymentCents: finance.loanMonthlyPaymentCents,
+      loanMonthlyPaymentCents: finance.lenderMonthlyPaymentCents,
       loanTermMonths: finance.loanTermMonths,
       downPaymentCents: finance.downPaymentCents,
     },

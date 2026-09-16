@@ -155,7 +155,7 @@ describe("before the customer signs, everything moves", () => {
   it("lets a rep price the deal", async () => {
     actAs("sales_rep");
     expect((await savePrice(400)).ok).toBe(true);
-    expect((await finance())?.grossPpwCents).toBe(400);
+    expect((await finance())?.baseFinalPpwCents).toBe(400);
   });
 
   it("reports the deal as unsigned", async () => {
@@ -168,11 +168,11 @@ describe("after the customer signs, the economics are locked", () => {
 
   it("REFUSES a rep raising the price — the change that moves their own pay", async () => {
     actAs("sales_rep");
-    const before = (await finance())?.grossPpwCents;
+    const before = (await finance())?.baseFinalPpwCents;
     const res = await savePrice(900);
     expect(res.ok).toBe(false);
     expect("error" in res && res.error).toMatch(/signed/i);
-    expect((await finance())?.grossPpwCents).toBe(before);
+    expect((await finance())?.baseFinalPpwCents).toBe(before);
   });
 
   it("REFUSES a manager, and an ADMIN, too", async () => {
@@ -181,7 +181,7 @@ describe("after the customer signs, the economics are locked", () => {
       const res = await savePrice(900);
       expect(res.ok, `${role} must not rewrite a signed contract`).toBe(false);
     }
-    expect((await finance())?.grossPpwCents).toBe(350);
+    expect((await finance())?.baseFinalPpwCents).toBe(350);
   });
 
   it("REFUSES changing the equipment or the panel count", async () => {
@@ -258,7 +258,7 @@ describe("a super admin must reopen the contract, and say why", () => {
     const res = await savePrice(500);
     expect(res.ok).toBe(false);
     expect("error" in res && res.error).toMatch(/reopen it first and give a reason/i);
-    expect((await finance())?.grossPpwCents).toBe(350);
+    expect((await finance())?.baseFinalPpwCents).toBe(350);
   });
 
   it("REFUSES an unlock with no real reason", async () => {
@@ -284,15 +284,15 @@ describe("a super admin must reopen the contract, and say why", () => {
 
     const res = await savePrice(500);
     expect(res.ok).toBe(true);
-    expect((await finance())?.grossPpwCents).toBe(500);
+    expect((await finance())?.baseFinalPpwCents).toBe(500);
   });
 
   it("records who, when, why, and both figures on the deal's own history", async () => {
-    const before = (await finance())!.contractPriceCents;
+    const before = (await finance())!.finalPriceCents;
     actAs("super_admin");
     await inSolar(() => unlockSignedContractAction({ leadId, reason: REASON }));
     await savePrice(500);
-    const after = (await finance())!.contractPriceCents;
+    const after = (await finance())!.finalPriceCents;
     expect(after).not.toBe(before);
 
     const logs = await db.activityLog.findMany({ where: { leadId }, orderBy: { createdAt: "asc" } });
@@ -341,7 +341,7 @@ describe("a super admin must reopen the contract, and say why", () => {
     expect((await inSolar(() => relockSignedContractAction(leadId))).ok).toBe(true);
     const res = await savePrice(600);
     expect(res.ok).toBe(false);
-    expect((await finance())?.grossPpwCents).toBe(500);
+    expect((await finance())?.baseFinalPpwCents).toBe(500);
   });
 
   it("EXPIRES — an unlock left open is not a lock removed", async () => {

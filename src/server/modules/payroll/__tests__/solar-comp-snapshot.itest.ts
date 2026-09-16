@@ -96,8 +96,8 @@ async function makeSignedDeal(tag: string): Promise<{ projectId: string; leadId:
   await raw.solarFinance.create({
     data: {
       companyId, leadId: lead.id, product: "loan",
-      grossPpwCents: GROSS_PPW, dealerFeePct: 0, adderTotalCents: 0,
-      contractPriceCents: KW * 1000 * GROSS_PPW,
+      baseFinalPpwCents: GROSS_PPW, dealerFeePct: 0, addersInsideRuleCents: 0,
+      finalPriceCents: KW * 1000 * GROSS_PPW,
     },
   });
   // A real signature, because the engine now asks whether one exists before it
@@ -497,8 +497,8 @@ describe("a signed deal never falls back to today's settings", () => {
     await raw.solarFinance.create({
       data: {
         companyId, leadId: lead.id, product: "loan",
-        grossPpwCents: GROSS_PPW, dealerFeePct: 0, adderTotalCents: 0,
-        contractPriceCents: KW * 1000 * GROSS_PPW,
+        baseFinalPpwCents: GROSS_PPW, dealerFeePct: 0, addersInsideRuleCents: 0,
+        finalPriceCents: KW * 1000 * GROSS_PPW,
       },
     });
     await raw.solarProposal.create({
@@ -591,7 +591,7 @@ describe("approved commissions are immutable", () => {
     // The design grows, which would ordinarily move a pending line.
     await raw.solarFinance.updateMany({
       where: { leadId: (await raw.project.findUniqueOrThrow({ where: { id: projectId }, select: { leadId: true } })).leadId! },
-      data: { grossPpwCents: 400 },
+      data: { baseFinalPpwCents: 400 },
     });
     await computeFor(projectId);
 
@@ -650,8 +650,8 @@ describe("standalone battery pay is a property of the REP, not the lender", () =
       await raw.solarFinance.create({
         data: {
           companyId, leadId: lead.id, product: "loan",
-          grossPpwCents: 0, stickerPricePerBatteryCents: 12_000_00,
-          dealerFeePct: 0, adderTotalCents: 0, contractPriceCents: 24_000_00,
+          baseFinalPpwCents: 0, baseFinalPerBatteryCents: 12_000_00,
+          dealerFeePct: 0, addersInsideRuleCents: 0, finalPriceCents: 24_000_00,
         },
       });
       const project = await raw.project.create({
@@ -704,9 +704,9 @@ describe("standalone battery pay is a property of the REP, not the lender", () =
     });
     await raw.solarFinance.create({
       data: {
-        companyId, leadId: lead.id, product: "loan", grossPpwCents: 0,
-        stickerPricePerBatteryCents: 12_000_00, dealerFeePct: 0, adderTotalCents: 0,
-        contractPriceCents: 24_000_00,
+        companyId, leadId: lead.id, product: "loan", baseFinalPpwCents: 0,
+        baseFinalPerBatteryCents: 12_000_00, dealerFeePct: 0, addersInsideRuleCents: 0,
+        finalPriceCents: 24_000_00,
       },
     });
     const project = await raw.project.create({

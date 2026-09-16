@@ -113,10 +113,10 @@ async function makeSolarDeal(opts: {
   await raw.solarFinance.create({
     data: {
       companyId, leadId: lead.id, product,
-      grossPpwCents: opts.grossPpwCents,
+      baseFinalPpwCents: opts.grossPpwCents,
       dealerFeePct: opts.dealerFeePct,
-      adderTotalCents: opts.adderTotalCents ?? 0,
-      contractPriceCents: gross + (opts.adderTotalCents ?? 0),
+      addersInsideRuleCents: opts.adderTotalCents ?? 0,
+      finalPriceCents: gross + (opts.adderTotalCents ?? 0),
     },
   });
   const project = await raw.project.create({
@@ -153,11 +153,11 @@ async function makeStorageDeal(opts: {
   await raw.solarFinance.create({
     data: {
       companyId, leadId: lead.id, product: opts.product ?? "loan",
-      grossPpwCents: 0,
-      stickerPricePerBatteryCents: opts.stickerPerBatteryCents,
+      baseFinalPpwCents: 0,
+      baseFinalPerBatteryCents: opts.stickerPerBatteryCents,
       dealerFeePct: opts.dealerFeePct,
-      adderTotalCents: 0,
-      contractPriceCents: opts.stickerPerBatteryCents * qty,
+      addersInsideRuleCents: 0,
+      finalPriceCents: opts.stickerPerBatteryCents * qty,
     },
   });
   const project = await raw.project.create({
@@ -290,7 +290,7 @@ describe("terms lock once the line exists", () => {
     await computeFor(p);
 
     const lead = await raw.project.findUniqueOrThrow({ where: { id: p }, select: { leadId: true } });
-    await raw.solarFinance.update({ where: { leadId: lead.leadId! }, data: { grossPpwCents: 340 } });
+    await raw.solarFinance.update({ where: { leadId: lead.leadId! }, data: { baseFinalPpwCents: 340 } });
     await computeFor(p);
 
     // $3.40/W at 18% nets $2.788/W → $0.788 over the ORIGINAL $2.00 redline.

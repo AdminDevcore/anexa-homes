@@ -264,19 +264,19 @@ async function seedDeal(name: string, o: { layout?: boolean; storage?: boolean }
       leadId: lead.id,
       vertical: "solar",
       product: "loan",
-      contractPriceCents: 0,
+      finalPriceCents: 0,
       ...(o.storage
         ? {
             lenderProductId: storageProgrammeId,
-            grossPpwCents: 0,
-            stickerPricePerBatteryCents: 2_000_000, // grossPpwFromNet(1,000,000, 50)
+            baseFinalPpwCents: 0,
+            baseFinalPerBatteryCents: 2_000_000, // grossPpwFromNet(1,000,000, 50)
             dealerFeePct: ST.feePct,
             aprPct: ST.aprPct,
             loanTermMonths: ST.termMonths,
           }
         : {
             lenderProductId: programmeId,
-            grossPpwCents: 400, // grossPpwFromNet(300, 25)
+            baseFinalPpwCents: 400, // grossPpwFromNet(300, 25)
             dealerFeePct: WE.feePct,
             aprPct: WE.aprPct,
             loanTermMonths: WE.termMonths,
@@ -305,7 +305,7 @@ async function sign(leadId: string, proposalId: string) {
 const money = (leadId: string) =>
   raw.solarFinance.findUniqueOrThrow({
     where: { leadId },
-    select: { grossPpwCents: true, stickerPricePerBatteryCents: true, adderTotalCents: true, onTopAdderTotalCents: true, contractPriceCents: true },
+    select: { baseFinalPpwCents: true, baseFinalPerBatteryCents: true, addersInsideRuleCents: true, addersOutsideRuleCents: true, finalPriceCents: true },
   });
 
 /** The final price of the per-watt loan deal as stored, with or without its battery. */
@@ -317,10 +317,10 @@ async function perWattFinal(leadId: string, batteryPriceCents: number) {
   return pricePurchase({
     product: "loan",
     systemSizeKwDc: design.systemSizeKwDc,
-    stickerPpwCents: row.grossPpwCents,
+    stickerPpwCents: row.baseFinalPpwCents,
     dealerFeePct: WE.feePct,
-    adderTotalCents: row.adderTotalCents,
-    onTopAdderTotalCents: row.onTopAdderTotalCents,
+    adderTotalCents: row.addersInsideRuleCents,
+    onTopAdderTotalCents: row.addersOutsideRuleCents,
     batteryPriceCents,
   }).contractPriceCents;
 }
@@ -350,9 +350,9 @@ describe("the live re-price keeps the battery (site 2)", () => {
     const design = await raw.solarDesign.findUniqueOrThrow({ where: { leadId }, select: { systemSizeKwDc: true } });
     expect(design.systemSizeKwDc).toBe(10); // 25 × 400 W, re-derived from the drawing
     const row = await money(leadId);
-    expect(row.grossPpwCents).toBe(420);
-    expect(row.contractPriceCents).toBe(await perWattFinal(leadId, WORKED_BATTERY_CENTS));
-    expect(row.contractPriceCents).toBeGreaterThan(await perWattFinal(leadId, 0));
+    expect(row.baseFinalPpwCents).toBe(420);
+    expect(row.finalPriceCents).toBe(await perWattFinal(leadId, WORKED_BATTERY_CENTS));
+    expect(row.finalPriceCents).toBeGreaterThan(await perWattFinal(leadId, 0));
   });
 
   it("leaves the battery on the deal when the new version is refused", async () => {
@@ -373,8 +373,8 @@ describe("the live re-price keeps the battery (site 2)", () => {
       // The row the re-price wrote, untouched by any generation. It used to
       // carry no battery here.
       const row = await money(leadId);
-      expect(row.grossPpwCents).toBe(420);
-      expect(row.contractPriceCents).toBe(await perWattFinal(leadId, WORKED_BATTERY_CENTS));
+      expect(row.baseFinalPpwCents).toBe(420);
+      expect(row.finalPriceCents).toBe(await perWattFinal(leadId, WORKED_BATTERY_CENTS));
     } finally {
       await raw.solarSettings.deleteMany({ where: { companyId } });
     }
@@ -392,7 +392,7 @@ describe("the live re-price keeps the battery (site 2)", () => {
       expect(res.ok === false && res.issues?.map((i) => i.code)).toContain("storage.product_not_eligible");
       // Two batteries at the partner's flat $12,000 gross, grossed up by the 50% fee.
       // The old re-price priced this per watt, over zero watts: a $0 contract.
-      expect(await money(leadId)).toMatchObject({ grossPpwCents: 0, contractPriceCents: 4_800_000 });
+      expect(await money(leadId)).toMatchObject({ baseFinalPpwCents: 0, finalPriceCents: 4_800_000 });
     } finally {
       await raw.solarLenderProduct.update({ where: { id: storageProgrammeId }, data: { financesStorageOnly: true } });
     }
@@ -450,7 +450,7 @@ describe("the commission measure is frozen at signing", () => {
     expect({ ...before, estimate: { ...before.estimate, fromSnapshot: false } }).toEqual(unsigned);
 
     // After signing, the live deal can move and the commission does not.
-    await raw.solarFinance.update({ where: { leadId }, data: { grossPpwCents: 600 } });
+    await raw.solarFinance.update({ where: { leadId }, data: { baseFinalPpwCents: 600 } });
     await raw.solarDesign.update({ where: { leadId }, data: { systemSizeKwDc: 12 } });
     expect(await pay(leadId, projectId)).toEqual(before);
 
@@ -508,14 +508,14 @@ describe("the commission measure is frozen at signing", () => {
     const { leadId, projectId } = await seedDeal("unsigned");
     await generate(leadId);
     const before = await pay(leadId, projectId);
-    await raw.solarFinance.update({ where: { leadId }, data: { grossPpwCents: 600 } });
+    await raw.solarFinance.update({ where: { leadId }, data: { baseFinalPpwCents: 600 } });
     expect((await pay(leadId, projectId)).line?.amount).not.toBe(before.line?.amount);
   });
 
   it("flags a signature on a version the deal no longer prices to, and still freezes", async () => {
     const { leadId } = await seedDeal("mismatch");
     const { row: v1 } = await generate(leadId);
-    await raw.solarFinance.update({ where: { leadId }, data: { grossPpwCents: 450 } });
+    await raw.solarFinance.update({ where: { leadId }, data: { baseFinalPpwCents: 450 } });
     await sign(leadId, v1.id);
 
     // The deal now prices to $33,750 of base; the document says $30,000. The
@@ -579,7 +579,7 @@ describe("a super admin can re-freeze the measure by hand", () => {
     const frozen = await raw.solarDealComp.findUniqueOrThrow({ where: { leadId } });
 
     // A correction made after signing, which the household has not re-signed.
-    await raw.solarFinance.update({ where: { leadId }, data: { grossPpwCents: 450 } });
+    await raw.solarFinance.update({ where: { leadId }, data: { baseFinalPpwCents: 450 } });
 
     try {
       requireUser.mockResolvedValue({ ...user, role: "admin" });
@@ -685,7 +685,7 @@ describe("the backfill freezes rows signed before the measure existed", () => {
     });
     // Re-priced after it was signed: the document says $30,000 of base, the
     // deal now says $33,750, and payroll has been paying the $33,750.
-    await raw.solarFinance.update({ where: { leadId }, data: { grossPpwCents: 450 } });
+    await raw.solarFinance.update({ where: { leadId }, data: { baseFinalPpwCents: 450 } });
 
     const first = await inSolar(() => backfillCommissionMeasure(db, { apply: true, now: new Date(), companyId }));
     const held = first.find((r) => r.leadId === leadId)!;
@@ -767,7 +767,7 @@ describe("L16 pinned: a capped storage deal's stored per-battery sticker depends
     const afterNextSave = await money(leadId);
 
     expect(
-      [afterSave, afterGeneration, afterNextSave].map((r) => [r.stickerPricePerBatteryCents, r.contractPriceCents])
+      [afterSave, afterGeneration, afterNextSave].map((r) => [r.baseFinalPerBatteryCents, r.finalPriceCents])
     ).toEqual([
       [2_000_000, 4_800_000], // what was typed: $10,000 base at 50%
       [2_400_000, 4_800_000], // the partner's flat $12,000 gross at 50%, written back by generation

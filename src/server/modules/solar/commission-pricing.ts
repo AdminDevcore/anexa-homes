@@ -35,9 +35,9 @@ export async function loadCommissionDeal(db: Db, companyId: string, leadId: stri
     db.solarFinance.findUnique({
       where: { leadId },
       select: {
-        product: true, grossPpwCents: true, dealerFeePct: true,
-        adderTotalCents: true, onTopAdderTotalCents: true, contractPriceCents: true,
-        stickerPricePerBatteryCents: true,
+        product: true, baseFinalPpwCents: true, dealerFeePct: true,
+        addersInsideRuleCents: true, addersOutsideRuleCents: true, finalPriceCents: true,
+        baseFinalPerBatteryCents: true,
         // Which price the partner's figure fixes is the quoted programme's to
         // say. No programme quoted reads as `final`, the rule as it always was.
         lenderProduct: {
@@ -108,10 +108,10 @@ export async function loadCommissionDeal(db: Db, companyId: string, leadId: stri
       ? priceStorageStored({
           product: finance.product,
           batteryQty: design.batteryQty,
-          stickerPricePerBatteryCents: finance.stickerPricePerBatteryCents,
+          stickerPricePerBatteryCents: finance.baseFinalPerBatteryCents,
           dealerFeePct: finance.dealerFeePct,
-          adderTotalCents: finance.adderTotalCents,
-          onTopAdderTotalCents: finance.onTopAdderTotalCents,
+          adderTotalCents: finance.addersInsideRuleCents,
+          onTopAdderTotalCents: finance.addersOutsideRuleCents,
           maxFinalPricePerBatteryCents: design.lender?.maxFinalPricePerBatteryCents ?? null,
           finalBatteryPriceMode: design.lender?.finalBatteryPriceMode,
           batteryPriceBasis: finance.lenderProduct?.batteryPriceBasis,
@@ -123,10 +123,10 @@ export async function loadCommissionDeal(db: Db, companyId: string, leadId: stri
       ? priceStoredPurchase({
           product: finance.product,
           systemSizeKwDc: design.systemSizeKwDc,
-          stickerPpwCents: finance.grossPpwCents,
+          stickerPpwCents: finance.baseFinalPpwCents,
           dealerFeePct: finance.dealerFeePct,
-          adderTotalCents: finance.adderTotalCents,
-          onTopAdderTotalCents: finance.onTopAdderTotalCents,
+          adderTotalCents: finance.addersInsideRuleCents,
+          onTopAdderTotalCents: finance.addersOutsideRuleCents,
           // ON THE FINAL PRICE, OUT OF THE BASE. The household signs for the
           // battery; a rep's redline is measured on `basePriceCents`, which the
           // battery deliberately stays out of — it is priced from the catalogue
@@ -134,7 +134,7 @@ export async function loadCommissionDeal(db: Db, companyId: string, leadId: stri
           batteryPriceCents: batteryChargeCents({
             systemType: design.systemType,
             batteryQty: design.batteryQty,
-            dealPerBatteryCents: finance.stickerPricePerBatteryCents,
+            dealPerBatteryCents: finance.baseFinalPerBatteryCents,
             cataloguePerBatteryCents: design.battery?.priceCents ?? null,
           }),
           maxFinalPpwCents: design.lender?.maxFinalPpwCents ?? null,
@@ -171,7 +171,7 @@ export async function loadCommissionDeal(db: Db, companyId: string, leadId: stri
      * as fresh as the last save, and a deal priced before adders were pulled
      * inside the dealer fee carries a figure several thousand dollars light.
      */
-    finalPriceCents: priced?.contractPriceCents ?? finance.contractPriceCents,
+    finalPriceCents: priced?.contractPriceCents ?? finance.finalPriceCents,
   };
 }
 
