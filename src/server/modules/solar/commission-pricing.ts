@@ -1,6 +1,7 @@
 import type { FinanceProduct } from "@prisma/client";
 import type { Db } from "@/server/db/types";
-import { priceStoredPurchase, priceStorageStored, batteryChargeCents } from "@/lib/solar-money";
+import { batteryChargeCents } from "@/lib/solar-money";
+import { priceDeal } from "@/lib/solar-price-deal";
 import { readProposalSnapshot } from "@/lib/solar-proposal";
 
 /**
@@ -103,47 +104,59 @@ export async function loadCommissionDeal(db: Db, companyId: string, leadId: stri
   // sticker is only as capped as the lender was on the day it was saved, and
   // paying a redline overage on an uncapped figure pays out of money nobody is
   // ever sent.
-  const storagePurchase =
-    isStorage && (finance.product === "cash" || finance.product === "loan")
-      ? priceStorageStored({
+  /**
+   * THE DEAL, PRICED ONCE — through `priceDeal()` (Stage 4c).
+   *
+   * One function for the array and for the batteries, so a storage deal and a
+   * PV one climb the same ladder and cannot round differently from each other.
+   * The partner's ceiling is passed for exactly the reason the two calls this
+   * replaces passed it: a stored sticker is only as capped as the lender was on
+   * the day it was saved, and paying a redline overage on an uncapped figure
+   * pays out of money nobody is ever sent.
+   *
+   * GATED ON THE PRODUCT, and deliberately NOT delegated to `priceDeal`'s own
+   * lease/PPA branch. `priceDeal` answers for every product; the two calls this
+   * replaces answered only for cash and loan and left `null` behind for the
+   * rest — and `finalPriceCents` below FALLS BACK to the stored column on that
+   * null. Hand lease and PPA to `priceDeal` and the fallback stops firing, so a
+   * lease's final price reads 0 and the signed-document comparison reports a
+   * mismatch that is not there.
+   *
+   * Nothing would catch that: no test anywhere — unit or integration —
+   * exercises a lease or PPA commission deal. The gate is the protection, so
+   * it is explained rather than merely present.
+   */
+  const deal =
+    finance.product === "cash" || finance.product === "loan"
+      ? priceDeal({
           product: finance.product,
-          batteryQty: design.batteryQty,
-          stickerPricePerBatteryCents: finance.baseFinalPerBatteryCents,
-          dealerFeePct: finance.dealerFeePct,
-          adderTotalCents: finance.addersInsideRuleCents,
-          onTopAdderTotalCents: finance.addersOutsideRuleCents,
-          maxFinalPricePerBatteryCents: design.lender?.priceRulePerBatteryCents ?? null,
-          finalBatteryPriceMode: design.lender?.priceRuleBatteryMode,
-          batteryPriceBasis: finance.lenderProduct?.batteryPriceBasis,
-        }).breakdown
-      : null;
-
-  const purchase =
-    !isStorage && (finance.product === "cash" || finance.product === "loan")
-      ? priceStoredPurchase({
-          product: finance.product,
+          systemType: design.systemType,
           systemSizeKwDc: design.systemSizeKwDc,
-          stickerPpwCents: finance.baseFinalPpwCents,
+          baseFinalPpwCents: finance.baseFinalPpwCents,
+          baseFinalPerBatteryCents: finance.baseFinalPerBatteryCents,
+          batteryQty: design.batteryQty,
           dealerFeePct: finance.dealerFeePct,
-          adderTotalCents: finance.addersInsideRuleCents,
-          onTopAdderTotalCents: finance.addersOutsideRuleCents,
+          addersInsideRuleCents: finance.addersInsideRuleCents,
+          addersOutsideRuleCents: finance.addersOutsideRuleCents,
           // ON THE FINAL PRICE, OUT OF THE BASE. The household signs for the
           // battery; a rep's redline is measured on `baseKeptCents`, which the
           // battery deliberately stays out of — it is priced from the catalogue
-          // to cover its own cost, exactly like an adder.
-          batteryPriceCents: batteryChargeCents({
+          // to cover its own cost, exactly like an adder. Ignored on a
+          // storage-only deal, where the battery IS the system.
+          equipmentChargesCents: batteryChargeCents({
             systemType: design.systemType,
             batteryQty: design.batteryQty,
             dealPerBatteryCents: finance.baseFinalPerBatteryCents,
             cataloguePerBatteryCents: design.battery?.priceCents ?? null,
           }),
-          maxFinalPpwCents: design.lender?.priceRulePpwCents ?? null,
-          finalPpwMode: design.lender?.priceRuleMode,
+          priceRulePpwCents: design.lender?.priceRulePpwCents ?? null,
+          priceRuleMode: design.lender?.priceRuleMode,
           ppwBasis: finance.lenderProduct?.ppwBasis,
-        }).breakdown
+          priceRulePerBatteryCents: design.lender?.priceRulePerBatteryCents ?? null,
+          priceRuleBatteryMode: design.lender?.priceRuleBatteryMode,
+          batteryPriceBasis: finance.lenderProduct?.batteryPriceBasis,
+        })
       : null;
-
-  const priced = purchase ?? storagePurchase;
 
   return {
     product: finance.product,
@@ -159,9 +172,9 @@ export async function loadCommissionDeal(db: Db, companyId: string, leadId: stri
 
     // Zero on a storage deal, and zero is the truth there rather than a
     // conversion that did not happen.
-    systemWatts: isStorage ? 0 : (purchase?.systemWatts ?? Math.round(design.systemSizeKwDc * 1000)),
+    systemWatts: isStorage ? 0 : (deal?.systemWatts ?? Math.round(design.systemSizeKwDc * 1000)),
     batteryQty: design.batteryQty,
-    baseKeptCents: priced?.baseKeptCents ?? 0,
+    baseKeptCents: deal?.baseKeptCents ?? 0,
     /**
      * The final price, before any credit — what the signed document is checked
      * against when the measure is frozen. No pay is a share of it: an override
@@ -177,7 +190,7 @@ export async function loadCommissionDeal(db: Db, companyId: string, leadId: stri
      * `DerivedPriceCents` and the stored one is a plain `number`. A comment
      * saying "derived" is advice; a brand is something the compiler holds.
      */
-    finalPriceCents: derivedPrice(priced?.contractPriceCents ?? finance.finalPriceCents),
+    finalPriceCents: derivedPrice(deal?.finalPriceCents ?? finance.finalPriceCents),
   };
 }
 
