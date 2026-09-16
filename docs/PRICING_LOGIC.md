@@ -1239,3 +1239,41 @@ Nothing in this section is in the code. The current text stays everywhere until 
 The brief for counsel is `docs/legal/2026-09-15-credit-ownership-brief.md`: facts only, no recommendation on the legal question, with the production exposure counted.
 
 **Both reworks landed before Stage 2 started**, in the second commit on the branch. See the two new rows in §8.9 and findings #4 and #5 in §8.11.
+
+### 8.19 The signed-contract lock: the chokepoint, and the three paths that went round it (2026-09-16)
+
+Ordered AHEAD of Stage 2 by the owner, after a production deal was found with
+`grossPpwCents`, `dealerFeePct`, `finalPriceCents` and `batteryQty` all at zero.
+
+**That incident was not a bug.** Lead `2307d609` was edited by the owner under a
+proper 30-minute unlock (opened 01:14:42 UTC, reason "Lender correction"), every
+step audited, `4925360 → 0` logged by name. The zeros follow from the product
+becoming `ppa`, which has no system price. The lock worked exactly as designed.
+
+**What the investigation found instead.** No non-human path can write to
+`SolarFinance` or `SolarDesign` — not the 11 cron entries, the lender webhook
+(it accepts `dealerFeePct` but writes it to `CreditApplication`), the public
+signing route, a page load, the automation engine, or raw SQL. But the guard was
+enforced **per call site**, at 8 of them, with no chokepoint underneath — and
+three writers reached the money with no super admin, no unlock and no trail.
+
+| # | What landed | Where |
+|---|---|---|
+| 1 | **The chokepoint.** `economicWritesAllowed(companyId, leadId)` asks about the DEAL, not the person — no user, no role — so it drops into `recomputeDealMoney` and `recomputeDesignFigures`, which have no user to ask about. A signed deal with no live unlock cannot be recomputed. Callers keep their own `checkSignedLock`: theirs refuses the person with a sentence they can act on, this one refuses the write, and nothing relies on either alone. | `signed-lock.ts`, `deal-money.ts`, `recompute.ts` |
+| 2 | **The live re-price asks about the signed DEAL**, not merely the signed proposal. A signed deal can carry an unsigned v-next (generation over a signature is deliberate), and re-pricing through that draft rewrote the signed rows. Asked before the consumption write, which lands first. **The product contradiction is fixed**: the comment said "the PRODUCT never changes here" while the code read it off the chosen programme, so a lease/PPA row flipped the deal, wrote $0/W and a 0% fee, and skipped the floor guards. A programme whose product differs is now refused outright. | `proposal-reprice-actions.ts` |
+| 3 | **The layout designer is locked**, and an empty drawing is refused outright — on signed and unsigned deals alike. `blocks: []` priced the deal over zero watts. The maintenance script already refused to zero a live deal; the live path had no floor. | `layout-actions.ts` |
+| 4 | **Generation: confirmed, behaviour unchanged.** `generateProposalVersion` never calls either recompute — it writes `SolarFinance` directly at two places — so the chokepoint neither covers it nor changes it, as instructed. **Residual, reported not fixed:** `capStickerToFinalUnit` returns a 0 sticker when adders alone exceed a partner's pinned figure, and in `flat` mode the early-out is bypassed. Amos Capital Fund carries `finalBatteryPriceMode: flat` at $12,000/battery in production. The per-watt `flat` mode is armed nowhere (all three lenders are `cap`). | `proposal-generate.ts` |
+| 5 | **The floor guards refuse explicitly.** They ran only `if (isPurchase)`, so a lease or PPA fell straight through — a rule that does not apply is now said out loud instead of being absent. | `proposal-reprice-actions.ts` |
+| 6 | **Every derived write under an unlock is audited** with old → new, attributed to whoever opened the unlock, for both the money and the design figures. A recompute is a consequence of an edit; on a signed contract the consequence is as much a change as the edit was. | `auditDerivedWrite` in `signed-lock.ts` |
+
+**Exposure at the time of the fix:** of 6 solar deals, exactly one signed deal
+carried a newer unsigned version — `5886e6ac`, the one real signed customer,
+Amos at a 65% fee. Path 2 was reachable on it. The tests are shaped after it.
+
+**Tests** (`signed-lock.itest.ts`, 6 new): a rep with `Lead:update` cannot
+re-price the signed deal through its unsigned v3, cannot wipe the array, cannot
+redraw it; an empty drawing is refused even unsigned; the recompute refuses even
+when a caller forgets to ask (an adder written straight past the guarded action
+moves nothing); and under an unlock it goes through and says what moved.
+Unit 2,495; integration 791 passing with the 7 baseline failures; typecheck and
+the touched files' lint clean. **No golden figure moved.**
