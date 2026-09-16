@@ -6,6 +6,8 @@ import type { SessionUser } from "@/server/auth/session";
 import { resolveVppCredits } from "@/server/modules/solar/vpp-credits";
 import { resolveLayoutAsset } from "./layout-asset";
 import { getSolarSettings } from "./settings";
+import { resolveDealerFee } from "@/lib/solar-dealer-fee";
+import { dealSignedAt } from "./signed-lock";
 import { readSolarReadiness } from "./readiness";
 import {
   buildProposalSnapshot,
@@ -458,13 +460,49 @@ export async function generateProposalVersion(
       })
     : null;
 
+  /**
+   * THE ONE FEE RULE (D8) — resolved ONCE, here, and used by every site below.
+   *
+   * `quotedRow` already carried the programme's fee and six sites read
+   * `finance.dealerFeePct` past it, so generation priced, capped, submitted and
+   * FROZE a fee the programme did not publish. On production that is five deals
+   * caching 65% against a programme publishing 0%.
+   *
+   * SIGNED DEALS ARE NOT RE-RESOLVED. The rule is the CURRENT rate on an
+   * UNSIGNED quote; once a household has signed, the copy cached on the deal is
+   * what the sale was made at, and commission is snapshotted against it. So a
+   * signed deal keeps its own figure and this refreshes nothing.
+   */
+  const signedAt = await dealSignedAt(user.companyId, leadId);
+  const dealerFee = signedAt
+    ? { pct: finance.dealerFeePct, source: "deal" as const }
+    : resolveDealerFee({
+        product: finance.product,
+        programmePct: quotedRow?.dealerFeePct,
+        dealPct: finance.dealerFeePct,
+        companyDefaultPct: assumptions.defaultDealerFeePct,
+      });
+
+  /**
+   * The cached copy, refreshed — "frozen at generation" is what makes it a
+   * cache rather than a second source of truth. Written before anything below
+   * reads it so the row, the document and the submission cannot disagree.
+   */
+  if (!signedAt && dealerFee.pct !== finance.dealerFeePct) {
+    finance.dealerFeePct = dealerFee.pct;
+    await prisma.solarFinance.update({
+      where: { leadId },
+      data: { dealerFeePct: dealerFee.pct },
+    });
+  }
+
   const capped = capStickerToFinalPpw({
     stickerPpwCents: finance.baseFinalPpwCents,
     maxFinalPpwCents: dealLender?.priceRulePpwCents ?? null,
     mode: dealLender?.priceRuleMode,
     basis: quotedRow?.ppwBasis,
     systemSizeKwDc: design.systemSizeKwDc,
-    dealerFeePct: finance.dealerFeePct,
+    dealerFeePct: dealerFee.pct,
     // The adders the partner's figure is a price FOR. A roof financed on top
     // rides above it and is added back by `pricePurchase` below.
     adderTotalCents: finance.addersInsideRuleCents,
@@ -495,7 +533,7 @@ export async function generateProposalVersion(
       product: finance.product,
       systemSizeKwDc: design.systemSizeKwDc,
       stickerPpwCents,
-      dealerFeePct: finance.dealerFeePct,
+      dealerFeePct: dealerFee.pct,
       adderTotalCents: finance.addersInsideRuleCents,
       onTopAdderTotalCents: finance.addersOutsideRuleCents,
       batteryPriceCents,
@@ -533,7 +571,7 @@ export async function generateProposalVersion(
       mode: dealLender?.priceRuleBatteryMode,
       basis: quotedRow?.batteryPriceBasis,
       units: design.batteryQty,
-      dealerFeePct: finance.dealerFeePct,
+      dealerFeePct: dealerFee.pct,
       adderTotalCents: finance.addersInsideRuleCents,
     });
 
@@ -541,7 +579,7 @@ export async function generateProposalVersion(
       product: finance.product,
       batteryQty: design.batteryQty,
       stickerPricePerBatteryCents: storageCap.stickerPerUnitCents,
-      dealerFeePct: finance.dealerFeePct,
+      dealerFeePct: dealerFee.pct,
       adderTotalCents: finance.addersInsideRuleCents,
       onTopAdderTotalCents: finance.addersOutsideRuleCents,
     });
@@ -793,7 +831,7 @@ export async function generateProposalVersion(
       // cash quote that never mentioned them.
       lenderId: dealLender?.id ?? null,
       grossPpwCents: finance.baseFinalPpwCents,
-      dealerFeePct: finance.dealerFeePct,
+      dealerFeePct: dealerFee.pct,
     },
     programmes: programmes.map((p): CatalogueProgramme => ({
       ...p,
@@ -971,7 +1009,7 @@ export async function generateProposalVersion(
       // prices the whole system at zero installed watts — see the field's note.
       stickerPricePerBatteryCents: finance.baseFinalPerBatteryCents,
       batteryPriceCents,
-      dealerFeePct: finance.dealerFeePct,
+      dealerFeePct: dealerFee.pct,
       adderTotalCents: finance.addersInsideRuleCents,
       onTopAdderTotalCents: finance.addersOutsideRuleCents,
       // Named and priced HERE, then frozen into the snapshot. Reading them back

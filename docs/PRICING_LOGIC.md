@@ -1653,3 +1653,78 @@ string literals. A guard that invents findings gets muted, so it blanks them
 now. It also used a `/…/s` regex, which this repo's target rejects (`TS1501`).
 
 **Results.** `tsc` 0. Unit 169 files / 2,531 passing. Lint clean.
+
+## 8.25 Stage 4, slice 4a — one fee rule, resolved once
+
+The dealer fee reached a deal from three places and was resolved in three
+different ORDERS by three different files:
+
+- `financeRowForProduct` read the programme first — correct.
+- `proposal-generate.ts` fetched the programme row, selected `dealerFeePct` on
+  it at `:446`, and then read `finance.dealerFeePct` at six sites instead.
+- `readiness.ts` read the deal's cached copy too.
+
+So one deal could be PRICED on the programme's rate and JUDGED against its own.
+On production that is not hypothetical: **Amos 30 Year Solar publishes 0% while
+all five of its deals cache 65%**, and `pricing.below_lender_floor` has been
+refusing them on a number no other part of the system used.
+
+**`src/lib/solar-dealer-fee.ts`** now owns the precedence, unchanged from the
+one `solar-finance-row.ts` already had:
+
+1. the PROGRAMME's fee today — the partner's published rate
+2. the copy cached on the deal — what it was last generated at
+3. the company default
+
+`??` and never `||`. Amos's 0% is a real, deliberate rate; `||` reads it as
+"unset" and falls through to the stale 65%, quoting a fee the partner does not
+charge. That case is the FIRST test in the file, because every other fixture
+uses a non-zero programme fee and would pass either way.
+
+**Signed deals are not re-resolved, and this gate is load-bearing.**
+`commission-pricing.ts` does NOT read a frozen measure — it reads
+`finance.dealerFeePct` live off the row, and says why: the signed document never
+prints the fee, so the base a commission is measured on cannot be taken off the
+document. Only the redline TERMS are snapshotted at signing. Had generation
+refreshed the cached fee unconditionally, regenerating the one signed Amos deal
+would drop it 65% → 0%, moving `baseKeptCents` from 35% of final to 100% —
+**nearly tripling the commission measure on a sold deal.** So `dealSignedAt()`
+gates the refresh: a signed deal keeps its copy, full stop.
+
+**The new field hit the hole guarded in §8.24, immediately.** `FinanceRow` gained
+`dealerFeeSource`, which is PROVENANCE and not a column. `deal-money.ts`'s exit
+spreads `...rest` into a Prisma payload, so the new key would have type-checked
+perfectly and failed at runtime with `Unknown argument`. It is destructured out
+by name with a comment saying why. The guard written before Stage 4 caught the
+first change Stage 4 made.
+
+**What moves on production.** Nothing a customer sees. `ppwBasis` on Amos 30
+Year Solar is `final`, so the fee does not enter the final price — it only
+splits it. The four UNSIGNED Amos deals move from a cached 65% to the
+programme's 0%:
+
+| Figure | Before | After | Why |
+|---|---|---|---|
+| Fee on 4 unsigned Amos deals | 65% (cached) | 0% (programme) | D8: the programme is the authority on an unsigned quote |
+| Kept base on those deals | 193¢/W | 550¢/W | fee no longer taken out of a `final`-basis price |
+| `pricing.below_lender_floor` | blocking all 5 | clears on the 4 | 550¢ ≥ the 200¢ floor once the fee is 0 |
+| Fee on the 1 SIGNED Amos deal | 65% | **65%** | frozen; `dealSignedAt` gate |
+| Customer final price, all 5 | — | **unchanged** | basis is `final`; the fee splits it, it does not set it |
+
+**This unblocks those deals for the wrong reason, and the owner should know
+that.** The programme's 0% is almost certainly the misconfigured value, not the
+deals' 65%: `solar-validation.ts:568` records that Amos publishes 65% against a
+flat $5.50/W. Setting the programme to 65% in the UI makes this slice a no-op
+for Amos and keeps the floor block — which is the honest state until the cap or
+the floor is also corrected. See §8.26 for the three settings.
+
+**Results.** tsc 0. Unit 170 files / 2,541 passing. Goldens unmoved. Lint clean
+(0 errors, 0 warnings).
+
+**The schema change cannot migrate, proved on the DDL.** The first check written
+for this counted `///` lines in the diff and reported 14 non-comment lines, which
+REFUTED the claim it was meant to support — `npx prisma format` had realigned
+field padding across three models. Counting comment markers was the wrong test.
+The right one strips comments, normalises whitespace and compares what is left:
+**3,039 DDL-significant lines before, 3,039 after, 0 differences.** Whitespace
+cannot produce DDL, so no migration is possible from this commit.

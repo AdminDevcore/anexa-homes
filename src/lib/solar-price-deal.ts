@@ -1,4 +1,5 @@
 import type { FinanceProduct } from "@prisma/client";
+import type { DealerFeeSource } from "./solar-dealer-fee";
 import {
   priceStoredPurchase,
   priceStorageStored,
@@ -59,7 +60,12 @@ import {
 export type CreditStateKey = "applied" | "notApplied";
 
 /** Where the dealer fee on this deal came from, for the margin indicator. */
-export type DealerFeeSource = "programme" | "deal" | "companyDefault";
+/**
+ * Re-exported, not declared. `solar-dealer-fee.ts` owns the precedence AND the
+ * vocabulary for it, so that the resolver and the priced deal cannot drift into
+ * describing the same three places with different words.
+ */
+export type { DealerFeeSource };
 
 /**
  * One reading of the money, under one credit state.
@@ -335,7 +341,10 @@ function creditState(
  */
 export function priceDeal(input: PriceDealInput): DealPrice {
   const dealerFeePct = input.product === "cash" ? 0 : input.dealerFeePct;
-  const source = input.dealerFeeSource ?? "programme";
+  // Cash carries no fee at all, so its provenance is `none` rather than a
+  // place a zero was read from. Mirrors the line above it.
+  const source: DealerFeeSource =
+    input.product === "cash" ? "none" : (input.dealerFeeSource ?? "programme");
 
   // ── Lease and PPA: electricity, not a system ─────────────────────────────
   if (!isPurchase(input.product)) {

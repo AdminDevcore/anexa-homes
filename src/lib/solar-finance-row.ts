@@ -1,4 +1,5 @@
 import type { FinanceProduct } from "@prisma/client";
+import { resolveDealerFee, type DealerFeeSource } from "./solar-dealer-fee";
 import {
   capStickerToFinalPpw,
   pricePurchase,
@@ -92,6 +93,8 @@ export type FinanceRow = {
   product: FinanceProduct;
   grossPpwCents: number;
   dealerFeePct: number;
+  /** Which of the three places that fee came from — see DealerFeeSource. */
+  dealerFeeSource: DealerFeeSource;
   adderTotalCents: number;
   onTopAdderTotalCents: number;
   contractPriceCents: number;
@@ -141,10 +144,22 @@ export function financeRowForProduct(
       ? ctx.lenderProduct
       : null;
 
-  // Cash has no lender, so it can never carry a dealer fee.
-  const dealerFeePct = isLoan
-    ? (lp?.dealerFeePct ?? f.dealerFeePct ?? assumptions.defaultDealerFeePct)
-    : 0;
+  /**
+   * Cash has no lender, so it can never carry a dealer fee.
+   *
+   * The precedence itself — the programme's CURRENT fee, then the copy cached
+   * on the deal, then the company default — moved to `resolveDealerFee`
+   * UNCHANGED. It was correct here and wrong in generation and readiness, both
+   * of which read the cached copy; sharing one function is what stops a deal
+   * being priced on one fee and judged against another.
+   */
+  const fee = resolveDealerFee({
+    product: f.product,
+    programmePct: lp?.dealerFeePct,
+    dealPct: f.dealerFeePct,
+    companyDefaultPct: assumptions.defaultDealerFeePct,
+  });
+  const dealerFeePct = fee.pct;
 
   // The sticker that leaves the target net after this product's fee.
   //
@@ -207,6 +222,7 @@ export function financeRowForProduct(
     // third-party-owned proposal.
     grossPpwCents: isPurchase ? grossPpwCents : 0,
     dealerFeePct,
+    dealerFeeSource: fee.source,
     adderTotalCents: isPurchase ? (f.adderTotalCents ?? 0) : 0,
     onTopAdderTotalCents: isPurchase ? (f.onTopAdderTotalCents ?? 0) : 0,
     contractPriceCents,

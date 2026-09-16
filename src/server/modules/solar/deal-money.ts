@@ -192,6 +192,16 @@ export async function dealMoneyColumns(
     contractPriceCents,
     monthlyPaymentCents,
     loanMonthlyPaymentCents,
+    // PROVENANCE, NOT A COLUMN. `dealerFeeSource` says where the fee above came
+    // from so a screen can print it; SolarFinance has no such column. It is
+    // named here for one reason: `rest` below is SPREAD into a Prisma payload,
+    // a spread is exempt from excess-property checking, and leaving this in it
+    // would type-check perfectly and then fail at runtime with
+    // `Unknown argument`. See solar-prisma-payload-spread.test.ts.
+    // Named solely to keep it OUT of `rest`, which is spread into a Prisma
+    // payload. The disable must sit on the line directly above the code.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    dealerFeeSource: _dealerFeeSource,
     ...rest
   } = rowData;
 
