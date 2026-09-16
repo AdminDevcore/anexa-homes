@@ -421,6 +421,9 @@ model Company {
   webhookEvents        WebhookEvent[]
   bankRules            BankRule[]
 
+  bills          Bill[]
+  lenderFundings LenderFunding[]
+
   @@map("companies")
   solarContractUnlocks SolarContractUnlock[]
 
@@ -1174,6 +1177,8 @@ model Lead {
   @@index([setterId])
   @@index([companyId, status])
   @@index([companyId, vertical], map: "leads_companyId_industry_idx")
+  lenderFundings LenderFunding[]
+
   @@map("leads")
   solarContractUnlocks SolarContractUnlock[]
 
@@ -1262,6 +1267,8 @@ model Project {
   @@index([companyId, status])
   @@index([companyId, managerId])
   @@index([companyId, vertical])
+  bills Bill[]
+
   @@map("projects")
 }
 
@@ -2306,6 +2313,11 @@ model Invoice {
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
+  /// The A/R entry this invoice posted as. Null means it has not been
+  /// posted to the journal — a draft, or a row that predates the ledger.
+  journalEntryId String?       @unique
+  journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
+
   @@unique([companyId, invoiceNumber])
   @@index([companyId, projectId])
   @@map("invoices")
@@ -2720,6 +2732,8 @@ model BookkeepingVendor {
   journalLines JournalLine[]
   bankRules    BankRule[]
 
+  bills Bill[]
+
   @@index([companyId])
   @@map("bookkeeping_vendors")
 }
@@ -2871,6 +2885,9 @@ model LedgerAccount {
   @@unique([companyId, systemKey])
   @@index([companyId, type])
   @@index([companyId, active])
+  /// Bills that expense to this account.
+  billExpenses Bill[]
+
   @@map("ledger_accounts")
 }
 
@@ -2929,6 +2946,12 @@ model JournalEntry {
   @@unique([companyId, sourceType, sourceId])
   @@index([companyId, date])
   @@index([companyId, status])
+  /// What this entry recorded, where the record is a document of its own.
+  /// Each is a distinct model, so none of these relations needs a name.
+  invoices       Invoice[]
+  bills          Bill[]
+  lenderFundings LenderFunding[]
+
   @@map("journal_entries")
 }
 
@@ -3200,6 +3223,9 @@ model BankFeedTransaction {
   @@index([companyId, status, postedAt])
   @@index([bankAccountId, postedAt])
   @@index([journalEntryId])
+  /// The lender deposit this row turned out to be, if it was one.
+  lenderFunding LenderFunding?
+
   @@map("bank_feed_transactions")
 }
 
@@ -4579,6 +4605,25 @@ model SolarLender {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  /// ── HOW THIS LENDER PAYS US ────────────────────────────────────────────
+  /// A lender does not wire the contract price. It wires the contract MINUS
+  /// its dealer fee, usually in stages, and the stages differ by lender. These
+  /// describe the expectation so a deposit can be recognised when it lands.
+  ///
+  /// Null everywhere = no expectation is formed, and deposits are decided by
+  /// hand. That is the honest default: guessing a funding schedule would
+  /// produce confident "short by $X" figures for a lender nobody configured.
+  fundsNetOfDealerFee Boolean @default(true)
+  /// Share of the net released at each stage, 0–1. They should sum to 1.
+  fundingM1Pct Float?
+  fundingM2Pct Float?
+  /// How far a deposit may sit from the expectation and still auto-match.
+  /// Lenders round, withhold small holdbacks and net off adders; an exact-cents
+  /// rule would send every real deposit to manual review.
+  fundingToleranceCents Int @default(0)
+
+  fundings LenderFunding[]
 
   @@index([companyId, isActive])
   @@map("solar_lenders")
@@ -6218,4 +6263,157 @@ model NovaPendingAction {
 
   @@index([companyId, actorId, status])
   @@map("nova_pending_actions")
+}
+
+// ---------------------------------------------------------------------------
+// Payables and lender funding (Phase 4)
+// ---------------------------------------------------------------------------
+
+/// What a bill is doing right now.
+///
+/// `open` is the working state: accrued into Accounts Payable and owed. `paid`
+/// means a payment entry settled it. `void` is reached by reversal, never by
+/// deleting the row — a bill that was entered and cancelled is part of the
+/// record of what happened.
+enum BillStatus {
+  draft
+  open
+  paid
+  void
+}
+
+/// When a lender releases money. Solar lenders pay in stages, not in one wire.
+enum FundingMilestone {
+  /// Usually on install.
+  m1
+  /// Usually on permission to operate.
+  m2
+  /// A single-stage lender, or the last release on a multi-stage one.
+  final
+  /// Anything else — a holdback release, a correction.
+  other
+}
+
+/// Where a funding stands against what was expected.
+///
+/// `short` and `over` are recorded rather than corrected. A deposit that does
+/// not match the expectation is a fact about the lender, and the difference is
+/// posted to Dealer Fees or Funding Variance so it appears on the P&L instead
+/// of being absorbed into revenue where nobody would ever see it.
+enum FundingStatus {
+  expected
+  received
+  short
+  over
+  void
+}
+
+/// A VENDOR BILL — what we owe, and since when.
+///
+/// TAGGED, exactly as `Invoice` is: stamped with the department on write and
+/// never filtered on read, so the consolidated books still roll up while the
+/// P&L can break out by vertical. A bill with no vertical is genuinely
+/// company-level — office rent, a software subscription.
+///
+/// The bill links only its ACCRUAL entry. Paying it posts a separate journal
+/// entry keyed `bill:<id>:payment`, so the two events stay two events: a bill
+/// entered in March and paid in May is an expense in March and a movement of
+/// cash in May, which is the whole reason accrual accounting exists.
+model Bill {
+  id        String    @id @default(uuid())
+  companyId String
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  vertical  Vertical?
+
+  vendorId String
+  /// Restrict, not Cascade: deleting a vendor must not silently delete the
+  /// record of money owed to them. The bill is evidence.
+  vendor   BookkeepingVendor @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+
+  billNumber  String
+  status      BillStatus @default(open)
+  amountCents Int        @default(0)
+
+  /// The date the VENDOR billed, which is the date the expense belongs to.
+  billedAt DateTime
+  dueAt    DateTime?
+  paidAt   DateTime?
+
+  /// The job this is a cost of, when it is one.
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  /// Which expense or COGS account it lands in.
+  expenseAccountId String?
+  expenseAccount   LedgerAccount? @relation(fields: [expenseAccountId], references: [id], onDelete: SetNull)
+
+  /// The A/P accrual this bill posted as.
+  journalEntryId String?       @unique
+  journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
+
+  memo        String?
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([companyId, billNumber])
+  @@index([companyId, status, dueAt])
+  @@index([vendorId])
+  @@map("bills")
+}
+
+/// MONEY A LENDER OWES US ON A DEAL, AND WHAT ACTUALLY ARRIVED.
+///
+/// A financed solar deal is not paid by the customer; it is paid by the lender,
+/// net of the lender's dealer fee, usually in stages. This row is the
+/// expectation and its settlement side by side, so "we are owed $18,400 on this
+/// job" is a figure the books can state rather than something a person
+/// reconstructs from a bank statement.
+///
+/// TAGGED: a funding belongs to a department (solar today), stamped on write.
+///
+/// One row per deal per milestone — `@@unique([companyId, leadId, milestone])`
+/// — so a lender that wires M1 twice cannot create two open expectations, and
+/// re-running the expectation builder updates rather than duplicates.
+model LenderFunding {
+  id        String   @id @default(uuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  vertical  Vertical @default(solar)
+
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  lenderId String?
+  lender   SolarLender? @relation(fields: [lenderId], references: [id], onDelete: SetNull)
+
+  milestone     FundingMilestone @default(m1)
+  /// What the lender should send: contract less the dealer fee, times this
+  /// milestone's share. Zero when no expectation could be formed.
+  expectedCents Int              @default(0)
+  /// What actually arrived.
+  receivedCents Int              @default(0)
+  status        FundingStatus    @default(expected)
+
+  expectedAt DateTime?
+  receivedAt DateTime?
+
+  /// The bank row this was recognised from, kept as the evidence for it.
+  bankFeedTransactionId String?              @unique
+  bankFeedTransaction   BankFeedTransaction? @relation(fields: [bankFeedTransactionId], references: [id], onDelete: SetNull)
+
+  /// The entry that booked the deposit and its variance.
+  journalEntryId String?       @unique
+  journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
+
+  memo        String?
+  decidedById String?
+  decidedAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([companyId, leadId, milestone])
+  @@index([companyId, status])
+  @@index([leadId])
+  @@map("lender_fundings")
 }
