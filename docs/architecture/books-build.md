@@ -272,6 +272,31 @@ tables, which then presents as P3005 and "table does not exist" in suites that
 have nothing to do with the change being tested. Repair is to drop and recreate
 `vertical_test` and deploy once, in a single process.
 
+**Run in a schema of your own instead — the config already supports it.** That
+warning is not enough, because you cannot stop another session from starting.
+`global-setup.ts` reads `VERTICAL_TEST_DATABASE_URL` and falls back to
+`vertical_test`, and `vitest.integration.config.ts` feeds the same constant into
+`env.DATABASE_URL`, so the app client follows it too. No code change is needed:
+
+```bash
+psql "postgresql://anexa:anexa@127.0.0.1:5544/anexa" -c 'CREATE SCHEMA IF NOT EXISTS vertical_books;'
+export VERTICAL_TEST_DATABASE_URL="postgresql://anexa:anexa@127.0.0.1:5544/anexa?schema=vertical_books"
+pnpm exec vitest run --config vitest.integration.config.ts
+```
+
+**A second presentation of the same contention, seen during Phase 3.** The suite
+came back 202 failed across 16 files, every one a `40P01 deadlock detected`,
+in suites the change could not reach (`payroll-ledger`, `pricing-stage1`,
+`review`). The tell is in the deadlock detail: *"waits for RowShareLock … blocked
+by … waits for AccessExclusiveLock"*. `RowShareLock` is an ordinary foreign-key
+read; **`AccessExclusiveLock` is a DDL lock** — CREATE / ALTER / DROP / TRUNCATE
+— and ordinary test code never takes one. Its presence is proof that something
+outside the suite was changing the schema mid-run. The identical commit then
+passed **981/981 with zero deadlocks** on a private schema. Before debugging
+application code, check `select nspname from pg_namespace` for other sessions'
+schemas; `pg_stat_activity` shows only the current instant, so an empty result
+there does not mean nothing ran during the test run.
+
 ### Phase 1 closing decisions (2026-09-16)
 
 **Payroll reaches the journal on TWO events, not one.** Approving a run accrues
@@ -497,6 +522,16 @@ since. What remains genuinely open:
 - **Plaid credentials and the ACH provider.** Both are owner decisions with
   costs attached; Phase 2 and Phase 5 build against a fixture provider behind an
   env-selected interface so neither blocks the work.
-- **What exactly `accountant_readonly` may export.** Read-only is settled; the
-  export surface is not, and it interacts with the row-scope boundary note on
-  `postManualEntryAction`.
+- ~~**What exactly `accountant_readonly` may export.**~~ **Settled 2026-09-16**
+  (commit `cd40a20`): `Bookkeeping` and `Report`, `read` + `export`, and nothing
+  else. Export is included deliberately — a year-end handover is a set of files,
+  not a screen share. `Payroll` and `ContractorInvoice` are deliberately
+  excluded: they name individual people and what they were paid, and the reports
+  already carry the totals an accountant needs. `Project: ["read"]` was refused
+  for the same reason — it would hand an outside party the whole pipeline, with
+  customer names and addresses, to answer questions the reports already answer.
+  `create` is withheld partly because the role is read-only and partly because
+  `row-scope-boundary.test.ts` permits `postManualEntryAction` to take a
+  `projectId` unchecked *on the stated grounds that everyone holding
+  `Bookkeeping:create` sees every job in the company*; granting create here would
+  have made that entry quietly false. Assignment is super-admin-only.
