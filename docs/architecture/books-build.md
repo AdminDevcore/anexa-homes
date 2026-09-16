@@ -272,6 +272,46 @@ tables, which then presents as P3005 and "table does not exist" in suites that
 have nothing to do with the change being tested. Repair is to drop and recreate
 `vertical_test` and deploy once, in a single process.
 
+### Phase 1 closing decisions (2026-09-16)
+
+**Payroll reaches the journal on TWO events, not one.** Approving a run accrues
+it (expense against a payable, per line); marking it paid settles it (payables
+down, bank down, one entry for the whole run because one transfer leaves the
+account and the bank statement will show one line). The old ledger wrote a
+single negative row at payment time, which meant an approved-but-unpaid run —
+money genuinely owed — existed nowhere in the books.
+
+**The bank account is resolved, never guessed.** `payPayrollRun` needs the
+account the money left, and a payroll run has never carried one. It resolves to
+the company's single active non-card account; where that is ambiguous or absent
+the run is left **accrued but unsettled**, to be settled from the Books screen.
+Guessing would understate one real balance and overstate another, and both read
+as ordinary until a reconciliation fails months later. A payable still sitting
+open is visible and explains itself. *Open question for the owner: whether to
+put a designated payroll bank account on the company record instead.*
+
+**The legacy ledger is dual-written, not cut over.** `postRunToBookkeeping` and
+the `transactions` table still feed `/portal/bookkeeping`, so both are written
+until that page moves onto the journal. Retiring the table is its own slice.
+
+**The Books screen is new and additive** at `/portal/books` — chart of accounts,
+journal register with drill-down, bank accounts and transfers, period close.
+`/portal/bookkeeping` is untouched. The trial balance sits above every tab
+rather than on one of them: it is the only figure on the page that checks the
+ledger instead of describing it, and a disagreement there is a bug, not a
+bookkeeping mistake.
+
+**The inversion now pinned by test:** a rep's commission is an EXPENSE, a
+subcontractor's invoice is a JOB COST. Both lines are deal-tagged, so the tag is
+not what separates them — the account class is. Swap them and every job looks
+worse the better it was sold, gross margin moves untraceably, and every
+individual entry still balances perfectly. `payroll-posting.itest.ts` asserts
+the account types directly, because nothing else catches it.
+
+Gates at the end of Phase 1: tsc 0 errors; lint clean on the changed files;
+unit 2497/2497; integration 72 files / 941 tests, 0 failures, 0 deadlocks
+(baseline was 71 / 927).
+
 ---
 
 ## Not decided yet
@@ -279,10 +319,20 @@ have nothing to do with the change being tested. Repair is to drop and recreate
 These decisions leave some questions open. Settle each one before the phase that
 needs it, and record the answer here.
 
-- **Accounting basis** for reports: cash, accrual, or both. This is needed by
-  Phase 3, and by Phase 1 if invoices and bills post to A/R and A/P.
-- **Fiscal year start.** Needed by Phase 1 for periods.
-- **Chart of accounts numbering scheme** and the starting accounts. Needed by
-  Phase 1.
-- **How payroll posting maps onto journal entries**, including the per-line
-  `externalId` keys. Needed by Phase 1.
+The four questions this section opened with — accounting basis, fiscal year
+start, chart numbering, and how payroll maps onto journal entries — were all
+settled above under "Decisions settled before Phase 1" and have been built on
+since. What remains genuinely open:
+
+- **Which bank account payroll pays from.** Currently inferred when exactly one
+  active non-card account exists (see Phase 1 closing decisions). A designated
+  account on the company record would remove the inference. Owner's call.
+- **When to retire the legacy `transactions` table** and move
+  `/portal/bookkeeping` onto the journal. Needs a data migration for any rows
+  written between now and then.
+- **Plaid credentials and the ACH provider.** Both are owner decisions with
+  costs attached; Phase 2 and Phase 5 build against a fixture provider behind an
+  env-selected interface so neither blocks the work.
+- **What exactly `accountant_readonly` may export.** Read-only is settled; the
+  export surface is not, and it interacts with the row-scope boundary note on
+  `postManualEntryAction`.
