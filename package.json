@@ -6,7 +6,7 @@
     "copy-pdf-worker": "node -e \"require('fs').copyFileSync(require.resolve('pdfjs-dist/build/pdf.worker.min.mjs'),'public/pdf.worker.min.mjs')\"",
     "postinstall": "node -e \"try{require('fs').copyFileSync(require.resolve('pdfjs-dist/build/pdf.worker.min.mjs'),'public/pdf.worker.min.mjs')}catch(e){}\"",
     "dev": "npm run copy-pdf-worker && next dev",
-    "build": "node scripts/prod-migrate.mjs && prisma generate && npm run copy-pdf-worker && next build",
+    "build": "node scripts/prod-migrate.mjs && prisma generate && tsx scripts/check-agent-handlers.ts && npm run copy-pdf-worker && next build",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
