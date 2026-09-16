@@ -374,6 +374,34 @@ export async function voidJournalEntry(input: VoidInput): Promise<PostResult> {
   if (!original) return { ok: false, error: "Entry not found." };
   if (original.status === "void") return { ok: false, error: "That entry is already void." };
 
+  /**
+   * A RECONCILED LINE IS LOCKED.
+   *
+   * If any line of this entry was cleared against a bank statement, the entry
+   * cannot be voided until that reconciliation is undone. A month that has been
+   * agreed with the bank stops being evidence the moment its lines can still
+   * move underneath it — and the reconciliation would silently stop adding up,
+   * with nothing on screen saying why.
+   *
+   * Counted inline rather than imported from `reconcile.ts`, which already
+   * imports this module's actor type; six lines is cheaper than a cycle.
+   */
+  const lockedLines = await prisma.journalLine.count({
+    where: {
+      companyId,
+      entryId: original.id,
+      reconciledAt: { not: null },
+      bankReconciliation: { status: "completed" },
+    },
+  });
+  if (lockedLines > 0) {
+    return {
+      ok: false,
+      error:
+        "This entry has been reconciled against a bank statement. Undo that reconciliation before voiding it.",
+    };
+  }
+
   const date = input.date ?? original.date;
   // The void reason IS the lock reason. Voiding already demands one, so a
   // separate override field would be a second box asking the same question.

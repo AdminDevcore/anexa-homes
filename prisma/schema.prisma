@@ -375,6 +375,7 @@ model Company {
   ledgerAccounts           LedgerAccount[]
   journalEntries           JournalEntry[]
   bankAccounts             BankAccount[]
+  bankReconciliations      BankReconciliation[]
   accountingPeriodLock     AccountingPeriodLock?
   financeAuditEvents       FinanceAuditEvent[]
   knowledgeCategories      KnowledgeCategory[]
@@ -2958,13 +2959,56 @@ model JournalLine {
   memo     String?
   position Int     @default(0)
 
+  /// Cleared against a bank statement. A reconciled line is LOCKED: it cannot
+  /// be voided or re-dated without first undoing the reconciliation it settled
+  /// in, because a closed reconciliation is the evidence that the books and the
+  /// bank agreed on a date.
+  reconciledAt         DateTime?
+  bankReconciliationId String?
+  bankReconciliation   BankReconciliation? @relation(fields: [bankReconciliationId], references: [id], onDelete: SetNull)
+
   createdAt DateTime @default(now())
 
   @@index([companyId, accountId])
   @@index([companyId, projectId])
   @@index([companyId, vendorId])
   @@index([entryId])
+  @@index([bankReconciliationId])
   @@map("journal_lines")
+}
+
+/// A completed bank reconciliation: one statement (account + date + ending
+/// balance) matched against the lines it cleared.
+///
+/// UNDO IS LOGGED, NEVER DELETED. Undoing sets `status = "undone"` with who and
+/// why, and releases its lines — the row stays, because "this month was
+/// reconciled and then un-reconciled" is exactly the fact an auditor asks about.
+model BankReconciliation {
+  id            String      @id @default(uuid())
+  companyId     String
+  company       Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  bankAccountId String
+  bankAccount   BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+
+  statementDate         DateTime
+  /// What the bank said the account held on that date.
+  statementBalanceCents Int
+  /// Everything already reconciled before this one — the authoritative start.
+  beginningBalanceCents Int
+  clearedCount          Int    @default(0)
+
+  /// "completed" | "undone"
+  status       String    @default("completed")
+  undoneAt     DateTime?
+  undoneById   String?
+  undoneReason String?
+
+  createdById String?
+  createdAt   DateTime      @default(now())
+  lines       JournalLine[]
+
+  @@index([companyId, bankAccountId, statementDate])
+  @@map("bank_reconciliations")
 }
 
 enum BankAccountKind {
@@ -2999,6 +3043,8 @@ model BankAccount {
   openingBalanceDate  DateTime?
 
   active Boolean @default(true)
+
+  reconciliations BankReconciliation[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
