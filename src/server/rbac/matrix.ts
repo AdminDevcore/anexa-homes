@@ -160,6 +160,9 @@ const GRANTS: Partial<Record<Role, Grant>> = {
     Knowledge: ALL,
     Scope: ALL,
     Proposal: ALL,
+    // "manage", like every other line here — but there is no delete action on
+    // an agent anywhere in the app: disabling is how one is retired, exactly as
+    // the admin grant below spells out. The Roles page reads this "full access".
     Agent: ALL,
   },
 

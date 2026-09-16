@@ -1279,6 +1279,7 @@ async function main() {
         channels: ["in_app"],
         titleTemplate: "Agent failed: {{agent}}",
         bodyTemplate: "{{status}}",
+        active: true,
       },
       {
         companyId: company.id,
@@ -1290,6 +1291,7 @@ async function main() {
         channels: ["in_app"],
         titleTemplate: "Needs a human: {{agent}}",
         bodyTemplate: "{{status}}",
+        active: true,
       },
     ]),
   });

@@ -61,7 +61,14 @@ const resultSchema = z
   .strict();
 
 export function truncateSummary(summary: string): string {
-  return summary.length <= SUMMARY_MAX ? summary : `${summary.slice(0, SUMMARY_MAX - 1)}…`;
+  if (summary.length <= SUMMARY_MAX) return summary;
+  const cut = summary.slice(0, SUMMARY_MAX - 1);
+  // An emoji is two UTF-16 units, so the cut can land between its halves and
+  // leave a lone surrogate, which renders as a replacement box. Drop the orphan
+  // rather than show it — one character shorter is not worth noticing.
+  const lastUnit = cut.charCodeAt(cut.length - 1);
+  const orphaned = lastUnit >= 0xd800 && lastUnit <= 0xdbff;
+  return `${orphaned ? cut.slice(0, -1) : cut}…`;
 }
 
 /** A handler is code, but its result is still input: nothing it returns is trusted unparsed. */

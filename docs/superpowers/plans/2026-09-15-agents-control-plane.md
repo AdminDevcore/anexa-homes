@@ -5487,6 +5487,10 @@ git commit -m "feat(agents): labels and form values, and every reason saving an 
 
 ---
 
+> **Note after the Task 16 code review:** on an app-only rollback (the code reverts, the database keeps these rows)
+> the seeded rows go inert. Nothing in a reverted build fires `agent_run_failed` or `agent_needs_human`, so the
+> disabled Hello Agent and the four alert rules simply sit unused until the code returns.
+
 ## Task 16: The Hello Agent and starter alerts for every company
 
 **Files:**

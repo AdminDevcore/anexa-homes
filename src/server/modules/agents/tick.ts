@@ -17,6 +17,12 @@ export type TickReport = {
   started: number;
   missingHandler: number;
   skippedInFlight: number;
+  /**
+   * A query this tick depends on threw. Without it a broken tick is
+   * indistinguishable from a quiet one: `started: 0` reads as "nothing was
+   * due" when it actually means "could not look".
+   */
+  degraded: boolean;
   results: { runId: string; status: AgentRunStatus | null }[];
 };
 
@@ -31,7 +37,7 @@ export type TickReport = {
  */
 export async function tick(now: Date = new Date()): Promise<TickReport> {
   const anchorMs = now.getTime();
-  const report: TickReport = { reaped: 0, started: 0, missingHandler: 0, skippedInFlight: 0, results: [] };
+  const report: TickReport = { reaped: 0, started: 0, missingHandler: 0, skippedInFlight: 0, degraded: false, results: [] };
 
   try {
     report.reaped = await reapStuckRuns(now);
@@ -39,12 +45,19 @@ export async function tick(now: Date = new Date()): Promise<TickReport> {
     // A failing reap costs this tick its reap, not the tick itself: claiming
     // and executing due runs must not be held hostage by a slow or broken
     // reaper. Left at 0 rather than guessed.
+    report.degraded = true;
     console.error("[agents] reap failed; leaving stuck runs for the reaper's next pass", err);
   }
 
   const toRun: { runId: string; owned: boolean }[] = [];
 
   try {
+    // Deliberately global, and not scoped to a company: the tick runs unscoped
+    // for every company, and a manual run whose after() never started it has to
+    // be picked up whoever queued it. `take` bounds what that can cost, so one
+    // company's backlog cannot spend the whole tick. Integration tests each own
+    // their own schema, so another vitest process's queued rows are not visible
+    // from here in the first place.
     const stale = await prisma.agentRun.findMany({
       where: { status: "queued", createdAt: { lt: new Date(anchorMs - STALE_QUEUED_MS) } },
       orderBy: { createdAt: "asc" },
@@ -109,6 +122,11 @@ export async function tick(now: Date = new Date()): Promise<TickReport> {
         // One agent's claim failing (a pool error, a transient DB blip) must
         // not cost every OTHER due agent its run: those already pushed into
         // toRun stay owned and get executed below regardless.
+        //
+        // A throw AFTER the claim succeeded costs this agent THIS occurrence:
+        // nextRunAt has already moved on, so nothing retries the missed slot and
+        // the agent simply runs again at its next scheduled time. That is the
+        // price of claiming before starting, and this log line is the record.
         console.error("[agents] could not claim", agent.id, err);
       }
     }
@@ -116,6 +134,7 @@ export async function tick(now: Date = new Date()): Promise<TickReport> {
     // Finding the due set itself failed. Whatever was already claimed above
     // (stale queued runs picked up before this) still gets executed in the
     // finally below, rather than left running forever.
+    report.degraded = true;
     console.error("[agents] failed while finding due agents; running whatever was already claimed", err);
   } finally {
     report.started = toRun.length;

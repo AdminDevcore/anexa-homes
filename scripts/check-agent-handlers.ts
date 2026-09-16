@@ -15,6 +15,13 @@ async function main() {
     console.log(`[check-agent-handlers] VERCEL_ENV=${process.env.VERCEL_ENV ?? "(unset)"} — not a production build, skipping.`);
     return;
   }
+  /**
+   * A PLAIN client, not `@/server/db/client`.
+   *
+   * The extended one enforces the vertical scope from async-local storage,
+   * which a build script has none of — and this has to span every company's
+   * enabled agents rather than the ones one workspace can see.
+   */
   const prisma = new PrismaClient();
   try {
     const rows = await prisma.agent.findMany({

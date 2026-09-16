@@ -1,4 +1,5 @@
--- prisma/migrations/20260916100200_agents_seed_rows/migration.sql
+-- Starter agent rows for every company that already exists. Additive and
+-- idempotent: re-running writes nothing a previous run already wrote.
 --
 -- The Hello Agent for every company: disabled, unscheduled, gated. It exists so
 -- an admin can press Run now and watch the runner and the run log work end to

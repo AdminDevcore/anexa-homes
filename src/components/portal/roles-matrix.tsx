@@ -111,6 +111,11 @@ export function RolesMatrix({ roles }: { roles: RoleGrants[] }) {
                 The matrix lives in code rather than in the database, so a grant cannot be widened
                 by accident from a settings screen. Changing one is a deploy.
               </Hint>
+              <Hint>
+                Agents access is not a role and does not appear above. It is a per-person switch on
+                a team member&rsquo;s page, and it lets somebody run and resolve agents whose role
+                here stops at reading them.
+              </Hint>
             </Panel>
           </div>
         </div>

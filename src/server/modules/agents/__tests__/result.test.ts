@@ -41,6 +41,14 @@ describe("parseAgentResult", () => {
     expect(truncateSummary("short")).toBe("short");
   });
 
+  it("does not cut an emoji in half at the limit", () => {
+    // 278 plain characters, then an emoji straddling the 279th UTF-16 unit: a
+    // naive slice keeps its high surrogate alone and the UI shows a box.
+    const cut = truncateSummary(`${"x".repeat(278)}😀${"y".repeat(20)}`);
+    expect(cut.length).toBe(SUMMARY_MAX - 1);
+    expect([...cut].every((ch) => ch === "x" || ch === "…")).toBe(true);
+  });
+
   it("refuses a change: typo instead of changes:, rather than silently dropping it", () => {
     const r = parseAgentResult({
       status: "success",
