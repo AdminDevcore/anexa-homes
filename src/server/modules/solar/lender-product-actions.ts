@@ -1,6 +1,7 @@
 "use server";
 
 import { z } from "zod";
+import type { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/server/db/client";
 import { requireUser } from "@/server/auth/session";
@@ -146,7 +147,16 @@ export async function upsertSolarLenderProductAction(
   });
   if (!lender) return fail("Lender not found.");
 
-  const data = {
+  /**
+   * ANNOTATED, so the keys below are actually checked.
+   *
+   * This literal is spread into `create` a few lines down, and a spread
+   * member is exempt from excess-property checking however the target is
+   * typed. Naming the input type here restores the check where it still
+   * works — on a fresh literal's own keys — so a field renamed in the
+   * schema and not here fails to compile instead of failing at runtime.
+   */
+  const data: Omit<Prisma.SolarLenderProductUncheckedCreateInput, "companyId"> = {
     lenderId: d.lenderId,
     product: d.product,
     name: d.name?.trim() || null,

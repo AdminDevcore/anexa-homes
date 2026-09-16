@@ -1606,3 +1606,50 @@ passing, 0 failing. Lint clean.
 **STOPPED HERE.** Stage 4 (rewire the 25 sites) and Stage 5 (the model flip: D1,
 D2, D3, D6, D9) are NOT started — credit ownership is with counsel and Stage 5
 depends on that answer.
+
+## 8.24 The spread hole, guarded (before Stage 4)
+
+Stage 2's three defects were one family: a renamed field reaching a payload the
+compiler had stopped checking. The retired-name guard (§8.22) catches a retired
+spelling written as a literal KEY inside a Prisma call. It cannot see one that
+arrives through a **spread**, which is how two of the three got in.
+
+**Why the compiler cannot help.** TypeScript checks an object literal's OWN
+properties for excess keys. A spread member is exempt — always, and however the
+target is typed. So `prisma.solarDealAdder.create({ data: { leadId, ...line } })`
+type-checks perfectly while `line` carries a key the model does not have. Prisma
+addresses FIELDS, not columns, so that either throws `Unknown argument` or,
+where a cast widened it first, writes nothing and reports success.
+
+**`solar-prisma-payload-spread.test.ts`** is a RATCHET over the money-bearing
+models (`solarFinance`, `solarLender`, `solarLenderProduct`, `solarDealAdder`,
+`solarDesign`, `solarSettings`, `solarDealComp`, `solarEquipment`,
+`solarProposal`). All 37 spreads that exist today are listed; a new one fails
+until somebody adds it deliberately, which is the moment to ask whether the
+payload should be MAPPED instead. A stale entry fails too, so removing a spread
+means removing its line and the list cannot grow a fiction.
+
+A blanket ban was the alternative and was rejected: 93 sites repo-wide, which
+would have buried the three that matter in churn.
+
+**The three named production sites, closed by what actually type-checks there:**
+
+- `lender-product-actions.ts:149` spreads a FRESH OBJECT LITERAL. It is now
+  annotated `Omit<Prisma.SolarLenderProductUncheckedCreateInput, "companyId">`.
+  Excess-property checking applies to a literal's own keys, so all sixteen are
+  now checked; the two trailing `...(cond ? {} : {…})` guards stay exempt, which
+  is harmless — they carry `rank` and `isActive`.
+- `actions.ts:1017` and `:1505` spread **zod parses**. No annotation and no
+  assignment can restore the check there, because the parse is not a fresh
+  literal at the call site. So a second test proves each schema's keys against
+  the model's own field list, read out of `schema.prisma` — at the schema, which
+  is where the two halves are supposed to agree.
+
+**The guard's first run was wrong, and that is worth recording.** The key
+scanner reported `only`, `MW`, `URL` and `javascript` as schema fields — words
+harvested out of `// Loans only.`, `Capped at 1 MW` and a note about
+`javascript:` links, because it walked brace depth without blanking comments and
+string literals. A guard that invents findings gets muted, so it blanks them
+now. It also used a `/…/s` regex, which this repo's target rejects (`TS1501`).
+
+**Results.** `tsc` 0. Unit 169 files / 2,531 passing. Lint clean.
