@@ -13,6 +13,9 @@ export const ROLE_LABELS: Partial<Record<Role, string>> = {
   marketing: "Marketing",
   installer: "Installer / Crew",
   accounting: "Payroll / Accounting",
+  // Named for what they can do, not for who they are: this label is what an
+  // admin reads in the invite dropdown before handing someone the books.
+  accountant_readonly: "Accountant (read-only)",
 };
 
 // Roles a Super Admin / Admin can actually assign in the UI (retired ones excluded).
@@ -25,6 +28,7 @@ export const ASSIGNABLE_ROLES: Role[] = [
   "marketing",
   "installer",
   "accounting",
+  "accountant_readonly",
 ];
 
 export function roleLabel(role: Role): string {
@@ -34,7 +38,16 @@ export function roleLabel(role: Role): string {
 // Privileged roles that ONLY a Super Admin may grant — whether inviting a new
 // user or changing an existing member's role. Admins and sales managers can
 // invite/manage staff, but can never create or promote anyone into these.
-export const SUPER_ADMIN_ONLY_ROLES: Role[] = ["super_admin", "admin", "manager", "accounting"];
+export const SUPER_ADMIN_ONLY_ROLES: Role[] = [
+  "super_admin",
+  "admin",
+  "manager",
+  "accounting",
+  // The outside CPA reads every figure the company has. Read-only is not a
+  // reason to let a sales manager hand that out — who sees the books is an
+  // owner's decision, the same as who runs payroll.
+  "accountant_readonly",
+];
 
 /** Can `actor` assign `target` — i.e. invite into it or change a user to it? */
 export function canAssignRole(actor: Role, target: Role): boolean {

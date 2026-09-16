@@ -32,13 +32,21 @@ const ROLE_LABEL: Record<Role, string> = {
   marketing: "Marketing",
   installer: "Installer / Crew",
   accounting: "Accounting",
+  accountant_readonly: "Accountant (read-only)",
   customer: "Customer",
 };
 
-/** Roughly seniority, so the panel reads top-down like an org chart. */
+/**
+ * Roughly seniority, so the panel reads top-down like an org chart.
+ *
+ * Every role has to be listed. This is a plain array rather than a total record,
+ * so TypeScript will not notice an omission — but `indexOf` returns -1 for a
+ * missing role, which sorts it ABOVE the owner. A new role left out here does
+ * not fail to build; it quietly appears at the top of the list.
+ */
 const ROLE_ORDER: Role[] = [
   "super_admin", "admin", "manager", "sales_rep",
-  "canvasser", "marketing", "installer", "accounting", "customer",
+  "canvasser", "marketing", "installer", "accounting", "accountant_readonly", "customer",
 ];
 
 export function demoModeEnabled(): boolean {

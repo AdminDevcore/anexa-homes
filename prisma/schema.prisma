@@ -23,6 +23,14 @@ enum Role {
   marketing
   installer
   accounting
+  /// The outside CPA. Reads and exports the books and the reports, and can do
+  /// NOTHING else — see the grants in rbac/matrix.ts, which are the definition.
+  ///
+  /// A separate role rather than a flag on `accounting`, because the difference
+  /// is not a preference that could be toggled off by accident: this person is
+  /// outside the company, and every write verb they do not hold is one they can
+  /// never be granted by a settings screen.
+  accountant_readonly
   customer
 }
 

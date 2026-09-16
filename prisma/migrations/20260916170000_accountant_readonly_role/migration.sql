@@ -1,0 +1,12 @@
+-- AlterEnum
+--
+-- Adds one value to an existing enum. Non-destructive: no table is rewritten,
+-- no existing value is removed, and no row changes.
+--
+-- HAND-WRITTEN rather than generated. `migrate diff` against the shared test
+-- database produced a script that ALSO dropped tables and narrowed an enum
+-- belonging to work that is not on this branch, because that database had
+-- drifted ahead of this migration history. A generated diff is only as
+-- trustworthy as the database it is diffed against. The line below is the only
+-- schema change this branch needs.
+ALTER TYPE "Role" ADD VALUE 'accountant_readonly';

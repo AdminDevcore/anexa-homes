@@ -21,6 +21,11 @@ export const ROLES = [
   "marketing",
   "installer",
   "accounting",
+  // Listed here, and not only in GRANTS, because this list is what the ratchet
+  // tests iterate. A role missing from it holds whatever it holds while
+  // `export-grants.test.ts` passes vacuously — which is the opposite of what
+  // that file is for.
+  "accountant_readonly",
 ] as const;
 
 /**
@@ -92,6 +97,11 @@ export const STAFF_ROLES: Role[] = [
   "marketing",
   "installer",
   "accounting",
+  // The outside CPA is staff for the purpose of reaching the portal at all —
+  // they log in, so `isStaff` must be true or nothing renders. What they may
+  // actually DO is decided entirely by GRANTS below, which is read/export on
+  // two resources and silence everywhere else.
+  "accountant_readonly",
 ];
 
 export const ADMIN_ROLES: Role[] = ["super_admin", "admin"];
@@ -280,6 +290,30 @@ const GRANTS: Partial<Record<Role, Grant>> = {
     Knowledge: ["read"],
     Scope: ["read"],
     Proposal: ["read"],
+  },
+
+  /**
+   * THE OUTSIDE CPA. Two resources, two verbs, and nothing else.
+   *
+   * Everything an accountant actually needs — P&L, balance sheet, trial
+   * balance, general ledger, 1099 totals, reconciliation history — lives under
+   * `Bookkeeping` and `Report`. So nothing else is granted.
+   *
+   * `Project: ["read"]` was considered and deliberately refused: it would hand
+   * an outside party the entire deal pipeline, with customer names and
+   * addresses, to answer questions the reports already answer. Every extra
+   * resource here is a real widening of what leaves the building.
+   *
+   * `create` IS DELIBERATELY ABSENT, and not only because this role is
+   * read-only. `row-scope-boundary.test.ts` allows
+   * `books/actions.ts#postManualEntryAction` to take a projectId without a
+   * per-viewer scope check, on the stated grounds that everyone holding
+   * `Bookkeeping:create` sees every job in the company. Granting create here
+   * would silently make that entry false.
+   */
+  accountant_readonly: {
+    Bookkeeping: ["read", "export"],
+    Report: ["read", "export"],
   },
 };
 
