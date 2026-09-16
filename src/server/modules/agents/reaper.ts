@@ -24,7 +24,10 @@ import { truncateSummary } from "./result";
  */
 export const REAP_GRACE_MS = 60_000;
 export const QUEUED_EXPIRY_MS = 10 * 60_000;
-const BATCH = 200;
+// Kept low: each row here costs an updateMany plus a notifyRun (dynamic
+// import and fireEvent) before the tick gets to claim or execute anything.
+// 200 sequential rows could eat the whole 300 s budget on their own.
+const BATCH = 25;
 const RUNNING_CUTOFF_MS = CRON_MAX_DURATION_SECONDS * 1000 + REAP_GRACE_MS;
 
 const RUN_SELECT = {
@@ -33,7 +36,6 @@ const RUN_SELECT = {
   vertical: true,
   leadId: true,
   startedAt: true,
-  createdAt: true,
   agent: { select: { name: true } },
 } satisfies Prisma.AgentRunSelect;
 
@@ -50,7 +52,8 @@ export async function reapStuckRuns(now: Date): Promise<number> {
     select: RUN_SELECT,
   });
   for (const run of running) {
-    const startedMs = (run.startedAt ?? run.createdAt).getTime();
+    // The query above requires startedAt < cutoff, so every row here has one.
+    const startedMs = run.startedAt!.getTime();
     const minutes = Math.max(1, Math.round((nowMs - startedMs - CRON_MAX_DURATION_SECONDS * 1000) / 60_000));
     const message =
       `Reaped: still marked running ${minutes} min past the ${CRON_MAX_DURATION_SECONDS} s limit on any run. ` +

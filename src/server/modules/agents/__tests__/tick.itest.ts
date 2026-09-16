@@ -27,6 +27,47 @@ vi.mock("../registry", () => ({
   HANDLERS: {},
 }));
 
+// Test seams into the runner: real by default (calls straight through to the
+// unmocked implementation), overridable per test to force the failure paths
+// Important 1 and the skip-path test need without faking the whole module.
+const r = vi.hoisted(() => ({
+  createRun: { forceThrowOnCall: null as number | null, callCount: 0 },
+  hasRunInFlight: { forceFalse: false },
+}));
+
+vi.mock("../runner", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../runner")>();
+  return {
+    ...actual,
+    createRun: async (input: Parameters<typeof actual.createRun>[0]) => {
+      r.createRun.callCount++;
+      if (r.createRun.forceThrowOnCall !== null && r.createRun.callCount === r.createRun.forceThrowOnCall) {
+        throw new Error("pool exploded while claiming");
+      }
+      return actual.createRun(input);
+    },
+    hasRunInFlight: async (agentId: string, vertical: Parameters<typeof actual.hasRunInFlight>[1]) => {
+      if (r.hasRunInFlight.forceFalse) return false;
+      return actual.hasRunInFlight(agentId, vertical);
+    },
+  };
+});
+
+// Same seam for the reaper: Important 3 needs reapStuckRuns to throw without
+// touching the reaper's own itest coverage of the real thing.
+const rp = vi.hoisted(() => ({ forceThrow: false }));
+
+vi.mock("../reaper", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../reaper")>();
+  return {
+    ...actual,
+    reapStuckRuns: async (now: Date) => {
+      if (rp.forceThrow) throw new Error("reaper exploded");
+      return actual.reapStuckRuns(now);
+    },
+  };
+});
+
 import { tick } from "../tick";
 
 const db = new PrismaClient({ datasources: { db: { url: TEST_DATABASE_URL } } });
@@ -39,12 +80,15 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+  r.createRun.forceThrowOnCall = null;
+  r.createRun.callCount = 0;
+  r.hasRunInFlight.forceFalse = false;
+  rp.forceThrow = false;
+  // Scoped to this file's own company only: touching other companies' rows
+  // would sabotage a second vitest process running these itests against the
+  // same shared schema at the same time.
   await db.agentRun.deleteMany({ where: { companyId } });
   await db.agent.deleteMany({ where: { companyId } });
-  // The tick sees every company in this schema. Leftovers from other files
-  // must not take this file's five slots or its reaper counts.
-  await db.agent.updateMany({ where: { companyId: { not: companyId }, enabled: true }, data: { enabled: false } });
-  await db.agentRun.updateMany({ where: { companyId: { not: companyId }, status: { in: ["queued", "running"] } }, data: { status: "failed" } });
 });
 
 afterAll(async () => {
@@ -114,6 +158,17 @@ describe("tick", () => {
     expect(await runsOf(a.id)).toHaveLength(1);
   });
 
+  it("counts a due agent already in flight as skipped, not started, even when createRun itself is the one that catches it", async () => {
+    // hasRunInFlight is forced to miss it, so this exercises the second guard:
+    // createRun's own insert hits the partial unique index and returns null.
+    const a = await dueAgent();
+    await db.agentRun.create({ data: { companyId, agentId: a.id, vertical: "roofing", trigger: "manual", status: "queued", createdAt: new Date() } });
+    r.hasRunInFlight.forceFalse = true;
+    const report = await tick(new Date());
+    expect(report.skippedInFlight).toBe(1);
+    expect(await runsOf(a.id)).toHaveLength(1);
+  });
+
   it("starts at most five runs in one tick, and leaves the rest due", async () => {
     const agents = [];
     for (let i = 0; i < 6; i++) agents.push(await dueAgent({ nextRunAt: new Date(Date.now() - 120_000 + i * 1000) }));
@@ -122,6 +177,51 @@ describe("tick", () => {
     expect(report.started).toBe(5);
     expect(await runsOf(agents[5].id)).toHaveLength(0);
     expect((await nextRunOf(agents[5].id))!.getTime()).toBeLessThanOrEqual(now.getTime());
+  });
+
+  it("runs the capped-out agent on the very next tick", async () => {
+    const agents = [];
+    for (let i = 0; i < 6; i++) agents.push(await dueAgent({ nextRunAt: new Date(Date.now() - 120_000 + i * 1000) }));
+    const first = await tick(new Date());
+    expect(first.started).toBe(5);
+    expect(await runsOf(agents[5].id)).toHaveLength(0);
+
+    const second = await tick(new Date());
+    expect(second.started).toBe(1);
+    expect(await runsOf(agents[5].id)).toHaveLength(1);
+  });
+
+  it("bounds missing-handler writes to the same per-tick cap as real runs", async () => {
+    const agents = [];
+    for (let i = 0; i < 6; i++) agents.push(await dueAgent({ handlerKey: "bank.ntp_poll", nextRunAt: new Date(Date.now() - 120_000 + i * 1000) }));
+    const now = new Date();
+    const report = await tick(now);
+    expect(report.missingHandler).toBe(5);
+    expect(await runsOf(agents[5].id)).toHaveLength(0);
+    expect((await nextRunOf(agents[5].id))!.getTime()).toBeLessThanOrEqual(now.getTime());
+  });
+
+  it("does not orphan an earlier claim when a later agent's claim throws", async () => {
+    const first = await dueAgent({ nextRunAt: new Date(Date.now() - 120_000) });
+    const second = await dueAgent({ nextRunAt: new Date(Date.now() - 60_000) });
+    r.createRun.forceThrowOnCall = 2;
+    const report = await tick(new Date());
+
+    expect(await runsOf(first.id)).toHaveLength(1);
+    expect((await runsOf(first.id))[0].status).toBe("success");
+    expect(await runsOf(second.id)).toHaveLength(0);
+
+    const allRuns = await db.agentRun.findMany({ where: { agentId: { in: [first.id, second.id] } } });
+    expect(allRuns.some((run) => run.status === "running")).toBe(false);
+    expect(report.started).toBe(1);
+  });
+
+  it("still claims and executes a due run when the reap itself throws", async () => {
+    const a = await dueAgent();
+    rp.forceThrow = true;
+    const report = await tick(new Date());
+    expect(report.reaped).toBe(0);
+    expect((await runsOf(a.id)).map((r) => r.status)).toEqual(["success"]);
   });
 
   it("reaps a run stuck in running and one that never started", async () => {
@@ -165,5 +265,14 @@ describe("tick", () => {
     });
     await tick(new Date());
     expect(await db.agentRun.findUniqueOrThrow({ where: { id: run.id } })).toMatchObject({ status: "success", summary: "Ticked" });
+  });
+
+  it("logs when a stored schedule can no longer produce a next run, and still writes the null", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const a = await dueAgent({ schedule: "not a cron expression" });
+    await tick(new Date());
+    expect(spy).toHaveBeenCalledWith(expect.stringContaining("nextRunAtFor"), a.id, "not a cron expression");
+    expect(await nextRunOf(a.id)).toBeNull();
+    spy.mockRestore();
   });
 });
