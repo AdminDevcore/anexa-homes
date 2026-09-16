@@ -69,6 +69,16 @@ describe("shared modules stay shared", () => {
     expect(classify("Transaction")).toBe("tagged");
     expect(classify("Commission")).toBe("tagged");
     expect(classify("Invoice")).toBe("tagged");
+    // Phase 4's payables and lender funding join them for the same reason: one
+    // set of books that still breaks out by department on the reports.
+    //
+    // LenderFunding is the one tagged model that is NOT registered in
+    // TAGGED_PROVENANCE, because provenance resolves a row's department by
+    // looking up a PROJECT and this model hangs off a LEAD. Registering it
+    // would resolve nothing and fall through to the ambient workspace while
+    // appearing configured. Its column is non-null with a solar default.
+    expect(classify("Bill")).toBe("tagged");
+    expect(classify("LenderFunding")).toBe("tagged");
   });
 
   /**

@@ -187,6 +187,15 @@ const TAGGED_PROVENANCE: Record<string, string> = {
   // and it falls through to the ambient workspace, which is the same treatment
   // hand-booked office rent already gets.
   JournalLine: "projectId",
+  // A bill's department is the job it is a cost of, exactly like every row
+  // above. A null projectId is ordinary rather than exceptional here — office
+  // rent and a software subscription belong to no job — and falls through to
+  // the ambient workspace.
+  Bill: "projectId",
+  // LenderFunding is deliberately ABSENT. It hangs off a LEAD, not a job, and
+  // this lookup resolves project ids: registering `leadId` would resolve
+  // nothing and quietly fall through to ambient while appearing configured.
+  // Its `vertical` column is non-null with a solar default instead.
 };
 
 type ProjectLookup = (id: string) => Promise<ActiveVertical | null>;
