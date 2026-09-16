@@ -275,8 +275,20 @@ describe("the ladder is a complete substitute for PurchaseBreakdown", () => {
     expect(d.systemWatts).toBe(b.systemWatts);
     expect(d.baseKeptCents).toBe(b.baseKeptCents);
     expect(d.basePpwCents).toBe(b.basePpwCents);
-    expect(d.addersInsideRuleCents).toBe(b.adderTotalCents);
+    // `b.adderTotalCents` is BOTH halves — `priceUnits` sums them — so it is the
+    // TOTAL rung that has to equal it, not the inside-rule one. Pinning the
+    // inside-rule field against the total is exactly what let `addersCents`
+    // double-count the on-top money without a red test.
+    expect(d.addersCents).toBe(b.adderTotalCents);
+    expect(d.addersInsideRuleCents).toBe(b.adderTotalCents - b.onTopAdderTotalCents);
     expect(d.addersOutsideRuleCents).toBe(b.onTopAdderTotalCents);
+    // Disjoint, and they reach the total between them.
+    expect(d.addersInsideRuleCents + d.addersOutsideRuleCents).toBe(d.addersCents);
+    // Against the figures actually passed in, so the arithmetic above cannot be
+    // satisfied by two wrong numbers agreeing: 250_000 went in inside the rule,
+    // and the old double-count read 250_000 + 2 x ON_TOP on the total.
+    expect(d.addersInsideRuleCents).toBe(250_000);
+    expect(d.addersCents).toBe(250_000 + ON_TOP);
     expect(d.addersOutsideRuleFinalCents).toBe(b.onTopAdderStickerCents);
     expect(d.equipmentChargesCents).toBe(b.batteryPriceCents);
     expect(d.equipmentFinalCents).toBe(b.batteryStickerCents);

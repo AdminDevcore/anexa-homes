@@ -155,7 +155,15 @@ export type DealPrice = {
   basePpwCents: number;
   /** ALL the extra work at catalogue price: inside the rule plus outside it. */
   addersCents: number;
+  /**
+   * Of that, the work priced INSIDE the partner's ceiling.
+   *
+   * Disjoint from `addersOutsideRuleCents`, and the two sum to `addersCents`.
+   * Not to be confused with `PurchaseBreakdown.adderTotalCents`, which wears a
+   * similar name and holds the TOTAL.
+   */
   addersInsideRuleCents: number;
+  /** Of that, the work financed ON TOP of the ceiling, at its own price. */
   addersOutsideRuleCents: number;
   /** The storage on the job at catalogue price. Zero without one. */
   equipmentChargesCents: number;
@@ -276,8 +284,22 @@ function ladderFrom(b: PurchaseBreakdown, feePct: number, source: DealerFeeSourc
     systemWatts: b.systemWatts,
     baseKeptCents: b.baseKeptCents,
     basePpwCents: b.basePpwCents,
-    addersCents: b.adderTotalCents + b.onTopAdderTotalCents,
-    addersInsideRuleCents: b.adderTotalCents,
+    // `PurchaseBreakdown.adderTotalCents` is ALREADY both halves: `priceUnits`
+    // builds it as `insideAdderCents + onTopAdderTotalCents`. So adding the
+    // on-top figure back counted that money TWICE, and reading the same field
+    // as the inside-rule part named a total after one of its two halves.
+    //
+    // The input types say this plainly in opposite directions, which is how it
+    // survived: on `PurchaseInput` the on-top adders are "disjoint from
+    // adderTotalCents", and on `PurchaseBreakdown` they are "of that, the part
+    // financed on top". Both are true — of the INPUT and of the OUTPUT — and
+    // the two sentences are about different numbers wearing one name.
+    //
+    // Neither field was ever read: `addersCents` has no consumer in src/, and
+    // the only reader of `addersInsideRuleCents` was the test pinning this
+    // shape. Corrected before the rest of Stage 4 connects to these names.
+    addersCents: b.adderTotalCents,
+    addersInsideRuleCents: b.adderTotalCents - b.onTopAdderTotalCents,
     addersOutsideRuleCents: b.onTopAdderTotalCents,
     equipmentChargesCents: b.batteryPriceCents,
     grossPriceCents: b.grossPriceCents,
