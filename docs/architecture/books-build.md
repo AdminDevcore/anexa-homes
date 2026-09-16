@@ -761,6 +761,155 @@ nothing had been relying on lines being untagged.
 - 60 new integration tests (30 invoices, 23 funding, 7 department). Full suite
   1084 passed, up from a 981 baseline at the start of Phase 3.
 
+## Phase 5 decisions — money movement (2026-09-16)
+
+Every other phase records what happened. Phase 5 makes something happen, and it
+is the only part of the books where a mistake cannot be undone by a reversing
+entry — a reversing entry does not bring the money back. So the controls are
+stacked, and each is independent of the others.
+
+### TOTP is hand-written, and that needed justifying
+
+No dependency. The algorithm is ~40 lines, frozen by RFC 4226 and RFC 6238, and
+verifiable against published test vectors — so the usual argument for a library
+(someone else got the edge cases right) is settled by the vectors instead.
+Against that, this code guards payments, and a transitive dependency in that
+position is a supply-chain surface we can close completely.
+
+The tests use the RFCs' numbers, not ours, including `T = 20000000000` — past
+the 32-bit second boundary, where an implementation holding the counter in a
+32-bit integer agrees with every earlier row and is wrong from there on. The
+base32 encoder is checked against a known-good constant rather than round-tripped
+through its own decoder, since two matching bugs would cancel out and pass.
+
+**`verifyTotp` returns the matched step, never a boolean.** A code is valid for
+its whole 30-second window, so an attacker who observes one can replay it until
+the window closes, and one code could approve two payments. Returning the
+counter is what lets the caller record what was consumed. An interface that
+cannot express that invites the vulnerable implementation.
+
+### Enrolment does not count until a code proves it
+
+`enrolledAt` stays null until a code generated from the stored secret is
+accepted. Counting an unproved enrolment locks out anyone whose QR never saved —
+the system would demand a factor they do not hold. So restarting a PENDING
+enrolment is allowed and replaces the secret; replacing a CONFIRMED one is
+refused, because that is exactly how somebody holding a live session swaps the
+factor for one they control. Nobody may remove their own factor either.
+
+### Payees: the cooling-off period is the point
+
+The commonest fraud against a business like this one is not a hacked bank
+account. It is an email that appears to come from a known subcontractor saying
+their bank has changed, followed by an invoice. Somebody updates the details and
+pays it that afternoon, and the money is gone before anyone reads the email a
+second time.
+
+So changed bank details start a clock and payments are refused until it expires.
+**A newly created payee waits too** — "add a payee and pay it immediately" is the
+same fraud with one extra step, and a delay that applies only to edits simply
+tells an attacker to create rather than edit. Any change restarts it; deciding
+which edits are "safe enough" to skip it is how a control is worn away one
+exception at a time.
+
+The routing number is checked against the ABA checksum, catching a transposed
+digit at the keyboard rather than after an ACH file reaches a bank that does not
+exist. Full numbers are decrypted in exactly one function, and the encrypted
+columns are never selected by any listing — not loaded and then dropped, but
+never read.
+
+### `Payment` is its own RBAC resource
+
+NOT a verb under `Bookkeeping`. `accounting` holds `Bookkeeping: ALL`, so folding
+payments in would have granted "can send money" to everyone who already had
+`manage` on the ledger — privilege by inheritance rather than by decision.
+Reading the books and paying a vendor are different powers.
+
+`accounting` gets create/read/update/approve but never delete (a payment is
+reversed, never erased). `accountant_readonly` gets read/export, which is
+narrower than it looks: every payment is already visible to that role as a
+journal entry, so withholding it would hide nothing and merely break the page an
+outside accountant needs to reconcile A/P.
+
+### A payment settles a bill
+
+Deliberately. Money out must answer to a categorised expense, tagged to a
+department, before it moves — so "pay something that has no bill" is "enter the
+bill, then pay it". Sending delegates to `payBill` rather than posting a second
+competing entry, so there is only ever one way to pay a bill. One live payment
+per bill, because two drafts both pass every later check and the vendor is paid
+twice.
+
+### The back-dating bug, which its own tests found
+
+Worth recording because it was a security defect produced by a naming choice,
+not by a logic error.
+
+The first version threaded one parameter, `at`, into both the journal entry's
+accounting date and the payee cooling-off check. **Those are different time
+axes.** Conflating them made the cooling-off period bypassable by back-dating:
+change a payee's bank details, post the payment "as of" last month, and the
+delay is evaluated against a date that has already passed.
+
+A fraud control a caller can step around by choosing a date is not a control.
+The parameter is now `postingDate`, it reaches only the ledger, and the
+cooling-off check takes no date at all — it is always real time. Seven tests
+failed on this with a single cause, and the error message named it: *"cannot be
+paid for another 2217 hours"*.
+
+Cooling-off is also checked at SEND rather than at approval, so details changed
+in between cannot go out on an approval given against the old ones.
+
+### Maker-checker, and what a role cannot express
+
+The person who raises a payment can never approve it. This is the control that
+survives a single compromised or dishonest account, and it is enforced in code
+rather than by permission, because **a role cannot express "somebody other than
+you"**. Holding both `create` and `approve` is therefore fine; doing both to the
+same payment is not.
+
+Limits are enforced per payment and per day, the daily one counting everything
+already approved today so a series of individually-allowed payments cannot add
+up to an unallowed day. They are constants with environment overrides, **not
+per-company settings** — that needs a `CompanySettings` migration and is listed
+below as remaining work rather than quietly skipped.
+
+### The provider boundary, and webhooks
+
+Everything across the boundary is plain data; the interface knows nothing about
+Prisma or our ledger, so swapping providers is a change to an adapter rather
+than to the books. `ACH_PROVIDER` selects it and defaults to the fixture, exactly
+as `BANK_FEED_PROVIDER` does. Configuring a provider with no adapter **throws** —
+a silent fallback would leave a deployment believing it was paying vendors while
+moving nothing at all. `docs/ach-provider-comparison.md` holds the
+recommendation; nothing is blocked on it.
+
+Webhook verification follows `docs/runbooks/amos-inbound-callbacks.md`:
+`t=<unix>,v1=<hex>`, HMAC-SHA256 over `${t}.${rawBody}`, 300-second tolerance,
+timing-safe compare, failing closed when the secret is unset. The first version
+signed the bare body; the runbook is explicit that the timestamp is signed WITH
+the body precisely so a captured delivery cannot be replayed, which only works
+if it is checked. Both halves have tests, including a correctly-signed-but-stale
+delivery being refused, and one stating the raw-bytes property directly: the
+same object re-serialised has different bytes and must fail.
+
+A redelivery answers **2xx**, because anything else guarantees the provider
+retries forever. A return is reversed, never unposted — the money left and came
+back, both are true — and the bill becomes owed again because it is.
+
+### What Phase 5 shipped, and what it did not
+
+Shipped: `lib/totp.ts`, `auth/mfa.ts`, `payments/payees.ts`, `payments/payments.ts`,
+the provider boundary with its fixture, the gated action surface, the webhook
+route, and `docs/ach-provider-comparison.md`. One additive migration (5 tables,
+3 types, 12 indexes, 13 constraints), re-diffing to empty.
+
+**Not built, and not pretended otherwise:** the payments SCREEN — everything
+above is server-side and reachable only through the actions; per-company limits
+and cooling-off duration as settings rather than constants; any real provider
+adapter; and a test of the webhook ROUTE itself, as against the provider
+verification beneath it, which has 19.
+
 ## Not decided yet
 
 These decisions leave some questions open. Settle each one before the phase that
