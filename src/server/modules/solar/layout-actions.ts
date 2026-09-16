@@ -9,6 +9,7 @@ import { leadAccessible } from "@/server/rbac/lead-access";
 import { panelCount, type LayoutBlock } from "@/lib/solar-layout";
 import { pinMoveAllowed } from "@/lib/map-view";
 import { recomputeDesignFigures } from "./recompute";
+import { checkSignedLock } from "./signed-lock";
 
 // `actions.ts` is a "use server" module, so its helpers cannot be shared —
 // every export there has to be an async server function.
@@ -133,8 +134,26 @@ export async function saveSolarLayoutAction(input: z.infer<typeof layoutSchema>)
   });
   if (!lead) return fail("Deal not found.");
 
+  /**
+   * The signed lock, which this action never had. Redrawing the roof moves the
+   * system size, and the size is what the contract is priced from, so a layout
+   * save on a signed deal is a price change made from the drawing screen.
+   */
+  const lock = await checkSignedLock(user, leadId, "the panel layout");
+  if (lock.blocked) return fail(lock.error);
+
   const moduleQty = panelCount(blocks as LayoutBlock[]);
   if (moduleQty > 500) return fail("That is more than 500 panels — check the drawing.");
+  /**
+   * AN EMPTY DRAWING IS NOT A DESIGN.
+   *
+   * `blocks: []` is a valid payload that prices the deal over zero watts and
+   * leaves a $0 contract behind it. The maintenance script already refuses to
+   * zero a live deal rather than writing one; the live path had no such floor.
+   */
+  if (blocks.length === 0 || moduleQty === 0) {
+    return fail("That would leave no panels on the roof. Draw the array you mean, or remove the design.");
+  }
 
   // The corrected pin, if there is one. Written FIRST, because the recompute
   // below simulates this design against the weather at the deal's coordinate,

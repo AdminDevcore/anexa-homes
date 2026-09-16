@@ -10,6 +10,7 @@ import { dealLenderId, lenderAdderRules, lineFromCatalogue } from "./adders";
 import { recomputeDesignFigures } from "./recompute";
 import { generateProposalVersion } from "./proposal-generate";
 import { dealMoneyColumns } from "./deal-money";
+import { checkSignedLock } from "./signed-lock";
 import { annualUsageFromBill, effectiveUsageKwh, monthlyBillFromUsage } from "@/lib/solar-energy";
 import { basePpwFromSticker, offsetPct, underBaseFloor } from "@/lib/solar-money";
 import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
@@ -115,6 +116,18 @@ export async function repriceProposalAction(
   const lead = await leadAccessible(user, leadId);
   if (!lead) return fail("Deal not found.");
   if (lead.vertical !== "solar") return fail("This is not a solar deal.");
+
+  /**
+   * THE DEAL, not merely this document.
+   *
+   * The check above asks whether THIS proposal is signed. It is not — a signed
+   * deal can carry an unsigned v-next, because generation over a signature is
+   * deliberate — and re-pricing through that draft rewrote the signed deal's
+   * finance and design rows with no unlock, no super admin and no trail. Asked
+   * BEFORE the consumption write below, which is the first thing that lands.
+   */
+  const lock = await checkSignedLock(user, leadId, "the price and financing, by re-pricing the live proposal");
+  if (lock.blocked) return fail(lock.error);
 
   // ── Consumption ───────────────────────────────────────────────────────────
   // Written first, because the design's usage is what offset and every saving
@@ -280,6 +293,22 @@ export async function repriceProposalAction(
     if (lenderProductId && !lenderProduct) return fail("That financing programme is not available.");
 
     /**
+     * THE PRODUCT NEVER CHANGES HERE — enforced, where it used to be asserted.
+     *
+     * The comment below said so while the code read the product off whichever
+     * programme was picked, so choosing a lease or PPA row flipped the deal and
+     * `financeRowForProduct` then wrote $0/W, a 0% fee and no contract price,
+     * with the floor guards skipped because they only run for a purchase. That
+     * is a $0 signed contract reachable from a dropdown.
+     */
+    if (lenderProduct && lenderProduct.product !== finance.product) {
+      return fail(
+        `That programme is a ${lenderProduct.product} and this deal is a ${finance.product}. ` +
+          "Change what the deal sells in the builder, where the validation for it lives."
+      );
+    }
+
+    /**
      * PRICED BY THE ONE DERIVATION: `dealMoneyColumns`, the code the financing
      * step's save and every recompute already run. It reads the programme's
      * terms, the adders and the storage off the deal itself.
@@ -291,11 +320,8 @@ export async function repriceProposalAction(
      * short row is what stayed on the deal.
      */
     const row = await dealMoneyColumns(user.companyId, leadId, {
-      // The PRODUCT never changes here. Moving a deal between cash, a loan
-      // and a lease changes which columns mean anything and which equipment
-      // is even sellable; that belongs in the builder, with the validation
-      // that goes with it.
-      product: lenderProduct?.product ?? finance.product,
+      // The deal's own product, always — see the refusal above.
+      product: finance.product,
       grossPpwCents: d.grossPpwCents ?? finance.baseFinalPpwCents,
       dealerFeePct: finance.dealerFeePct,
       rateMillsPerKwh: finance.rateMillsPerKwh,
@@ -343,6 +369,19 @@ export async function repriceProposalAction(
           `That leaves $${(basePpwFromSticker(row.baseFinalPpwCents, row.dealerFeePct) / 100).toFixed(2)}/W before the lender's cut, under this lender's $${((floor ?? 0) / 100).toFixed(2)}/W minimum.`
         );
       }
+    } else if (d.grossPpwCents != null) {
+      /**
+       * EXPLICIT, because implicit is how a deal reached $0.
+       *
+       * A lease and a PPA sell electricity, so they have no per-watt price and
+       * no base for a floor to hold — which meant the guard rails above simply
+       * did not run for them, and a row priced at nothing wrote straight
+       * through. Saying no out loud is the difference between a rule that does
+       * not apply and a rule that is absent.
+       */
+      return fail(
+        `A ${row.product} is not priced per watt. Change the plan in the builder, where that is validated.`
+      );
     }
 
     await prisma.solarFinance.update({ where: { leadId }, data: row });
