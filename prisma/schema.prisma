@@ -424,6 +424,11 @@ model Company {
   bills          Bill[]
   lenderFundings LenderFunding[]
 
+  payees        Payee[]
+  payments      Payment[]
+  paymentEvents PaymentEvent[]
+  userMfa       UserMfa[]
+
   @@map("companies")
   solarContractUnlocks SolarContractUnlock[]
 
@@ -667,6 +672,10 @@ model User {
   chargebacks             Chargeback[]         @relation("ChargebackUser")
   payrollAdjustments      PayrollAdjustment[]  @relation("PayrollAdjustmentUser")
   pipelineFilterViews     PipelineFilterView[] @relation("PipelineFilterViewCreator")
+
+  /// Second factor. Optional on the model and REQUIRED in code for the finance
+  /// roles, because a column cannot express "required only to move money".
+  mfa UserMfa?
 
   @@unique([companyId, email])
   @@unique([companyId, employeeNo])
@@ -2737,7 +2746,8 @@ model BookkeepingVendor {
   journalLines JournalLine[]
   bankRules    BankRule[]
 
-  bills Bill[]
+  bills  Bill[]
+  payees Payee[]
 
   @@index([companyId])
   @@map("bookkeeping_vendors")
@@ -2957,6 +2967,12 @@ model JournalEntry {
   bills          Bill[]
   lenderFundings LenderFunding[]
 
+  /// Payment is the exception to the note above: it points here TWICE — once
+  /// for the entry that sent the money and once for the entry that reverses it
+  /// when the bank returns it — so both relations must be named.
+  paymentEntry    Payment? @relation("PaymentEntry")
+  paymentReversal Payment? @relation("PaymentReversal")
+
   @@map("journal_entries")
 }
 
@@ -3103,6 +3119,7 @@ model BankAccount {
   reconciliations  BankReconciliation[]
   feedTransactions BankFeedTransaction[]
   bankRules        BankRule[]
+  payments         Payment[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -6361,10 +6378,212 @@ model Bill {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  payments Payment[]
+
   @@unique([companyId, billNumber])
   @@index([companyId, status, dueAt])
   @@index([vendorId])
   @@map("bills")
+}
+
+// ── Phase 5: money movement ──────────────────────────────────────────────────
+// All five models below are SHARED (absent from models.ts), deliberately.
+// Paying a vendor is a company act, not a departmental one: the DEPARTMENT was
+// already decided when the bill was accrued, and the ledger lines carry it.
+// Tagging the payment too would invite a payment whose vertical disagrees with
+// the expense it settles.
+
+enum PaymentStatus {
+  draft
+  submitted
+  approved
+  sent
+  settled
+  returned
+  failed
+  cancelled
+}
+
+enum PaymentMethod {
+  ach
+  check
+  card
+  other
+}
+
+enum PayeeAccountType {
+  checking
+  savings
+}
+
+/// WHERE money goes, kept separate from WHO we owe.
+///
+/// A vendor is a party we owe; a payee is a set of bank details. Keeping them
+/// apart means correcting bank details never rewrites bill history, and one
+/// vendor can be paid different ways over time without any bill changing.
+model Payee {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  vendorId String?
+  vendor   BookkeepingVendor? @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+
+  name  String
+  email String?
+
+  /// Encrypted at rest with FINANCE_ENC_KEY (server/lib/crypto.ts). Never
+  /// selected into a list query, never logged, never returned to a browser.
+  routingNumberEnc String?
+  accountNumberEnc String?
+
+  /// The only part ever displayed: enough to confirm the right account,
+  /// useless to whoever reads it over a shoulder.
+  accountLast4 String?
+  accountType  PayeeAccountType?
+
+  /// COOLING-OFF. Changing bank details starts a clock, and payments are
+  /// refused until it expires. Invoice-redirection fraud works by changing the
+  /// account and paying immediately, before anyone reads the email again.
+  bankDetailsUpdatedAt   DateTime?
+  bankDetailsUpdatedById String?
+
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payments Payment[]
+
+  @@unique([companyId, name])
+  @@index([companyId, active])
+  @@map("payees")
+}
+
+/// One payment, and everything an auditor would ask about it.
+model Payment {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  payeeId String
+  /// Restrict, not Cascade: a payee with payment history is deactivated, never
+  /// deleted. Money that moved must stay answerable to who received it.
+  payee   Payee  @relation(fields: [payeeId], references: [id], onDelete: Restrict)
+
+  billId String?
+  bill   Bill?   @relation(fields: [billId], references: [id], onDelete: SetNull)
+
+  amountCents Int
+  method      PaymentMethod @default(ach)
+  status      PaymentStatus @default(draft)
+  memo        String?
+
+  bankAccountId String?
+  bankAccount   BankAccount? @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+
+  /// MAKER AND CHECKER ARE DIFFERENT PEOPLE. Enforced in code and recorded
+  /// here, so an audit reads both off the row instead of reconstructing them.
+  createdById  String?
+  submittedAt  DateTime?
+  approvedById String?
+  approvedAt   DateTime?
+
+  /// The TOTP step consumed by the approval, so one code cannot approve two
+  /// payments inside its 30-second window.
+  approvalMfaStep BigInt?
+
+  providerId         String?
+  providerTransferId String?
+  sentAt             DateTime?
+  settledAt          DateTime?
+  returnedAt         DateTime?
+  returnCode         String?
+  returnReason       String?
+
+  journalEntryId String?       @unique
+  journalEntry   JournalEntry? @relation("PaymentEntry", fields: [journalEntryId], references: [id], onDelete: SetNull)
+
+  /// A returned payment is REVERSED, never unposted. The money genuinely left
+  /// and genuinely came back, and both facts belong in the ledger.
+  reversalEntryId String?       @unique
+  reversalEntry   JournalEntry? @relation("PaymentReversal", fields: [reversalEntryId], references: [id], onDelete: SetNull)
+
+  events PaymentEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// NULLs are distinct in Postgres, so every unsent payment coexists while a
+  /// provider's transfer id can only ever be recorded once.
+  @@unique([companyId, providerTransferId])
+  @@index([companyId, status, createdAt])
+  @@index([payeeId])
+  @@map("payments")
+}
+
+/// Every webhook the provider sent, recorded once.
+model PaymentEvent {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  paymentId String?
+  payment   Payment? @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  /// The provider's own event id, UNIQUE per provider. This is what makes
+  /// redelivery safe: a webhook that arrives three times is applied once.
+  providerId      String
+  providerEventId String
+  kind            String
+  payload         Json
+  receivedAt      DateTime @default(now())
+
+  @@unique([providerId, providerEventId])
+  @@index([companyId, receivedAt])
+  @@map("payment_events")
+}
+
+/// A user's second factor.
+model UserMfa {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId    String  @unique
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Encrypted with FINANCE_ENC_KEY. A plaintext TOTP secret is a second
+  /// password file that also silently defeats the factor it is meant to be.
+  secretEnc String
+
+  /// Null until a correct code proves the phone really holds the secret, so an
+  /// abandoned enrolment never counts as protection.
+  enrolledAt DateTime?
+
+  /// The last TOTP step accepted. A code is valid for its whole 30-second
+  /// window; without this it can simply be used again inside that window.
+  lastStep BigInt?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  recoveryCodes MfaRecoveryCode[]
+
+  @@map("user_mfa")
+}
+
+/// What gets someone back in when the phone is gone. Stored as SHA-256 of the
+/// normalised code — never the code, which is written on paper and must be
+/// assumed to leak from the user's side.
+model MfaRecoveryCode {
+  id       String    @id @default(uuid())
+  mfaId    String
+  mfa      UserMfa   @relation(fields: [mfaId], references: [id], onDelete: Cascade)
+  codeHash String
+  usedAt   DateTime?
+
+  @@unique([mfaId, codeHash])
+  @@index([mfaId])
+  @@map("mfa_recovery_codes")
 }
 
 /// MONEY A LENDER OWES US ON A DEAL, AND WHAT ACTUALLY ARRIVED.
