@@ -34,8 +34,8 @@ vi.mock("../registry", () => ({
 }));
 
 // Mock apply-changes so that resolveChanges throws while everything else works
-vi.mock("../apply-changes", async () => {
-  const actual = await vi.importActual<typeof import("../apply-changes")>("../apply-changes");
+vi.mock("../apply-changes", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../apply-changes")>();
   return {
     ...actual,
     resolveChanges: vi.fn(async () => {
@@ -120,5 +120,6 @@ describe("resolveChanges throws", () => {
 
     const detail = readDetail(row.detail);
     expect(detail.changes[0]).toMatchObject({ outcome: "discarded", note: "Not applied: the changes could not be checked." });
+    expect((await db.lead.findUniqueOrThrow({ where: { id: leadId } })).stageId).toBe(stage.from);
   });
 });

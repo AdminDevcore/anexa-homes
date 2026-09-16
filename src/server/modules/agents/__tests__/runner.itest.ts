@@ -90,6 +90,34 @@ const t = vi.hoisted(() => {
         return { status: "success", summary: "Late" };
       },
     },
+    "test.parse_throws": {
+      key: "test.parse_throws" as AgentHandler["key"],
+      label: "parse throws",
+      parseConfig: () => {
+        throw new Error("parseConfig blew up");
+      },
+      async run() {
+        return { status: "success", summary: "unreachable" };
+      },
+    },
+    "test.nul": {
+      key: "test.nul" as AgentHandler["key"],
+      label: "nul",
+      parseConfig: anyConfig,
+      async run(ctx) {
+        ctx.log("line\u0000one");
+        return { status: "success", summary: "All good\u0000" };
+      },
+    },
+    "test.logs_lots": {
+      key: "test.logs_lots" as AgentHandler["key"],
+      label: "logs a lot",
+      parseConfig: anyConfig,
+      async run(ctx) {
+        for (let i = 0; i < 600; i++) ctx.log(i === 0 ? "x".repeat(3000) : `line ${i}`);
+        return { status: "success", summary: "Logged a lot" };
+      },
+    },
   };
   return { state, handlers };
 });
@@ -100,7 +128,7 @@ vi.mock("../registry", () => ({
   HANDLERS: {},
 }));
 
-import { AGENT_SELECT, createRun, executeRun, writeMissingHandlerRun } from "../runner";
+import { AGENT_SELECT, MAX_LOG_LINE_CHARS, MAX_LOG_LINES, createRun, executeRun, writeMissingHandlerRun } from "../runner";
 import { readDetail } from "../detail";
 
 const db = new PrismaClient({ datasources: { db: { url: TEST_DATABASE_URL } } });
@@ -170,6 +198,7 @@ beforeEach(async () => {
   ).id;
   t.state.aborted = false;
   t.state.waiting = false;
+  t.state.release = () => {};
 });
 
 afterAll(async () => {
@@ -251,6 +280,30 @@ describe("executeRun", () => {
   it("fails a run whose config the handler refuses", async () => {
     const { row } = await runOf("test.picky");
     expect(row).toMatchObject({ status: "failed", summary: "Config is invalid: needs a portal" });
+  });
+
+  it("ends the run failed, not stuck running, when parseConfig itself throws", async () => {
+    const { row } = await runOf("test.parse_throws");
+    expect(row.status).toBe("failed");
+    expect(row.summary).toMatch(/^The runner crashed:/);
+    expect(row.finishedAt).not.toBeNull();
+  });
+
+  it("strips NUL bytes from the stored summary and log", async () => {
+    const { row, detail } = await runOf("test.nul");
+    expect(row.status).toBe("success");
+    expect(row.summary).toBe("All good");
+    expect(row.summary).not.toContain("\u0000");
+    expect(detail.log[0]).toBe("lineone");
+    expect(detail.log[0]).not.toContain("\u0000");
+  });
+
+  it("caps the log at 500 lines plus a dropped-lines marker, each line bounded", async () => {
+    const { detail } = await runOf("test.logs_lots");
+    expect(detail.log).toHaveLength(MAX_LOG_LINES + 1);
+    expect(detail.log[MAX_LOG_LINES]).toBe("… further lines dropped");
+    expect(detail.log[0]).toHaveLength(MAX_LOG_LINE_CHARS);
+    for (const line of detail.log) expect(line.length).toBeLessThanOrEqual(MAX_LOG_LINE_CHARS);
   });
 });
 
@@ -356,7 +409,7 @@ describe("ownership", () => {
     const result = await createRun({ agent: a, vertical: "roofing", trigger: "manual", status: "running" });
     const { id } = result!;
     const pending = executeRun(id, { owned: true });
-    await vi.waitFor(() => expect(t.state.waiting).toBe(true));
+    await vi.waitFor(() => expect(t.state.waiting).toBe(true), { timeout: 5000 });
     await db.agentRun.update({ where: { id }, data: { status: "failed", finishedAt: new Date(), summary: "Reaped", error: "Reaped" } });
     t.state.release();
     expect(await pending).toBe("failed");
@@ -382,6 +435,15 @@ describe("ownership", () => {
     await executeRun(id1, { owned: true });
     const result2 = await createRun({ agent: a, vertical: "roofing", trigger: "manual", status: "queued" });
     expect(result2).not.toBeNull();
+  });
+
+  it("returns null and runs nothing when told it owns a run that is not running", async () => {
+    const a = await agent("test.ok");
+    const result = await createRun({ agent: a, vertical: "roofing", trigger: "manual", status: "queued" });
+    const { id } = result!;
+    const status = await executeRun(id, { owned: true });
+    expect(status).toBeNull();
+    expect((await db.agentRun.findUniqueOrThrow({ where: { id } })).status).toBe("queued");
   });
 });
 

@@ -9,7 +9,7 @@ import { buildDeps } from "./deps";
 import { discardAll, finalStatus, planChanges } from "./gate";
 import { notifyRun } from "./notify";
 import { handlerFor } from "./registry";
-import { parseAgentResult, truncateSummary } from "./result";
+import { MAX_ERROR_CHARS, parseAgentResult, truncateSummary } from "./result";
 import { withTimeout } from "./timeout";
 import type { AgentDeps, ChangeRecord, RequestedChange, RunDetail } from "./types";
 
@@ -33,6 +33,20 @@ export const AGENT_SELECT = {
 
 export type RunnableAgent = Prisma.AgentGetPayload<{ select: typeof AGENT_SELECT }>;
 
+const RUN_SELECT = {
+  id: true,
+  companyId: true,
+  vertical: true,
+  trigger: true,
+  leadId: true,
+  startedAt: true,
+  detail: true,
+  status: true,
+  agent: { select: AGENT_SELECT },
+} satisfies Prisma.AgentRunSelect;
+
+type ClaimedRun = Prisma.AgentRunGetPayload<{ select: typeof RUN_SELECT }>;
+
 type NewRun = {
   agent: RunnableAgent;
   vertical: ActiveVertical;
@@ -43,6 +57,28 @@ type NewRun = {
 
 const json = (value: unknown) => value as Prisma.InputJsonValue;
 const firstLine = (err: unknown) => (err instanceof Error ? err.message : String(err)).split("\n")[0];
+
+/** Postgres `text` and `jsonb` reject a NUL byte outright; handler-controlled text must never carry one into a write. */
+function clean(s: string): string {
+  return s.replace(/\u0000/g, "");
+}
+
+/** `clean`, recursively, for anything headed into a jsonb column. */
+function cleanDeep<T>(value: T): T {
+  if (typeof value === "string") return clean(value) as unknown as T;
+  if (Array.isArray(value)) return value.map((v) => cleanDeep(v)) as unknown as T;
+  if (value !== null && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = cleanDeep(v);
+    return out as T;
+  }
+  return value;
+}
+
+/** The handler `log` callback keeps at most this many lines, so an unbounded loop cannot grow `detail` without limit. */
+export const MAX_LOG_LINES = 500;
+/** Each stored log line is cut to this many characters. */
+export const MAX_LOG_LINE_CHARS = 2_000;
 
 export async function hasRunInFlight(agentId: string, vertical: ActiveVertical): Promise<boolean> {
   const inFlight = await prisma.agentRun.count({
@@ -76,13 +112,7 @@ export async function createRun(input: NewRun & { status: "queued" | "running" }
       select: { id: true },
     });
   } catch (err) {
-    // P2002 = unique constraint violation. Check both the error code and message for Prisma errors.
-    const isP2002 =
-      (typeof err === "object" && err !== null && "code" in err && (err as { code: unknown }).code === "P2002") ||
-      (err instanceof Error && err.message.includes("P2002"));
-    if (isP2002) {
-      return null;
-    }
+    if ((err as { code?: unknown } | null)?.code === "P2002") return null;
     throw err;
   }
 }
@@ -145,11 +175,14 @@ export async function executeRun(runId: string, opts: ExecuteOptions = {}): Prom
     if (claimed.count === 0) return null;
   }
 
-  const run = await prisma.agentRun.findUnique({
-    where: { id: runId },
-    select: { id: true, companyId: true, vertical: true, trigger: true, leadId: true, startedAt: true, detail: true, agent: { select: AGENT_SELECT } },
-  });
+  const run = await prisma.agentRun.findUnique({ where: { id: runId }, select: RUN_SELECT });
   if (!run) return null;
+  // A caller claiming ownership (the tick) created this run itself as
+  // `running`; it never races the queued → running claim above. If the row
+  // is not `running` regardless — the reaper already closed it, or it is
+  // still `queued` because the claim never happened — this run is not ours
+  // to execute.
+  if (opts.owned && run.status !== "running") return null;
 
   const { agent } = run;
   const ctx: RunCtx = {
@@ -161,6 +194,51 @@ export async function executeRun(runId: string, opts: ExecuteOptions = {}): Prom
     detail: readDetail(run.detail),
     startedMs: run.startedAt?.getTime() ?? Date.now(),
   };
+  // The agent's gate and config can change between queuing and running; the
+  // record should describe what actually ran, not what was true when the row
+  // was created.
+  ctx.detail.gated = agent.requiresHumanGate;
+  ctx.detail.configSnapshot = agent.config ?? {};
+
+  try {
+    return await runClaimed(ctx, run, opts, anchorMs);
+  } catch (err) {
+    // Nothing between here and `finalize` may throw without this catching it:
+    // an uncaught throw would leave the run `running` until the reaper closes
+    // it minutes later, with no alert sent in between. `handler.parseConfig`
+    // throwing (rather than returning `{ ok: false }`) lands here too.
+    console.error("[agents] runner crashed", runId, err);
+    const finishedAt = new Date();
+    ctx.detail.durationMs = finishedAt.getTime() - ctx.startedMs;
+    const summary = truncateSummary(clean(`The runner crashed: ${firstLine(err)}`));
+    const error = clean(errorText(err)).slice(0, MAX_ERROR_CHARS);
+    // A minimal detail, not the half-built one this run was accumulating —
+    // except the changes, so the record still shows which deals moved before
+    // the crash.
+    const detail = cleanDeep({ ...emptyDetail(agent), changes: ctx.detail.changes });
+
+    const done = await prisma.agentRun.updateMany({
+      where: { id: runId, status: "running" },
+      data: { status: "failed", finishedAt, summary, error, detail: json(detail) },
+    });
+    if (done.count === 1) {
+      await notifyRun({ companyId: ctx.companyId, vertical: ctx.vertical, leadId: ctx.leadId, status: "failed", summary, agentName: ctx.agentName });
+      return "failed";
+    }
+    // Someone else (the reaper) already closed this run out from under us —
+    // its verdict stands, and this crash is not ours to record over it.
+    throw err;
+  }
+}
+
+/**
+ * Everything after the run is claimed and its context built: resolve the
+ * handler, run it against its deadline, gate and apply its changes, and
+ * write the verdict. Split out of `executeRun` so a throw anywhere in here
+ * is caught by executeRun's crash handler above.
+ */
+async function runClaimed(ctx: RunCtx, run: ClaimedRun, opts: ExecuteOptions, anchorMs: number): Promise<AgentRunStatus> {
+  const { agent } = run;
 
   const handler = handlerFor(agent.handlerKey);
   if (!handler) {
@@ -193,7 +271,9 @@ export async function executeRun(runId: string, opts: ExecuteOptions = {}): Prom
           config: config.config,
           signal: controller.signal,
           log: (line) => {
-            ctx.detail.log.push(String(line));
+            const l = ctx.detail.log;
+            if (l.length < MAX_LOG_LINES) l.push(clean(String(line)).slice(0, MAX_LOG_LINE_CHARS));
+            else if (l.length === MAX_LOG_LINES) l.push("… further lines dropped");
           },
           deps: opts.deps ?? buildDeps(run.companyId),
         }),
@@ -238,8 +318,8 @@ export async function executeRun(runId: string, opts: ExecuteOptions = {}): Prom
   if (applied.tooLate) {
     return finalize(ctx, {
       status: "failed",
-      summary: "Failed: the run passed its apply deadline, so no change was applied.",
-      error: "Apply deadline passed before changes were applied.",
+      summary: `Failed: the run passed its apply deadline after applying ${applied.appliedCount} of ${applied.toApplyCount} changes.`,
+      error: "Apply deadline passed before every change could be applied.",
     });
   }
   if (applied.error !== null) {
@@ -254,59 +334,91 @@ export async function executeRun(runId: string, opts: ExecuteOptions = {}): Prom
   });
 }
 
-/** Plan every change through the gate, then apply the ones it allows, in order. Call inside the run's workspace. */
+/**
+ * Plan every change through the gate, then apply the ones it allows, in
+ * order. Call inside the run's workspace.
+ *
+ * The apply deadline is checked at the top of EVERY iteration, not once
+ * before the loop starts: applying changes one at a time can itself eat the
+ * time budget, and a run that was fine to start applying may not still be
+ * fine three moves in. Once the deadline is reached, every remaining
+ * `applied` or `held` record becomes `discarded` — a held change can never
+ * be approved once its run has failed (gate.ts's own precedence, matched
+ * here) — and `tooLate` tells the caller to fail the run.
+ */
 async function applyChanges(
   ctx: RunCtx,
   agent: RunnableAgent,
   changes: RequestedChange[],
   anchorMs: number
-): Promise<{ records: ChangeRecord[]; moves: StageMove[]; tooLate: boolean; error: unknown }> {
+): Promise<{ records: ChangeRecord[]; moves: StageMove[]; tooLate: boolean; error: unknown; appliedCount: number; toApplyCount: number }> {
   const planned = planChanges(await resolveChanges(ctx.companyId, changes), agent.requiresHumanGate);
   const moves: StageMove[] = [];
-
-  if (pastApplyDeadline(anchorMs, Date.now())) {
-    const records = planned.map(
-      (c): ChangeRecord => (c.outcome === "applied" ? { ...c, outcome: "discarded", note: "Not applied: the run passed its apply deadline." } : c)
-    );
-    return { records, moves, tooLate: true, error: null };
-  }
+  const toApplyCount = planned.filter((c) => c.outcome === "applied").length;
 
   const records: ChangeRecord[] = [];
   let error: unknown = null;
+  let tooLate = false;
+  let appliedCount = 0;
+
   for (const c of planned) {
-    if (c.outcome !== "applied" || !c.toStage) {
-      records.push(c);
+    if (!tooLate && pastApplyDeadline(anchorMs, Date.now())) tooLate = true;
+
+    if (tooLate) {
+      records.push(
+        c.outcome === "applied" || c.outcome === "held"
+          ? { ...c, outcome: "discarded", note: "Not applied: the run reached its apply deadline." }
+          : c
+      );
       continue;
     }
     if (error !== null) {
-      records.push({ ...c, outcome: "discarded", note: "Not applied: an earlier change in this run failed." });
+      records.push(
+        c.outcome === "applied" || c.outcome === "held"
+          ? { ...c, outcome: "discarded", note: "Not applied: an earlier change in this run failed." }
+          : c
+      );
+      continue;
+    }
+    if (c.outcome !== "applied" || !c.toStage) {
+      records.push(c);
       continue;
     }
     try {
       await moveDeal(ctx.companyId, c.leadId, c.fromStage?.id ?? null, c.toStage, { kind: "agent", agentName: agent.name });
       moves.push({ leadId: c.leadId, stageId: c.toStage.id });
       records.push(c);
+      appliedCount++;
     } catch (err) {
       error = err;
       records.push({ ...c, outcome: "discarded", note: `Not applied: ${firstLine(err)}` });
     }
   }
-  return { records, moves, tooLate: false, error };
+  return { records, moves, tooLate, error, appliedCount, toApplyCount };
 }
 
 /**
  * Write the verdict, if the run is still ours. The compare-and-set on
  * `running` is what makes the reaper's word final: when it closed the run
  * first, this run stays failed and what came back is kept as lateResult.
+ *
+ * `summary` and `error` are stripped of NUL bytes and `detail` is walked the
+ * same way — Postgres `text` and `jsonb` reject 0x00 outright, and
+ * handler-controlled text reaches all three (the log, a handler's own
+ * `detail`, and `result.error`). `error` is also cut to `MAX_ERROR_CHARS`
+ * here, so a thrown stack or a handler's own `config.error` is bounded
+ * regardless of which path produced it.
  */
 async function finalize(ctx: RunCtx, verdict: Verdict): Promise<AgentRunStatus> {
   const finishedAt = new Date();
   ctx.detail.durationMs = finishedAt.getTime() - ctx.startedMs;
-  const summary = truncateSummary(verdict.summary);
+  const summary = clean(truncateSummary(verdict.summary));
+  const error = verdict.error != null ? clean(verdict.error).slice(0, MAX_ERROR_CHARS) : null;
+  const detail = cleanDeep(ctx.detail);
 
   const done = await prisma.agentRun.updateMany({
     where: { id: ctx.runId, status: "running" },
-    data: { status: verdict.status, finishedAt, summary, error: verdict.error ?? null, detail: json(ctx.detail) },
+    data: { status: verdict.status, finishedAt, summary, error, detail: json(detail) },
   });
 
   if (done.count === 0) {
@@ -315,10 +427,10 @@ async function finalize(ctx: RunCtx, verdict: Verdict): Promise<AgentRunStatus> 
     kept.lateResult = {
       status: verdict.status,
       summary,
-      error: verdict.error ?? null,
-      log: ctx.detail.log,
-      handler: ctx.detail.handler,
-      changes: ctx.detail.changes,
+      error,
+      log: detail.log,
+      handler: detail.handler,
+      changes: detail.changes,
       at: finishedAt.toISOString(),
     };
     await prisma.agentRun.update({ where: { id: ctx.runId }, data: { detail: json(kept) } });
