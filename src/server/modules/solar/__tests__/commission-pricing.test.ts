@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { commissionMeasure, compareWithSignedDocument } from "../commission-pricing";
+import {
+  commissionMeasure,
+  compareWithSignedDocument,
+  measureFromSignedDocument,
+} from "../commission-pricing";
 
 /**
  * What a solar commission is measured on, and the check against the signed
@@ -83,5 +87,58 @@ describe("compareWithSignedDocument", () => {
       differences: [],
     });
     expect(compareWithSignedDocument(deal, null)).toEqual({ matches: null, differences: [] });
+  });
+});
+
+describe("measureFromSignedDocument", () => {
+  /**
+   * The worked example: a $30,000 base at sticker with a 25% dealer fee inside
+   * it, which leaves the company $22,500 — the figure a redline is measured on.
+   */
+  const document = {
+    financing: { basePriceCents: 3_000_000, batteryQty: 1 },
+    system: { sizeKwDc: 10 },
+  };
+  const loan = { product: "loan" as const, dealerFeePct: 25, systemType: "pv_storage" as const };
+
+  it("measures on the document's base with the deal's fee taken out of it", () => {
+    expect(measureFromSignedDocument(document, loan)).toEqual({
+      systemWatts: 10_000,
+      basePriceCents: 2_250_000,
+      batteryQty: 1,
+    });
+  });
+
+  it("takes no fee out of a cash deal, whatever the row carries", () => {
+    expect(
+      measureFromSignedDocument(document, { ...loan, product: "cash", dealerFeePct: 25 })
+        ?.basePriceCents
+    ).toBe(3_000_000);
+  });
+
+  it("stands a fee down rather than making nonsense of it", () => {
+    for (const dealerFeePct of [0, 100, Number.NaN]) {
+      expect(measureFromSignedDocument(document, { ...loan, dealerFeePct })?.basePriceCents).toBe(
+        3_000_000
+      );
+    }
+  });
+
+  it("gives a storage job no watts and reads its batteries from the storage block", () => {
+    expect(
+      measureFromSignedDocument(
+        {
+          financing: { basePriceCents: 4_000_000 },
+          system: { sizeKwDc: 7.2 }, // a stale size left on the design
+          storage: { batteryQty: 2 },
+        },
+        { ...loan, systemType: "storage" }
+      )
+    ).toEqual({ systemWatts: 0, basePriceCents: 3_000_000, batteryQty: 2 });
+  });
+
+  it("reads nothing off a document that carries no priced figures", () => {
+    expect(measureFromSignedDocument({ financing: { batteryQty: 1 } }, loan)).toBeNull();
+    expect(measureFromSignedDocument(null, loan)).toBeNull();
   });
 });

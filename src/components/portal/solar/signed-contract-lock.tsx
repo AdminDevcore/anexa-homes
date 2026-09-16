@@ -9,6 +9,7 @@ import {
   unlockSignedContractAction,
   relockSignedContractAction,
 } from "@/server/modules/solar/unlock-actions";
+import { refreezeCommissionMeasureAction } from "@/server/modules/solar/commission-measure-actions";
 
 /**
  * WHY THIS DEAL'S MONEY IS READ-ONLY, said out loud.
@@ -39,6 +40,17 @@ export type ContractLockState = {
   canOverride: boolean;
   /** The live unlock, if one is open. */
   unlock: { reason: string; expiresAt: string } | null;
+  /**
+   * What this deal's commission is measured on, and which document it was read
+   * from. Null when nothing was ever frozen — a deal with no compensation terms
+   * has no measure to move.
+   */
+  measure?: {
+    frozenAt: string | null;
+    basis: string | null;
+    proposalVersion: number | null;
+    matchesDocument: boolean | null;
+  } | null;
 };
 
 export function SignedContractLock({ leadId, lock }: { leadId: string; lock: ContractLockState }) {
@@ -98,6 +110,7 @@ export function SignedContractLock({ leadId, lock }: { leadId: string; lock: Con
             {busy && <Loader2 className="size-4 animate-spin" />} Close it again
           </Button>
         )}
+        <CommissionMeasure leadId={leadId} lock={lock} />
       </div>
     );
   }
@@ -156,6 +169,103 @@ export function SignedContractLock({ leadId, lock }: { leadId: string; lock: Con
               variant="ghost"
               onClick={() => {
                 setOpening(false);
+                setReason("");
+              }}
+              disabled={busy}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+      <CommissionMeasure leadId={leadId} lock={lock} />
+    </div>
+  );
+}
+
+/**
+ * WHAT THIS DEAL PAYS ON, and the one manual way to move it.
+ *
+ * The measure — the watts, the base price and the battery count — is frozen off
+ * the proposal the household signed, so a correction made after signing does not
+ * move anybody's commission until the customer signs the corrected version.
+ * When a correction is agreed but not re-signed, a super admin re-freezes it
+ * here and says why. Never automatic on an unlock: reopening a contract is
+ * permission to fix something, not a decision about pay.
+ */
+function CommissionMeasure({ leadId, lock }: { leadId: string; lock: ContractLockState }) {
+  const router = useRouter();
+  const [busy, setBusy] = React.useState(false);
+  const [asking, setAsking] = React.useState(false);
+  const [reason, setReason] = React.useState("");
+
+  const measure = lock.measure;
+  if (!lock.canOverride || !measure) return null;
+
+  const from =
+    measure.basis === "signed_document" && measure.proposalVersion != null
+      ? `signed proposal v${measure.proposalVersion}`
+      : measure.frozenAt
+        ? "the deal itself — that document carries no priced figures"
+        : "the deal as it stands";
+
+  async function refreeze() {
+    setBusy(true);
+    try {
+      const res = await refreezeCommissionMeasureAction({ leadId, reason });
+      if (!res.ok) return toast.error(res.error);
+      toast.success("Commission measure re-frozen from the signed proposal.");
+      setAsking(false);
+      setReason("");
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 border-t border-border/60 pt-2">
+      <p className="text-[11px] text-muted-foreground">
+        Commission is measured on {from}.
+        {measure.matchesDocument === false && (
+          <span className="font-medium text-amber-700 dark:text-amber-300">
+            {" "}
+            The deal no longer matches that document.
+          </span>
+        )}
+      </p>
+
+      {!asking && (
+        <Button size="sm" variant="ghost" className="mt-1 h-7 px-2 text-[11px]" onClick={() => setAsking(true)}>
+          Re-freeze from the signed proposal
+        </Button>
+      )}
+
+      {asking && (
+        <div className="mt-2 space-y-2">
+          <label className="block space-y-1">
+            <span className="text-[11px] font-medium">Why is the measure being re-frozen?</span>
+            <textarea
+              aria-label="Reason for re-freezing the commission measure"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              rows={2}
+              placeholder="e.g. Customer agreed the corrected system size by email on 12 May"
+              className="w-full rounded-md border border-input bg-transparent px-2 py-1.5 text-sm"
+            />
+          </label>
+          <p className="text-[11px] text-muted-foreground">
+            Recorded on this deal&rsquo;s history with your name and the figures it wrote.
+          </p>
+          <div className="flex gap-2">
+            <Button size="sm" onClick={refreeze} disabled={busy || reason.trim().length < 8}>
+              {busy && <Loader2 className="size-4 animate-spin" />} Re-freeze
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setAsking(false);
                 setReason("");
               }}
               disabled={busy}

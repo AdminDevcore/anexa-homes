@@ -14,8 +14,9 @@ import { ASSUMPTIONS, DEALS, STORAGE_DEAL } from "@/lib/__tests__/pricing-golden
  *  - The live re-price keeps the battery (it now prices through
  *    `dealMoneyColumns`), including when the new version is refused.
  *  - The commission measure — watts, base price, battery count — is frozen at
- *    signing, checked against the signed version, and backfilled on rows
- *    signed before it existed.
+ *    signing FROM THE SIGNED PROPOSAL, compared against the live deal, and
+ *    backfilled on rows signed before it existed. A super admin can re-freeze
+ *    it by hand, with a reason.
  *  - Credits never change a commission, signed or not.
  *  - L16 pinned: a capped storage deal's stored per-battery sticker depends on
  *    which path wrote it last. Reported, not fixed.
@@ -39,6 +40,7 @@ const { generateProposalVersion } = await import("../proposal-generate");
 const { recomputeDealMoney } = await import("../deal-money");
 const { snapshotSolarDealComp } = await import("../deal-comp");
 const { backfillCommissionMeasure, loadCommissionDeal } = await import("../commission-pricing");
+const { refreezeCommissionMeasureAction } = await import("../commission-measure-actions");
 const { estimatedSolarCommission, computeSolarCommissionsForProject } = await import(
   "@/server/modules/payroll/solar-engine"
 );
@@ -434,9 +436,13 @@ describe("the commission measure is frozen at signing", () => {
       basePriceCents: live!.basePriceCents,
       batteryQty: 1,
       pricedFrom: "signature",
+      pricedBasis: "signed_document",
       pricedProposalId: v1.id,
       pricingMatchesSignedDocument: true,
     });
+    // The document's base at sticker, less this deal's fee — the same figure
+    // the live deal prices to while the two still agree.
+    expect(comp.basePriceCents).toBe(3_000_000);
     // Freezing the live figure moves nothing on the day. Only the estimate's
     // provenance changes: its terms now come from the signing.
     const before = await pay(leadId, projectId);
@@ -466,7 +472,12 @@ describe("the commission measure is frozen at signing", () => {
           snapshot: {
             ...snapshot,
             system: { ...snapshot.system, sizeKwDc: 12 },
-            financing: { ...snapshot.financing, contractPriceCents: moved!.finalPriceCents },
+            financing: {
+              ...snapshot.financing,
+              // At sticker, as the document always prints it: 12 kW at 600¢/W.
+              basePriceCents: 12_000 * 600,
+              contractPriceCents: moved!.finalPriceCents,
+            },
           },
         } as never,
       });
@@ -501,14 +512,118 @@ describe("the commission measure is frozen at signing", () => {
     await raw.solarFinance.update({ where: { leadId }, data: { grossPpwCents: 450 } });
     await sign(leadId, v1.id);
 
+    // The deal now prices to $33,750 of base; the document says $30,000. The
+    // customer signed the document, so that is what the rep is paid on.
+    const live = await inSolar(() => loadCommissionDeal(db, companyId, leadId));
+    expect(live!.basePriceCents).toBe(3_375_000);
     const comp = await raw.solarDealComp.findUniqueOrThrow({ where: { leadId } });
-    expect(comp.pricedFrom).toBe("signature");
-    expect(comp.pricingMatchesSignedDocument).toBe(false);
+    expect(comp).toMatchObject({
+      pricedFrom: "signature",
+      pricedBasis: "signed_document",
+      basePriceCents: 3_000_000,
+      pricingMatchesSignedDocument: false,
+    });
     const log = await raw.activityLog.findFirst({
       where: { companyId, leadId, message: { contains: "does not match signed proposal v1" } },
       select: { message: true },
     });
     expect(log?.message).toContain("final price");
+    expect(log?.message).toContain("base price $33,750.00 on the deal, $30,000.00 on the signed document");
+  });
+});
+
+describe("a document with no priced figures falls back to the deal, and says so", () => {
+  it("freezes the live measure and records why", async () => {
+    const { leadId } = await seedDeal("no-priced-figures");
+    const { row: v1 } = await generate(leadId);
+    const snapshot = v1.snapshot as SolarProposalSnapshot;
+    // A version as older code generated them: no priced figures on the document.
+    const financing = Object.fromEntries(
+      Object.entries(snapshot.financing).filter(([k]) => k !== "basePriceCents")
+    );
+    await raw.solarProposal.update({
+      where: { id: v1.id },
+      data: { snapshot: { ...snapshot, financing } as never },
+    });
+    await sign(leadId, v1.id);
+
+    const live = await inSolar(() => loadCommissionDeal(db, companyId, leadId));
+    expect(await raw.solarDealComp.findUniqueOrThrow({ where: { leadId } })).toMatchObject({
+      pricedBasis: "live_deal",
+      basePriceCents: live!.basePriceCents,
+    });
+    const log = await raw.activityLog.findFirst({
+      where: { companyId, leadId, message: { contains: "carries no priced figures" } },
+      select: { message: true },
+    });
+    expect(log?.message).toContain("frozen from the deal itself");
+  });
+});
+
+describe("a super admin can re-freeze the measure by hand", () => {
+  it("refuses everyone else, demands a reason, and reads the document again", async () => {
+    const { leadId } = await seedDeal("refreeze");
+    const { row: v1 } = await generate(leadId);
+    await sign(leadId, v1.id);
+    const frozen = await raw.solarDealComp.findUniqueOrThrow({ where: { leadId } });
+
+    // A correction made after signing, which the household has not re-signed.
+    await raw.solarFinance.update({ where: { leadId }, data: { grossPpwCents: 450 } });
+
+    try {
+      requireUser.mockResolvedValue({ ...user, role: "admin" });
+      expect(
+        await inSolar(() => refreezeCommissionMeasureAction({ leadId, reason: "Corrected the size" }))
+      ).toEqual({ ok: false, error: "Only a super admin can re-freeze what a commission is measured on." });
+
+      requireUser.mockResolvedValue({ ...user, role: "super_admin" });
+      expect(await inSolar(() => refreezeCommissionMeasureAction({ leadId, reason: "typo" }))).toEqual({
+        ok: false,
+        error: "Say why this deal's commission measure is being re-frozen.",
+      });
+
+      // Re-read from the same signed document: the moved deal does not reach it.
+      const res = await inSolar(() =>
+        refreezeCommissionMeasureAction({ leadId, reason: "Customer agreed the corrected size by email" })
+      );
+      expect(res).toMatchObject({
+        ok: true,
+        basis: "signed_document",
+        measure: { basePriceCents: frozen.basePriceCents },
+      });
+      expect(await raw.solarDealComp.findUniqueOrThrow({ where: { leadId } })).toMatchObject({
+        pricedFrom: "refreeze",
+        pricedBasis: "signed_document",
+        basePriceCents: frozen.basePriceCents,
+        pricingMatchesSignedDocument: false,
+      });
+
+      const log = await raw.activityLog.findFirst({
+        where: { companyId, leadId, message: { contains: "re-froze the commission measure" } },
+        select: { message: true },
+      });
+      expect(log?.message).toContain("signed proposal v1");
+      expect(log?.message).toContain("Customer agreed the corrected size by email");
+      expect(log?.message).toContain("the deal still differs");
+    } finally {
+      requireUser.mockResolvedValue(user);
+    }
+  });
+
+  it("has nothing to move on a deal nobody has signed", async () => {
+    const { leadId } = await seedDeal("refreeze-unsigned");
+    await generate(leadId);
+    try {
+      requireUser.mockResolvedValue({ ...user, role: "super_admin" });
+      expect(
+        await inSolar(() => refreezeCommissionMeasureAction({ leadId, reason: "Nothing to re-freeze" }))
+      ).toEqual({
+        ok: false,
+        error: "This contract has not been signed, so there is no frozen measure to move.",
+      });
+    } finally {
+      requireUser.mockResolvedValue(user);
+    }
   });
 });
 
@@ -528,6 +643,7 @@ describe("the backfill freezes rows signed before the measure existed", () => {
     expect(dry.map((r) => r.leadId)).toEqual([leadId]);
     expect(dry[0].outcome).toMatchObject({
       status: "would_freeze",
+      basis: "signed_document",
       matches: true,
       proposalId: v1.id,
       measure: { systemWatts: 10_000, batteryQty: 1 },
@@ -538,6 +654,7 @@ describe("the backfill freezes rows signed before the measure existed", () => {
     expect(applied[0].outcome.status).toBe("frozen");
     expect(await raw.solarDealComp.findUniqueOrThrow({ where: { leadId } })).toMatchObject({
       pricedFrom: "backfill",
+      pricedBasis: "signed_document",
       pricedProposalId: v1.id,
       pricingMatchesSignedDocument: true,
     });
@@ -545,6 +662,39 @@ describe("the backfill freezes rows signed before the measure existed", () => {
 
     // Nothing left to do on a second run.
     expect(await inSolar(() => backfillCommissionMeasure(db, { apply: true, now: new Date(), companyId }))).toEqual([]);
+  });
+
+  it("holds a row whose document would pay differently, until it is told to write it", async () => {
+    const { leadId } = await seedDeal("backfill-moves");
+    const { row: v1 } = await generate(leadId);
+    const signedAt = new Date();
+    await raw.solarProposal.update({ where: { id: v1.id }, data: { status: "signed", signedAt } });
+    await raw.solarDealComp.create({
+      data: { companyId, leadId, repId, basis: "redline", redlineCentsPerWatt: REDLINE, signedAt },
+    });
+    // Re-priced after it was signed: the document says $30,000 of base, the
+    // deal now says $33,750, and payroll has been paying the $33,750.
+    await raw.solarFinance.update({ where: { leadId }, data: { grossPpwCents: 450 } });
+
+    const first = await inSolar(() => backfillCommissionMeasure(db, { apply: true, now: new Date(), companyId }));
+    const held = first.find((r) => r.leadId === leadId)!;
+    expect(held).toMatchObject({ movesPay: true, held: true });
+    expect(held.outcome).toMatchObject({
+      status: "would_freeze",
+      measure: { basePriceCents: 3_000_000 },
+      live: { basePriceCents: 3_375_000 },
+    });
+    expect((await raw.solarDealComp.findUniqueOrThrow({ where: { leadId } })).pricedAt).toBeNull();
+
+    const second = await inSolar(() =>
+      backfillCommissionMeasure(db, { apply: true, allowMoves: true, now: new Date(), companyId })
+    );
+    expect(second.find((r) => r.leadId === leadId)).toMatchObject({ movesPay: true, held: false });
+    expect(await raw.solarDealComp.findUniqueOrThrow({ where: { leadId } })).toMatchObject({
+      pricedFrom: "backfill",
+      pricedBasis: "signed_document",
+      basePriceCents: 3_000_000,
+    });
   });
 });
 

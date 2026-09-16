@@ -5252,8 +5252,13 @@ model SolarDealComp {
   basePriceCents Int?
   batteryQty     Int?
   pricedAt       DateTime?
-  /// "signature" or "backfill".
+  /// "signature", "backfill" or "refreeze".
   pricedFrom     String?
+  /// WHERE the frozen numbers came from: "signed_document" — the proposal the
+  /// customer put their name to, which is the rule — or "live_deal", the
+  /// fallback for a document that carries no priced figures (a version
+  /// generated before the snapshot recorded them, or a lease or PPA).
+  pricedBasis    String?
   /// The signed proposal the frozen price was checked against.
   pricedProposalId String?
   /// Whether the live price at freezing matched that signed document: the final
