@@ -405,6 +405,55 @@ elsewhere is not something that message should confirm.
 question about the existing code, not only as an obstacle to the new. The guard
 was right, and it was right about something written a phase earlier.
 
+### Bank rules
+
+**A rule suggests; it posts only if asked.** `autoPost` is off by default. A
+wrong rule that suggests is a wrong suggestion; a wrong rule that posts has
+already written to the books, and undoing it means a reversing entry for every
+row it touched.
+
+**Suggestions are computed on read, never stored.** There is deliberately no
+`suggestedRuleId` column — a stored suggestion goes stale the moment the rule is
+edited, and the queue would then show a category no rule would produce.
+
+**Direction is matched on the sign**, which stops a `money_out` rule for "SHELL"
+catching a refund *from* Shell and booking a credit as fuel expense. Amount
+bounds compare the absolute value, so "under fifty" means what a person means.
+
+**Rule order is total** — priority, then `createdAt`, then `id`. Priority alone
+leaves equal-priority rules applying in whatever order the database returns, so
+the same row categorises differently between runs and neither result looks wrong.
+
+**A failed auto-post leaves the row in the queue.** Marking it otherwise would
+make an unhandled transaction look handled.
+
+**A rule applies the whole amount.** A split is a judgement about one particular
+row, which is precisely what a standing instruction cannot make.
+
+### A flaky test in the pipeline suite, diagnosed and fixed
+
+`stage-history.itest.ts` — "never writes a span that closes before it opened" —
+failed once during Phase 2 and passed on a re-run. Worth recording because
+"re-run it and it passed" is how a real intermittent bug gets ignored.
+
+It was not pollution from the new fixtures: `events()` filters by `leadId`, so
+no other suite can reach it. The cause is a tie created by *the very clamp the
+test verifies*. `recordStageEntry` clamps a backdated write forward, so entering
+at day(2) against a span opened at day(10) leaves the closed span's `exitedAt`
+and the new span's `enteredAt` both at day(10). `events()` orders by
+`enteredAt` alone; the rows tie; Postgres may return either first. When the
+still-open span won, `rows[0].exitedAt` was null and the test died on a
+TypeError — intermittently, and only under full-suite timing.
+
+Fixed by asserting the property across every closed span rather than `rows[0]`.
+The property was never about the first row.
+
+This is the same class as the `generalLedger` ordering bug fixed in Phase 1,
+where a reversal shares its original's date and needed a `createdAt` tiebreak.
+**Any `orderBy` whose key can tie is a non-deterministic read**, and in a test it
+surfaces as a flake rather than as a wrong number — which is luckier than it
+deserves.
+
 ---
 
 ## Not decided yet
