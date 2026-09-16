@@ -1,5 +1,6 @@
 import { prisma } from "@/server/db/client";
-import { batteryChargeCents, priceStorageStored } from "@/lib/solar-money";
+import { batteryChargeCents } from "@/lib/solar-money";
+import { priceDeal } from "@/lib/solar-price-deal";
 import { financeRowForProduct, type FinanceInput } from "@/lib/solar-finance-row";
 import { toLenderProductTerms, LENDER_TERMS_SELECT } from "./lender-terms";
 import { resolveAdderTotal } from "./adders";
@@ -156,15 +157,27 @@ export async function dealMoneyColumns(
   const storageSticker = isStorage ? (f.stickerPricePerBatteryCents ?? 0) : 0;
   const storagePrice =
     isStorage && (f.product === "cash" || f.product === "loan") && storageSticker > 0
-      ? priceStorageStored({
+      ? priceDeal({
+          // Passed straight through, unlike the builder's price card, which has
+          // to pin "loan". The old call here was `priceStorageStored`, which
+          // nulls the partner rule on cash ITSELF — and that is precisely the
+          // function `priceDeal`'s storage branch delegates to, so cash behaves
+          // identically either way.
           product: f.product,
+          systemType: "storage",
+          systemSizeKwDc: 0,
+          baseFinalPpwCents: 0,
+          baseFinalPerBatteryCents: storageSticker,
           batteryQty: design?.batteryQty ?? 0,
-          stickerPricePerBatteryCents: storageSticker,
           dealerFeePct: f.product === "cash" ? 0 : (rowData.dealerFeePct ?? 0),
-          adderTotalCents: adders.addersInsideRuleCents,
-          onTopAdderTotalCents: adders.addersOutsideRuleCents,
-          maxFinalPricePerBatteryCents: lenderBand?.priceRulePerBatteryCents ?? null,
-          finalBatteryPriceMode: lenderBand?.priceRuleBatteryMode ?? "cap",
+          // The provenance `financeRowForProduct` resolved. Read here, above the
+          // destructure that keeps it out of the Prisma payload — this reads the
+          // value, it does not carry it into `rest`.
+          dealerFeeSource: rowData.dealerFeeSource,
+          addersInsideRuleCents: adders.addersInsideRuleCents,
+          addersOutsideRuleCents: adders.addersOutsideRuleCents,
+          priceRulePerBatteryCents: lenderBand?.priceRulePerBatteryCents ?? null,
+          priceRuleBatteryMode: lenderBand?.priceRuleBatteryMode ?? "cap",
           // Which price that figure fixes is the quoted programme's to say.
           batteryPriceBasis: lenderProduct?.batteryPriceBasis,
         })
@@ -222,7 +235,7 @@ export async function dealMoneyColumns(
     baseFinalPpwCents: isStorage ? 0 : grossPpwCents,
     addersInsideRuleCents: adderTotalCents,
     addersOutsideRuleCents: onTopAdderTotalCents,
-    finalPriceCents: storagePrice ? storagePrice.breakdown.contractPriceCents : contractPriceCents,
+    finalPriceCents: storagePrice ? storagePrice.finalPriceCents : contractPriceCents,
     leasePaymentCents: monthlyPaymentCents,
     lenderMonthlyPaymentCents: loanMonthlyPaymentCents,
   };
