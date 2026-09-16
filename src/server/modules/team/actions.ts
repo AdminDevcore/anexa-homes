@@ -15,6 +15,8 @@ import { ensureRepVendor } from "@/server/modules/bookkeeping/rep-vendor";
 import { roleLabel, canAssignRole } from "@/lib/roles";
 import { VERTICALS, VERTICAL_LABEL } from "@/lib/vertical";
 import { userVerticals } from "@/server/auth/vertical";
+import type { Prisma } from "@prisma/client";
+import { AGENT_ACCESS_ROLE, withAgentsAccess, withoutAgentsAccess } from "@/server/modules/agents/access";
 
 function fail(error: string) {
   return { ok: false as const, error };
@@ -164,7 +166,7 @@ export async function updateTeamMemberAction(input: z.infer<typeof updateSchema>
   if (!parsed.success) return fail("Invalid changes.");
   const { userId, role, title, status, commissionSplitPct, providedLeadType, providedLeadSplitPct, providedLeadFlatCents, deductiblePct, verticals, salesRepId, managerId } = parsed.data;
 
-  const target = await prisma.user.findFirst({ where: { id: userId, companyId: me.companyId }, select: { id: true, role: true } });
+  const target = await prisma.user.findFirst({ where: { id: userId, companyId: me.companyId }, select: { id: true, role: true, permissions: true } });
   if (!target) return fail("User not found.");
 
   // Resolve the assigned sales rep (canvassers only). The effective role is the
@@ -234,11 +236,16 @@ export async function updateTeamMemberAction(input: z.infer<typeof updateSchema>
   // longer has a manager — and would silently come back if they were ever
   // promoted again, under a name nobody remembers choosing.
   const clearTeamName = roleChanged && role !== "manager";
+  // The Agents access switch goes the same way: it was given to a manager, and
+  // it does not follow them into a different job. The keys are deleted, never
+  // set to false (see modules/agents/access.ts).
+  const clearAgentsAccess = roleChanged && role !== AGENT_ACCESS_ROLE;
   await prisma.user.update({
     where: { id: target.id },
     data: {
       ...(role ? { role } : {}),
       ...(clearTeamName ? { teamName: null } : {}),
+      ...(clearAgentsAccess ? { permissions: withoutAgentsAccess(target.permissions) as Prisma.InputJsonValue } : {}),
       ...(title !== undefined ? { title } : {}),
       ...(status ? { status } : {}),
       ...(commissionSplitPct !== undefined ? { commissionSplitPct } : {}),
@@ -256,6 +263,39 @@ export async function updateTeamMemberAction(input: z.infer<typeof updateSchema>
   // A sales rep is paid as a 1099 contractor — make sure they have a vendor.
   if (effectiveRole === "sales_rep") await ensureRepVendor(me.companyId, target.id);
   revalidatePath("/portal/team");
+  revalidatePath(`/portal/team/${target.id}`);
+  return { ok: true as const };
+}
+
+// ---------------------------------------------------------------------------
+// Agents access
+// ---------------------------------------------------------------------------
+
+const agentsAccessSchema = z.object({ userId: z.string().min(1), on: z.boolean() });
+
+/**
+ * The per-person Agents access switch: read agents and runs, Run now, and
+ * resolve a run that needs a human. Never create or edit — config stays with
+ * the owner and admins by role. Owner only, and only a manager can be given
+ * it, because `manager` is where the solar coordinators sit today.
+ */
+export async function setAgentsAccessAction(input: z.infer<typeof agentsAccessSchema>) {
+  const me = await requireUser();
+  if (me.role !== "super_admin") return fail("Only the owner can change Agents access.");
+  const parsed = agentsAccessSchema.safeParse(input);
+  if (!parsed.success) return fail("Invalid request.");
+  const { userId, on } = parsed.data;
+
+  const target = await prisma.user.findFirst({
+    where: { id: userId, companyId: me.companyId },
+    select: { id: true, role: true, permissions: true },
+  });
+  if (!target) return fail("User not found.");
+  // Turning it OFF works on anyone, so a stale key can always be cleared.
+  if (on && target.role !== AGENT_ACCESS_ROLE) return fail("Agents access can only be given to a manager.");
+
+  const permissions = on ? withAgentsAccess(target.permissions) : withoutAgentsAccess(target.permissions);
+  await prisma.user.update({ where: { id: target.id }, data: { permissions: permissions as Prisma.InputJsonValue } });
   revalidatePath(`/portal/team/${target.id}`);
   return { ok: true as const };
 }
