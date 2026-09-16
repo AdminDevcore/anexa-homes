@@ -6,11 +6,11 @@ import type { ProposalAlternative, ProposalFinanceInput } from "./solar-proposal
 import {
   basePpwFromSticker,
   grossPpwFromNet,
-  capStickerToFinalUnit,
   type SolarAssumptions,
   type FinalPpwMode,
   type PriceBasis,
 } from "./solar-money";
+import { priceDeal } from "./solar-price-deal";
 
 /**
  * Turning a company's rate sheet into the menu a homeowner can actually choose
@@ -362,16 +362,39 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
      * programme's fee and then held to whatever this partner will fund a
      * battery for.
      */
+    /*
+     * Through `priceDeal()` rather than the ceiling primitive directly. Its
+     * storage branch caps with that same `capStickerToFinalUnit`, on the same
+     * arguments, and hands the capped per-battery rate back as
+     * `stickerPerUnitCents`. Only that rate is read here: the ladder priced
+     * alongside it is not wanted, because a menu row quotes a RATE and
+     * `purchaseFinance` builds the money from it further down.
+     *
+     * `product: "loan"` is pinned rather than passed through from `p`. The old
+     * call did not branch on product at all — it capped whatever it was handed
+     * — whereas `priceDeal` returns a zero per-unit rate on a lease or PPA and
+     * refuses a partner rule outright on cash. `eligible` already restricts a
+     * storage deal to `p.product === "loan"`, so this changes nothing today;
+     * pinning it means a later change to that filter cannot quietly turn this
+     * line into a $0 battery price.
+     */
     const storageSticker = storage
-      ? capStickerToFinalUnit({
-          stickerPerUnitCents:
+      ? priceDeal({
+          product: "loan",
+          systemType: "storage",
+          // A storage job has no array: the battery is the unit being counted.
+          systemSizeKwDc: 0,
+          baseFinalPpwCents: 0,
+          baseFinalPerBatteryCents:
             grossPpwFromNet(baseBatteryCents, row.dealerFeePct) ?? baseBatteryCents,
-          maxFinalPerUnitCents: p.lender.maxFinalPricePerBatteryCents ?? null,
-          mode: p.lender.finalBatteryPriceMode,
-          basis: p.batteryPriceBasis,
-          units: storage.batteryQty,
+          batteryQty: storage.batteryQty,
           dealerFeePct: row.dealerFeePct,
-          adderTotalCents: input.adderTotalCents,
+          dealerFeeSource: row.dealerFeeSource,
+          addersInsideRuleCents: input.adderTotalCents,
+          addersOutsideRuleCents: input.onTopAdderTotalCents,
+          priceRulePerBatteryCents: p.lender.maxFinalPricePerBatteryCents ?? null,
+          priceRuleBatteryMode: p.lender.finalBatteryPriceMode,
+          batteryPriceBasis: p.batteryPriceBasis,
         }).stickerPerUnitCents
       : null;
 
