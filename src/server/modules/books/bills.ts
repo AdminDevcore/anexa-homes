@@ -1,5 +1,6 @@
 import type { BillStatus, Vertical } from "@prisma/client";
 import { prisma } from "@/server/db/client";
+import { runUnscoped } from "@/server/vertical/context";
 import {
   postJournalEntry,
   voidJournalEntry,
@@ -97,6 +98,22 @@ export async function createBill(input: CreateBillInput): Promise<BillResult> {
   });
   if (clash) return { ok: false, error: `Bill ${input.billNumber} already exists.` };
 
+  // TAGGED FROM THE JOB, EXPLICITLY. Bill is classified TAGGED with `projectId`
+  // provenance, but the vertical extension returns early for unscoped callers —
+  // which is the books' normal state — so the row would otherwise be written
+  // with no department, and a bill-level breakout would show nothing.
+  const projectId = input.projectId ?? null;
+  let vertical = input.vertical ?? null;
+  if (!vertical && projectId) {
+    const project = await runUnscoped("books: a bill's department is its job's", () =>
+      prisma.project.findFirst({
+        where: { id: projectId, companyId: input.companyId },
+        select: { vertical: true },
+      })
+    );
+    vertical = project?.vertical ?? null;
+  }
+
   const bill = await prisma.bill.create({
     data: {
       companyId: input.companyId,
@@ -106,9 +123,9 @@ export async function createBill(input: CreateBillInput): Promise<BillResult> {
       amountCents: input.amountCents,
       billedAt: input.billedAt,
       dueAt: input.dueAt ?? null,
-      projectId: input.projectId ?? null,
+      projectId,
       expenseAccountId: input.expenseAccountId ?? null,
-      vertical: input.vertical ?? null,
+      vertical,
       memo: input.memo ?? null,
       createdById: input.actor.kind === "user" ? input.actor.userId : null,
     },

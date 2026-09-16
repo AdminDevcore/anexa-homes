@@ -192,27 +192,37 @@ async function checkPeriodLock(
  * Per-VIEWER scoping is a different question and belongs at the action
  * (`projectAccessible`), where there is a user to ask about.
  */
+type ReferenceResult =
+  | { ok: true; projectVerticals: Map<string, Vertical> }
+  | { ok: false; error: string };
+
 async function resolveReferences(
   companyId: string,
   lines: JournalLineInput[]
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<ReferenceResult> {
   const projectIds = [...new Set(lines.map((l) => l.projectId).filter((v): v is string => !!v))];
   const vendorIds = [...new Set(lines.map((l) => l.vendorId).filter((v): v is string => !!v))];
-  if (projectIds.length === 0 && vendorIds.length === 0) return { ok: true };
+  if (projectIds.length === 0 && vendorIds.length === 0) {
+    return { ok: true, projectVerticals: new Map() };
+  }
 
   return runUnscoped(
-    "journal posting: confirm a line's job and vendor belong to this company",
-    async () => {
+    "journal posting: confirm a line's job and vendor belong to this company, and read each job's department",
+    async (): Promise<ReferenceResult> => {
+      const projectVerticals = new Map<string, Vertical>();
       if (projectIds.length > 0) {
         const found = await prisma.project.findMany({
           where: { companyId, id: { in: projectIds } },
-          select: { id: true },
+          // `vertical` comes back from the SAME query that validates the job,
+          // so tagging every line by department costs no extra round trip.
+          select: { id: true, vertical: true },
         });
         if (found.length !== projectIds.length) {
           // The id is never echoed: whether a row exists elsewhere is not
           // something this error should confirm.
-          return { ok: false as const, error: "That job is not on this company's books." };
+          return { ok: false, error: "That job is not on this company's books." };
         }
+        for (const p of found) projectVerticals.set(p.id, p.vertical);
       }
       if (vendorIds.length > 0) {
         const found = await prisma.bookkeepingVendor.findMany({
@@ -220,10 +230,10 @@ async function resolveReferences(
           select: { id: true },
         });
         if (found.length !== vendorIds.length) {
-          return { ok: false as const, error: "That vendor is not on this company's books." };
+          return { ok: false, error: "That vendor is not on this company's books." };
         }
       }
-      return { ok: true as const };
+      return { ok: true, projectVerticals };
     }
   );
 }
@@ -300,21 +310,55 @@ export async function postJournalEntry(input: PostEntryInput): Promise<PostResul
     if (existing) return { ok: true, entryId: existing.id, duplicate: true };
   }
 
-  const lineData = input.lines.map((line, i) => ({
-    companyId,
-    accountId: accounts.ids[i],
-    debitCents: line.debitCents ?? 0,
-    creditCents: line.creditCents ?? 0,
-    // MAPPED, NEVER SPREAD. `JournalLineInput` carries `systemKey`, which is not
-    // a column; spreading the caller's object would type-check (a spread is
-    // exempt from excess-property checking) and fail at runtime with Prisma's
-    // "Unknown argument". Naming each field is what makes that impossible.
-    ...(line.vertical !== undefined ? { vertical: line.vertical } : {}),
-    projectId: line.projectId ?? null,
-    vendorId: line.vendorId ?? null,
-    memo: line.memo ?? null,
-    position: i,
-  }));
+  const lineData = input.lines.map((line, i) => {
+    /**
+     * THE DEPARTMENT OF A LINE IS RESOLVED HERE, and it has to be here.
+     *
+     * JournalLine is classified TAGGED with `projectId` provenance, but that
+     * provenance never fires on this path: lines are created NESTED, as
+     * `lines: { create: [...] }` under `journalEntry.create`, so the vertical
+     * extension sees a JournalEntry write. JournalEntry is deliberately
+     * untagged (one entry may span departments), so `classify()` returns
+     * "shared" and the extension returns before it ever inspects a line.
+     *
+     * Left to that, a line's department was only ever what the caller passed —
+     * and a vendor bill entered against a solar job was written with no
+     * department, disappeared from the solar P&L, and still showed in the
+     * company totals. Every report balanced, so nothing could look wrong.
+     *
+     * Precedence matches the extension's own documented rule, minus ambient:
+     *   1. an explicit `vertical` from the caller (seeds, backfills, imports)
+     *   2. the line's job                        ← the authoritative source
+     *   3. nothing — a line with no job is company-level (a bank fee, office
+     *      rent, a transfer between our own accounts)
+     *
+     * Ambient is deliberately NOT a fallback. The books are consolidated and
+     * usually run with no workspace at all; stamping whichever vertical the
+     * reader happened to have toggled is how a solar cost lands in roofing.
+     */
+    const vertical =
+      line.vertical !== undefined
+        ? line.vertical
+        : line.projectId
+          ? references.projectVerticals.get(line.projectId) ?? null
+          : undefined;
+
+    return {
+      companyId,
+      accountId: accounts.ids[i],
+      debitCents: line.debitCents ?? 0,
+      creditCents: line.creditCents ?? 0,
+      // MAPPED, NEVER SPREAD. `JournalLineInput` carries `systemKey`, which is
+      // not a column; spreading the caller's object would type-check (a spread
+      // is exempt from excess-property checking) and fail at runtime with
+      // Prisma's "Unknown argument". Naming each field makes that impossible.
+      ...(vertical !== undefined ? { vertical } : {}),
+      projectId: line.projectId ?? null,
+      vendorId: line.vendorId ?? null,
+      memo: line.memo ?? null,
+      position: i,
+    };
+  });
 
   try {
     const entry = await prisma.$transaction(async (tx) => {
