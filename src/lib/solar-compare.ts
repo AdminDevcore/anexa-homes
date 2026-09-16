@@ -1,9 +1,8 @@
 import type { FinanceProduct } from "@prisma/client";
+import { priceDeal } from "@/lib/solar-price-deal";
 import {
-  capStickerToFinalPpw,
   grossPpwFromNet,
   leaseMonthlyCents,
-  pricePurchase,
   priceThirdParty,
   type FinalPpwMode,
   type PriceBasis,
@@ -255,32 +254,37 @@ function purchaseRow(
   // paid, the redline — is computed from the price the customer is actually
   // being quoted. Capping the headline and leaving the payment to the old one
   // would put two different deals on the same card.
-  const cap =
-    uncappedPpwCents == null
-      ? null
-      : capStickerToFinalPpw({
-          stickerPpwCents: uncappedPpwCents,
-          maxFinalPpwCents,
-          mode: finalPpwMode,
-          basis: cash ? undefined : (offer as OfferProduct).ppwBasis,
-          systemSizeKwDc: basis.systemSizeKwDc,
-          dealerFeePct,
-          adderTotalCents: basis.adderTotalCents,
-        });
-  const grossPpwCents = cap?.stickerPpwCents ?? uncappedPpwCents;
-
+  /**
+   * The ceiling and the price, solved together (Stage 4c).
+   *
+   * This was a `capStickerToFinalPpw` followed by a `pricePurchase` on the
+   * figure it returned. `priceDeal()` does both and hands back the rate it
+   * actually priced at, which is this column's headline $/W.
+   *
+   * STILL GATED ON THE ARRAY. A column with no watts prices nothing: the old
+   * code left `priced` null there and reported a null contract, and dropping
+   * that guard would quote every zero-kW row at its adders alone. The cap is
+   * no loss at 0 kW either — `capStickerToFinalUnit` returns the sticker
+   * untouched the moment `units <= 0`, so the flags below stay false exactly
+   * as they did.
+   */
   const priced =
-    grossPpwCents != null && basis.systemSizeKwDc > 0
-      ? pricePurchase({
+    uncappedPpwCents != null && basis.systemSizeKwDc > 0
+      ? priceDeal({
           product: cash ? "cash" : "loan",
+          systemType: "pv",
           systemSizeKwDc: basis.systemSizeKwDc,
-          stickerPpwCents: grossPpwCents,
+          baseFinalPpwCents: uncappedPpwCents,
           dealerFeePct,
-          adderTotalCents: basis.adderTotalCents,
-          onTopAdderTotalCents: basis.onTopAdderTotalCents,
-          batteryPriceCents: basis.batteryPriceCents ?? 0,
+          addersInsideRuleCents: basis.adderTotalCents,
+          addersOutsideRuleCents: basis.onTopAdderTotalCents,
+          equipmentChargesCents: basis.batteryPriceCents ?? 0,
+          priceRulePpwCents: maxFinalPpwCents,
+          priceRuleMode: finalPpwMode,
+          ppwBasis: cash ? undefined : (offer as OfferProduct).ppwBasis,
         })
       : null;
+  const grossPpwCents = priced?.stickerPerUnitCents ?? uncappedPpwCents;
 
   const base: CompareRow = {
     ...meta,
@@ -292,13 +296,13 @@ function purchaseRow(
     fromFactor: false,
     grossPpwCents,
     dealerFeePct,
-    contractPriceCents: priced?.contractPriceCents ?? null,
+    contractPriceCents: priced?.finalPriceCents ?? null,
     keptPpwCents:
       priced && priced.systemWatts > 0 ? priced.grossPriceCents / priced.systemWatts : null,
     maxFinalPpwCents,
     finalPpwMode: finalPpwMode ?? "cap",
-    capped: cap?.capped ?? false,
-    adderOverrun: cap?.adderOverrun ?? false,
+    capped: priced?.priceRule?.capped ?? false,
+    adderOverrun: priced?.priceRule?.adderOverrun ?? false,
     totalPaidCents: null,
     totalPaidWithoutPaydownCents: null,
     termLabel: cash ? "—" : loanTermLabel((offer as OfferProduct).termMonths),
@@ -307,14 +311,14 @@ function purchaseRow(
   };
 
   // Cash is over the moment it is signed: what they pay IS the contract.
-  if (cash) return { ...base, totalPaidCents: priced?.contractPriceCents ?? null };
+  if (cash) return { ...base, totalPaidCents: priced?.finalPriceCents ?? null };
 
   const p = offer as OfferProduct;
   if (!priced) return base;
 
   // A down payment is not borrowed, so the factor and the amortisation both
   // work on what is left — but the customer still parts with it.
-  const financedCents = priced.contractPriceCents - basis.downPaymentCents;
+  const financedCents = priced.finalPriceCents - basis.downPaymentCents;
   const factors = hasPaymentFactor(p) ? factorQuote(p, financedCents) : null;
   const factorMonthly = factors ? factorMonthlyCents(factors) : null;
 
@@ -360,8 +364,8 @@ function purchaseRow(
     // The array and the storage at sticker, less the credits this job claims:
     // what the household is actually left holding. The adders are the one
     // exclusion — separate work, and it raises the price and stays raised.
-    systemPriceCents: priced.baseStickerCents,
-    batteryPriceCents: priced.batteryStickerCents,
+    systemPriceCents: priced.baseFinalCents,
+    batteryPriceCents: priced.equipmentFinalCents,
     systemWatts: priced.systemWatts,
     creditRates: basis.credits?.rates ?? null,
     creditClaims: basis.credits?.claims ?? null,
@@ -370,8 +374,8 @@ function purchaseRow(
 
   const ladder = basis.credits
     ? buildCreditLadder({
-        contractValueCents: priced.contractPriceCents,
-        quotedPriceCents: priced.contractPriceCents,
+        contractValueCents: priced.finalPriceCents,
+        quotedPriceCents: priced.finalPriceCents,
         rates: basis.credits.rates,
         claims: basis.credits.claims,
         signTodayCreditCents: signToday.cents,

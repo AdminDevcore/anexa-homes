@@ -2046,3 +2046,40 @@ COMMENT that named it — `purchaseFromUnits` at site 5, then
 `eslint` EXIT CODE only, and unused imports are **warnings**, which exit 0. So
 "lint clean" in earlier commit messages meant "no errors", not "no warnings".
 The gate now counts warnings, and occurrence counts blank comments first.
+
+## 8.32 Stage 4c, site 20 — the builder shelf prices through `priceDeal()`
+
+`purchaseRow` grossed the deal's base up by each offer's own fee, solved the
+partner's ceiling with `capStickerToFinalPpw`, then priced the result with
+`pricePurchase`. The cap and the price now come from one `priceDeal()` call,
+and the column's headline $/W is `stickerPerUnitCents` — the field §8.30 added.
+
+**The base→sticker conversion stays at the call site.** `CompareBasis` carries
+`basePpwCents`, a PRE-fee figure, and the whole point of the shelf is that one
+base grosses up differently under each partner's fee. `priceDeal` takes a
+sticker with the fee already inside, so `stickerCents()` remains — what
+collapsed is the cap solve and the pricing.
+
+**Three traps worked out before editing, each of which would have moved a
+rep-facing number:**
+
+1. **The zero-kW row.** `cap` was computed whenever a sticker existed, while
+   `priced` was additionally gated on `systemSizeKwDc > 0`. Dropping that guard
+   to let one call do both would have flipped `contractPriceCents` from `null`
+   to an adders-only figure on every column with no array. The guard is kept —
+   and losing the cap there costs nothing, because `capStickerToFinalUnit`
+   returns the sticker untouched as soon as `units <= 0`.
+2. **`priceRule` is `null` on cash** in `priceDeal`, where compare previously
+   computed a real but no-op cap. Both reach `false` through `?? false`.
+3. **The `if (!priced) return base;` guard** had to move with the rename or the
+   later reads lose their non-null narrowing.
+
+**Proof it moved nothing:** `pricing-golden.test.ts:186` snapshots
+`columnFigures` for every column of every golden deal — headline $/W, contract
+price, kept $/W, cap flags. The snapshot file is **byte-identical in git**.
+
+Integration re-run in the private schema (§8.31): 791 passing, 7 failures — the
+baseline.
+
+**Stage 4c now stands at 4 of 25 sites rewired:** the customer's document (§8.29),
+the commission measure, generation (§8.31), and the builder shelf.
