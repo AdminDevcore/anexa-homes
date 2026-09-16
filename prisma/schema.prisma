@@ -2307,6 +2307,11 @@ model Invoice {
   invoiceNumber String
   status        InvoiceStatus @default(draft)
   amount        Int           @default(0) // cents
+  /// The date the invoice was ISSUED, which is the date its A/R entry is
+  /// dated. Deliberately not `createdAt`: an invoice for January entered in
+  /// February is January revenue, and dating it by when somebody typed it in
+  /// would move income into the wrong period and shift the trial balance.
+  issuedAt      DateTime      @default(now())
   dueAt         DateTime?
   paidAt        DateTime?
   notes         String?

@@ -6,6 +6,7 @@ import {
   type JournalLineInput,
   type PostingActor,
 } from "./posting";
+import { bucketFor, daysOverdue, emptyBucketTotals, type AgingBucket } from "./aging";
 
 /**
  * VENDOR BILLS — what we owe, from the day the vendor billed us.
@@ -307,18 +308,12 @@ export async function voidBill(args: {
   return { ok: true, reversalId };
 }
 
-export type ApAgingBucket = "Current" | "1–30" | "31–60" | "61–90" | "90+";
-
-const AP_BUCKETS: ApAgingBucket[] = ["Current", "1–30", "31–60", "61–90", "90+"];
-const DAY = 86_400_000;
-
-function bucketFor(daysOver: number): ApAgingBucket {
-  if (daysOver <= 0) return "Current";
-  if (daysOver <= 30) return "1–30";
-  if (daysOver <= 60) return "31–60";
-  if (daysOver <= 90) return "61–90";
-  return "90+";
-}
+/**
+ * A/P uses the shared aging buckets, so what we owe and what we are owed can
+ * never drift apart on where "31–60" ends. The name is kept as an alias so
+ * callers that already speak in A/P terms read naturally.
+ */
+export type ApAgingBucket = AgingBucket;
 
 export type ApAgingRow = {
   billId: string;
@@ -355,10 +350,10 @@ export async function apAging(
     },
   });
 
-  const totals = Object.fromEntries(AP_BUCKETS.map((b) => [b, 0])) as Record<ApAgingBucket, number>;
+  const totals = emptyBucketTotals();
 
   const rows = bills.map((b): ApAgingRow => {
-    const daysOver = b.dueAt ? Math.floor((asOf.getTime() - b.dueAt.getTime()) / DAY) : 0;
+    const daysOver = daysOverdue(b.dueAt, asOf);
     const bucket = bucketFor(daysOver);
     totals[bucket] += b.amountCents;
     return {
