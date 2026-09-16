@@ -39,7 +39,20 @@ export type DealerFeeSource =
   /** The company's fallback, for a deal quoting no programme. */
   | "companyDefault"
   /** No lender on this deal at all, so no fee exists to source. */
-  | "none";
+  | "none"
+  /**
+   * A fee arrived with no provenance attached — a caller passed a percentage
+   * and said nothing about where it read it.
+   *
+   * `resolveDealerFee` NEVER returns this: every path through it knows which of
+   * the three places it looked in. It exists so that a caller who supplies no
+   * source gets an answer that admits as much, instead of being handed the most
+   * authoritative one going. Defaulting an unstated source to `programme` is
+   * the same lie as reading a real 0% through `||` — it invents a fact about
+   * where a number came from, and provenance that can be invented is worth
+   * nothing on the screen that prints it.
+   */
+  | "unstated";
 
 export type ResolvedDealerFee = {
   /** The fee as a percentage, 0–100. Always a number; never null. */
@@ -84,4 +97,5 @@ export const DEALER_FEE_SOURCE_LABEL: Record<DealerFeeSource, string> = {
   deal: "saved on this deal",
   companyDefault: "company default",
   none: "no lender on this deal",
+  unstated: "source not recorded",
 };

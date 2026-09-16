@@ -1,14 +1,13 @@
 import type { FinanceProduct } from "@prisma/client";
 import { resolveDealerFee, type DealerFeeSource } from "./solar-dealer-fee";
 import {
-  capStickerToFinalPpw,
-  pricePurchase,
   grossPpwFromNet,
   leaseMonthlyCents,
   type SolarAssumptions,
   type FinalPpwMode,
   type PriceBasis,
 } from "./solar-money";
+import { priceDeal } from "./solar-price-deal";
 
 /**
  * What actually gets written to SolarFinance for a given product.
@@ -200,37 +199,47 @@ export function financeRowForProduct(
   // maximum is not a default — it is what the partner will fund — and a rep
   // typing $16.23/W into a programme that pays $5.50 has not overridden
   // anything, they have written a contract the lender will send back.
-  const cap = isPurchase
-    ? capStickerToFinalPpw({
-        stickerPpwCents: uncappedPpwCents,
-        maxFinalPpwCents: lp?.maxFinalPpwCents ?? null,
+  // This was a `capStickerToFinalPpw` and then a `pricePurchase` on whatever
+  // sticker the ceiling handed back. `priceDeal()` is those two, in that order,
+  // with the same arguments: `priceStoredPurchase` caps on the adders INSIDE
+  // the rule only — the battery and the on-top adders stay out of the ceiling
+  // and are added back by `pricePurchase` — which is exactly the split written
+  // by hand here. Proved over 27 with-rule cases in
+  // solar-no-rule-equivalence.test.ts before this call replaced them.
+  //
+  // Cash needs no special-casing either way: `lp` is null on cash by the guard
+  // where it is resolved above, so no rule was ever passed on a cash deal, and
+  // `priceStoredPurchase` independently refuses one.
+  const priced = isPurchase
+    ? priceDeal({
+        product: f.product as "cash" | "loan",
+        // Finance-row prices per WATT and always has — it takes no system type,
+        // and a storage-only deal reaches its price by another door. Named so
+        // the array branch is chosen by intent rather than by a default.
+        systemType: "pv",
+        systemSizeKwDc: ctx.systemSizeKwDc,
+        baseFinalPpwCents: uncappedPpwCents,
+        dealerFeePct,
+        // The provenance resolved at the top of this function, carried through
+        // rather than left to the default — this row is where the three-way
+        // precedence is actually decided, so it is the one caller that always
+        // knows the true answer.
+        dealerFeeSource: fee.source,
+        // Only the work the partner's figure is a price FOR. A roof rides on
+        // top of it and is added to the contract inside the ladder.
+        addersInsideRuleCents: f.adderTotalCents ?? 0,
+        addersOutsideRuleCents: f.onTopAdderTotalCents ?? 0,
+        equipmentChargesCents: f.batteryPriceCents ?? 0,
+        priceRulePpwCents: lp?.maxFinalPpwCents ?? null,
         // A FLAT partner overrides the typed price outright rather than only
         // holding it down — see SolarPriceRuleMode. On such a lender the box a
         // rep types in stops being the price of anything the customer sees.
-        mode: lp?.finalPpwMode ?? undefined,
-        basis: lp?.ppwBasis ?? undefined,
-        systemSizeKwDc: ctx.systemSizeKwDc,
-        dealerFeePct,
-        // Only the work the partner's figure is a price FOR. A roof rides on
-        // top of it and is added to the contract below.
-        adderTotalCents: f.adderTotalCents ?? 0,
+        priceRuleMode: lp?.finalPpwMode ?? undefined,
+        ppwBasis: lp?.ppwBasis ?? undefined,
       })
     : null;
-  const grossPpwCents = cap?.stickerPpwCents ?? uncappedPpwCents;
-
-  let contractPriceCents = 0;
-  if (isPurchase) {
-    const breakdown = pricePurchase({
-      product: f.product as "cash" | "loan",
-      systemSizeKwDc: ctx.systemSizeKwDc,
-      stickerPpwCents: grossPpwCents,
-      dealerFeePct,
-      adderTotalCents: f.adderTotalCents ?? 0,
-      onTopAdderTotalCents: f.onTopAdderTotalCents ?? 0,
-      batteryPriceCents: f.batteryPriceCents ?? 0,
-    });
-    contractPriceCents = breakdown.contractPriceCents;
-  }
+  const grossPpwCents = priced?.stickerPerUnitCents ?? uncappedPpwCents;
+  const contractPriceCents = priced?.finalPriceCents ?? 0;
 
   return {
     product: f.product,

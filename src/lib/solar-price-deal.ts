@@ -365,8 +365,14 @@ export function priceDeal(input: PriceDealInput): DealPrice {
   const dealerFeePct = input.product === "cash" ? 0 : input.dealerFeePct;
   // Cash carries no fee at all, so its provenance is `none` rather than a
   // place a zero was read from. Mirrors the line above it.
+  //
+  // A caller that states no source gets `unstated`, not `programme`. The old
+  // default claimed the partner's published rate on behalf of a caller that had
+  // said nothing, which is precisely the invention `resolveDealerFee` refuses to
+  // make with `||` — and it was wrong at all four sites Stage 4c had converted,
+  // silently, because nothing reads this field yet.
   const source: DealerFeeSource =
-    input.product === "cash" ? "none" : (input.dealerFeeSource ?? "programme");
+    input.product === "cash" ? "none" : (input.dealerFeeSource ?? "unstated");
 
   // ── Lease and PPA: electricity, not a system ─────────────────────────────
   if (!isPurchase(input.product)) {
