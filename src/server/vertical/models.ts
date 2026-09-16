@@ -99,6 +99,16 @@ export const TAGGED_MODELS = [
   "ContractorPay",
   "Invoice",
   "ProjectCost",
+  // The double-entry ledger's line. Tagged, never scoped, for the reason this
+  // whole class exists: the departmental P&L must break a solar install's
+  // revenue out from a roofing one while the consolidated books stay whole.
+  //
+  // The tag is on the LINE and not on JournalEntry deliberately — one entry may
+  // carry lines for both departments (a single cheque paying a roofing sub and
+  // a solar sub), and an entry-level tag could not express that. JournalEntry,
+  // LedgerAccount, BankAccount and the audit tables are SHARED: one company,
+  // one chart of accounts, one set of books.
+  "JournalLine",
   // Deliberately NOT given a TAGGED_PROVENANCE entry: activity rows are written
   // on nearly every action, so a per-write lookup of the parent job would be a
   // real cost for no gain. Every call site already runs inside the action that

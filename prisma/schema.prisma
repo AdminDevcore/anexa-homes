@@ -372,6 +372,11 @@ model Company {
   transactions             Transaction[]
   bookkeepingCategories    BookkeepingCategory[]
   bookkeepingVendors       BookkeepingVendor[]
+  ledgerAccounts           LedgerAccount[]
+  journalEntries           JournalEntry[]
+  bankAccounts             BankAccount[]
+  accountingPeriodLock     AccountingPeriodLock?
+  financeAuditEvents       FinanceAuditEvent[]
   knowledgeCategories      KnowledgeCategory[]
   scopeOfWorks             ScopeOfWork[]
   scopeLines               ScopeLine[]
@@ -1235,6 +1240,7 @@ model Project {
   contractorPays   ContractorPay[]
   activityLogs     ActivityLog[]
   costs            ProjectCost[]
+  journalLines     JournalLine[]
 
   @@unique([companyId, projectNumber])
   @@index([companyId, status])
@@ -2690,6 +2696,8 @@ model BookkeepingVendor {
   notes         String?
   createdAt     DateTime @default(now())
 
+  journalLines JournalLine[]
+
   @@index([companyId])
   @@map("bookkeeping_vendors")
 }
@@ -2752,6 +2760,277 @@ model Reconciliation {
 
   @@index([companyId, account])
   @@map("reconciliations")
+}
+
+// ---------------------------------------------------------------------------
+// DOUBLE-ENTRY LEDGER — the QuickBooks replacement.
+// docs/architecture/books-build.md is the source of truth for every decision
+// here. One legal entity, ONE set of books, split by the `vertical` tag that
+// sits on the LINE, so a single entry can carry lines for both departments.
+// ---------------------------------------------------------------------------
+
+/// The leading digit of an account number decides its class, and the class
+/// decides the normal balance and which statement the account lands on.
+/// 1000 asset · 2000 liability · 3000 equity · 4000 income · 5000 job costs ·
+/// 6000 operating · 7000 other income · 8000 other expense.
+enum LedgerAccountType {
+  asset // debit normal
+  liability // credit normal
+  equity // credit normal
+  income // credit normal
+  cogs // debit normal — job costs
+  expense // debit normal — operating
+  other_income // credit normal
+  other_expense // debit normal
+}
+
+/// What KIND of account this is within its class. The balance sheet groups by
+/// subtype, and only `bank` / `credit_card` accounts can carry a bank feed or
+/// be reconciled. Adding an account is adding a ROW; nothing branches on a
+/// specific number anywhere in the code.
+enum LedgerAccountSubtype {
+  bank
+  undeposited_funds
+  accounts_receivable
+  other_current_asset
+  fixed_asset
+  accounts_payable
+  credit_card
+  other_current_liability
+  long_term_liability
+  equity
+  income
+  cogs
+  expense
+  other_income
+  other_expense
+}
+
+model LedgerAccount {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  /// 4-digit, unique per company. A STRING, not an Int: it is an identifier
+  /// that happens to be digits, and sub-accounts want "6110" next to "6110.1".
+  number  String
+  name    String
+  type    LedgerAccountType
+  subtype LedgerAccountSubtype
+
+  parentId String?
+  parent   LedgerAccount?  @relation("LedgerAccountTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children LedgerAccount[] @relation("LedgerAccountTree")
+
+  description String?
+  /// Where this account lands on the tax return ("Schedule C: Advertising").
+  /// Free text, mapped per company — the CPA decides, not the code.
+  taxLine     String?
+
+  active Boolean @default(true)
+
+  /// A stable handle for the accounts the CODE must be able to find —
+  /// "accounts_receivable", "opening_balance_equity", "commissions_payable".
+  /// Non-null means SYSTEM-PROTECTED: it cannot be deleted or re-typed, because
+  /// a posting routine resolves it by this key rather than by name or number.
+  systemKey String?
+
+  lines       JournalLine[]
+  bankAccount BankAccount?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, number])
+  @@unique([companyId, systemKey])
+  @@index([companyId, type])
+  @@index([companyId, active])
+  @@map("ledger_accounts")
+}
+
+/// `void` is a STATE, never a deletion. Voiding writes a reversing entry and
+/// leaves both in the books, because a ledger nobody can delete from is the
+/// only kind an auditor can trust.
+enum JournalEntryStatus {
+  posted
+  void
+}
+
+model JournalEntry {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  date DateTime
+  memo String?
+
+  /// What produced this entry — "manual", "payroll", "bank_feed", "invoice",
+  /// "bill", "payment", "opening_balance", "funding", "transfer".
+  sourceType String
+  /// The producer's own key for it. For payroll this is the EXISTING per-line
+  /// key (`payroll:<runId>:item:<id>`), kept verbatim so a run that already
+  /// posted is recognised rather than posted twice.
+  sourceId   String?
+
+  status JournalEntryStatus @default(posted)
+
+  /// The void relationship, both ways. A reversing entry points at what it
+  /// reverses; the original points back at the reversal that killed it.
+  reversesId  String?       @unique
+  reverses    JournalEntry? @relation("JournalReversal", fields: [reversesId], references: [id], onDelete: SetNull)
+  reversedBy  JournalEntry? @relation("JournalReversal")
+  voidReason  String?
+  voidedAt    DateTime?
+  voidedById  String?
+
+  /// Set only when the entry was posted INTO a locked period, which is
+  /// super-admin-only and must say why.
+  lockOverrideReason String?
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  lines JournalLine[]
+
+  /// The duplicate guard. Postgres treats NULLs as distinct, so any number of
+  /// hand-written entries (sourceId NULL) coexist while a keyed source can
+  /// never post the same thing twice.
+  @@unique([companyId, sourceType, sourceId])
+  @@index([companyId, date])
+  @@index([companyId, status])
+  @@map("journal_entries")
+}
+
+model JournalLine {
+  id        String       @id @default(uuid())
+  companyId String
+  entryId   String
+  entry     JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  accountId String
+  account   LedgerAccount @relation(fields: [accountId], references: [id])
+
+  /// Exactly one of these is non-zero, enforced by the posting service — which
+  /// is the ONLY thing allowed to write this table. Integer cents, never a
+  /// float and never a signed amount: a debit and a credit are different facts,
+  /// not opposite signs of one.
+  debitCents  Int @default(0)
+  creditCents Int @default(0)
+
+  /// Shared-but-segmented: reads are never filtered by vertical so the books
+  /// stay consolidated, but every line is tagged so the P&L breaks out by
+  /// department. The tag is on the LINE so one entry can carry both. Null =
+  /// genuinely company-level (office rent).
+  vertical Vertical?
+
+  /// REAL foreign keys, both of them. Job profitability and the 1099 report are
+  /// only as good as their joins, and a free-text vendor name was exactly how
+  /// the old single-entry ledger made "Expenses by vendor" unanswerable.
+  projectId String?
+  project   Project?           @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  vendorId  String?
+  vendor    BookkeepingVendor? @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+
+  memo     String?
+  position Int     @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, accountId])
+  @@index([companyId, projectId])
+  @@index([companyId, vendorId])
+  @@index([entryId])
+  @@map("journal_lines")
+}
+
+enum BankAccountKind {
+  checking
+  savings
+  credit_card
+}
+
+/// A real-world account, sitting on top of exactly one LedgerAccount. More
+/// banks, savings accounts and cards are added as ROWS — there is no enum
+/// branch and no code change. A credit card is a LIABILITY.
+model BankAccount {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  ledgerAccountId String        @unique
+  ledgerAccount   LedgerAccount @relation(fields: [ledgerAccountId], references: [id], onDelete: Cascade)
+
+  name        String
+  institution String?
+  /// Last 4 only. The full number is never stored.
+  mask        String?
+  kind        BankAccountKind @default(checking)
+
+  /// A line from this account is tagged with this unless someone changes it.
+  defaultVertical Vertical?
+
+  /// Posted as a real entry against Opening Balance Equity the moment it is
+  /// set, so the account's book balance is right from its first day.
+  openingBalanceCents Int       @default(0)
+  openingBalanceDate  DateTime?
+
+  active Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, active])
+  @@map("bank_accounts")
+}
+
+/// One lock date per company: everything dated on or before `lockedThrough` is
+/// closed. Only a super_admin may post into it, and only with a reason, which
+/// lands on the entry AND in the finance audit.
+model AccountingPeriodLock {
+  id        String  @id @default(uuid())
+  companyId String  @unique
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  lockedThrough DateTime
+  note          String?
+  updatedById   String?
+  updatedAt     DateTime @updatedAt
+  createdAt     DateTime @default(now())
+
+  @@map("accounting_period_locks")
+}
+
+/// Who changed what money, when, and what it was before.
+///
+/// Separate from ActivityLog on purpose: this is the auditor's table. It is
+/// queried as a report, it keeps before/after images, and it must not be
+/// diluted by the ~18 call sites a minute that write ordinary activity.
+model FinanceAuditEvent {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  /// Null when the actor is the SYSTEM (an auto-matched lender deposit). The
+  /// label then says which routine acted, so "nobody" is never the answer.
+  actorId    String?
+  actorLabel String?
+
+  /// "journal.post" | "journal.void" | "period.lock" | "account.update" | …
+  action     String
+  entityType String
+  entityId   String?
+
+  before Json?
+  after  Json?
+  reason String?
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, createdAt])
+  @@index([companyId, entityType, entityId])
+  @@map("finance_audit_events")
 }
 
 // ---------------------------------------------------------------------------

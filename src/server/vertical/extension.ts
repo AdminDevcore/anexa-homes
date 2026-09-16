@@ -181,6 +181,12 @@ const TAGGED_PROVENANCE: Record<string, string> = {
   ContractorPay: "projectId",
   Invoice: "projectId",
   ProjectCost: "projectId",
+  // A ledger line's department is the job's, exactly like every row above it.
+  // NULL projectId is ordinary here rather than exceptional — a bank fee, a
+  // transfer between our own accounts and office rent all belong to no job —
+  // and it falls through to the ambient workspace, which is the same treatment
+  // hand-booked office rent already gets.
+  JournalLine: "projectId",
 };
 
 type ProjectLookup = (id: string) => Promise<ActiveVertical | null>;
