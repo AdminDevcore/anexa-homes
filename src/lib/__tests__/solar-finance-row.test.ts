@@ -134,10 +134,25 @@ describe("a legitimate zero is a value, not an absence", () => {
 });
 
 describe("defaults come from settings, never from a constant", () => {
-  it("falls back to the company's PPW and dealer fee when none is given", () => {
+  it("grosses the company's BASE up into the sticker it has to be quoted at", () => {
     const row = financeRowForProduct({ product: "loan" }, CTX);
-    expect(row.grossPpwCents).toBe(A.companyDefaultBasePpwCents);
+    /**
+     * This asserted `grossPpwCents === companyDefaultBasePpwCents` before Stage
+     * 4b — sticker equals base — which is the exact conflation the slice
+     * removed. The default is what the company KEEPS per watt, so at an 18% fee
+     * the deal must sticker ABOVE it: 350 / 0.82 = 427.
+     *
+     * The old behaviour quoted 350 and kept round(350 x 0.82) = 287, so the
+     * company kept 63 cents/W LESS than its own stated default and the lender's
+     * cut came out of its margin. `targetBasePpwCents` two lines away in the
+     * source was already grossed up; this figure was not.
+     */
+    expect(row.grossPpwCents).toBe(427);
     expect(row.dealerFeePct).toBe(A.defaultDealerFeePct);
+    // The invariant actually worth pinning: what survives the fee IS the default.
+    expect(Math.round(row.grossPpwCents * (1 - row.dealerFeePct / 100))).toBe(
+      A.companyDefaultBasePpwCents
+    );
   });
 
   it("writes a zero credit, because no incentive is quoted anywhere", () => {

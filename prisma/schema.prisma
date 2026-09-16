@@ -3348,7 +3348,10 @@ model SolarSettings {
   targetOffsetPct      Float @default(100)
 
   // ── Pricing defaults ────────────────────────────────────────────────────
-  /// Default gross price per watt, in cents (e.g. 350 = $3.50/W).
+  /// Default BASE price per watt, in cents (e.g. 350 = $3.50/W) — what the
+  /// company keeps before the lender's cut, NOT the sticker a customer is
+  /// quoted. Callers gross it up by the deal's fee, exactly as they do
+  /// `targetBasePpwCents` below. The column keeps its old name on disk.
   companyDefaultBasePpwCents Int   @default(350) @map("defaultGrossPpwCents")
   /// Lender dealer fee as a % of gross. Applies to LOAN only — cash has none.
   /// The fallback when a deal quotes no lender product; a product's own fee wins.

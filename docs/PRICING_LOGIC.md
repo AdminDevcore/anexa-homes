@@ -1728,3 +1728,77 @@ field padding across three models. Counting comment markers was the wrong test.
 The right one strips comments, normalises whitespace and compares what is left:
 **3,039 DDL-significant lines before, 3,039 after, 0 differences.** Whitespace
 cannot produce DDL, so no migration is possible from this commit.
+
+## 8.26 Amos 30 Year Solar — the three settings (read-only, 2026-09-16)
+
+Read from production inside `BEGIN READ ONLY … ROLLBACK`. **Nothing was
+changed.** The owner sets these in the UI.
+
+**They are not on one screen**, which is most of why the numbers looked like
+they contradicted each other: the fee is on the PROGRAMME, the cap and the floor
+are both on the LENDER.
+
+| Setting | Model / UI location | Value now |
+|---|---|---|
+| Dealer fee | `SolarLenderProduct.dealerFeePct` — Settings → Lenders → Amos Capital Fund → programme **Amos 30 Year Solar** | **0%** |
+| Price-rule $/W | `SolarLender.priceRulePpwCents` — Settings → Lenders → **Amos Capital Fund** (lender row) | **550¢/W, mode `cap`** |
+| Min base $/W floor | `SolarLender.minBasePpwCents` — same lender row | **200¢/W** |
+
+**The premise was inverted.** The programme stores **0%**; the **deals** store
+65%. `solar-validation.ts:568` records that Amos genuinely publishes 65%, so the
+PROGRAMME row is the one never filled in — the deals are right.
+
+**Why it refuses.** Base kept = `round(sticker × (1 − fee))`, and the cap holds
+sticker at 550. At 65%: `round(550 × 0.35)` = **193¢** < the 200¢ floor.
+
+**What each would need to be** — change any ONE of the three:
+
+| Fee | Cap must be | …or floor must be | …or fee must be |
+|---|---|---|---|
+| **65%** | **≥ 570¢** ($5.70/W) | **≤ 193¢** ($1.93/W) | ≤ **63.7%** |
+| **60%** | 550¢ works as-is | 200¢ works as-is | — |
+| **50%** | 550¢ works as-is | 200¢ works as-is | — |
+
+**The cap is only the ceiling — each deal clears the floor on its own sticker.**
+At 60% a deal needs sticker ≥ **499¢**; at 50%, ≥ **399¢**.
+
+| Deal sticker | at 65% | at 60% | at 50% |
+|---|---|---|---|
+| 550¢ ×3 (one **signed**) | ✗ 193¢ | ✓ 220¢ | ✓ 275¢ |
+| 474¢ | ✗ 166¢ | ✗ 190¢ | ✓ 237¢ |
+| 284¢ | ✗ 99¢ | ✗ 114¢ | ✗ 142¢ (needs fee ≤ 29.7%) |
+
+**Caveat:** only the pricing FLOOR rule was checked. Generation runs the whole
+readiness gate, so a deal clearing the floor can still be refused elsewhere.
+
+## 8.27 Stage 4, slice 4b — the company default is a base everywhere
+
+`solar-finance-row.ts` grossed up `targetBasePpwCents` via `grossPpwFromNet` and
+then, three lines later, consumed `companyDefaultBasePpwCents` as a raw STICKER.
+Two figures that both mean "what the company keeps per watt", one converted and
+one not.
+
+**The cost, quantified.** On the test company — default base 350¢, fee 18% — the
+fallback quoted **350¢/W** and kept `round(350 × 0.82)` = **287¢/W**. The company
+kept 63¢/W less than its own stated default and the lender's cut came out of its
+margin. It now stickers at `round(350 / 0.82)` = **427¢/W** and keeps exactly
+**350¢/W**.
+
+**Pinned figures that move:**
+
+| Figure | Before | After | Why |
+|---|---|---|---|
+| Fallback sticker, default 350¢ @ 18% | 350¢/W | **427¢/W** | the default is a base; it grosses up like the target beside it |
+| Kept base on that fallback | 287¢/W | **350¢/W** | the company keeps what it says it keeps |
+| `solar-finance-row.test.ts` assertion | `sticker === base` | `kept === base` | the old assertion pinned the conflation itself |
+| Team page worked example headline | printed the base as the quoted rate | prints the sticker | `solarExample.grossPpwCents` → `basePpwCents` |
+
+**No production figure moves.** Production has `defaultDealerFeePct` = 0, so the
+conversion is the identity; and `targetBasePpwCents` is set (250¢), so the
+company-default fallback is unreachable for purchases there at all.
+
+**Customer documents unmoved:** `pricing-golden.test.ts` 16/16, and the golden
+snapshot file is byte-identical in git.
+
+**Schema:** `companyDefaultBasePpwCents`'s comment no longer says "gross". DDL
+compared before and after: **3,039 significant lines each, 0 differences.**

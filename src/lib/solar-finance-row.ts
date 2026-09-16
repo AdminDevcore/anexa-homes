@@ -173,7 +173,23 @@ export function financeRowForProduct(
     isPurchase && ctx.targetNetPpwCents != null && f.grossPpwCents == null
       ? grossPpwFromNet(ctx.targetNetPpwCents, dealerFeePct)
       : null;
-  const uncappedPpwCents = derivedGrossPpw ?? f.grossPpwCents ?? assumptions.companyDefaultBasePpwCents;
+  /**
+   * THE COMPANY DEFAULT IS A BASE, SO IT HAS TO BE GROSSED UP LIKE ONE.
+   *
+   * `targetBasePpwCents` is grossed up three lines above; this was read as a
+   * raw STICKER. Two figures that both mean "what the company keeps per watt",
+   * one converted and one not — so on any company with a non-zero default fee
+   * the fallback quoted a system for less than the company's own floor, and the
+   * lender's cut came out of the difference.
+   *
+   * `grossPpwFromNet` returns null at a fee of 100% or more, where no sticker
+   * can leave anything behind; the default is used unconverted there rather
+   * than collapsing the price to zero.
+   */
+  const companyDefaultStickerPpwCents =
+    grossPpwFromNet(assumptions.companyDefaultBasePpwCents, dealerFeePct) ??
+    assumptions.companyDefaultBasePpwCents;
+  const uncappedPpwCents = derivedGrossPpw ?? f.grossPpwCents ?? companyDefaultStickerPpwCents;
 
   // The lender's ceiling, applied last and to the price the rep TYPED as well
   // as to the derived one.
