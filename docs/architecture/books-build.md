@@ -454,6 +454,28 @@ where a reversal shares its original's date and needed a `createdAt` tiebreak.
 surfaces as a flake rather than as a wrong number — which is luckier than it
 deserves.
 
+### What Phase 2 shipped
+
+Provider interface with a real fixture bank and a Plaid adapter; connections,
+feed rows and webhook receipts in the schema; cursor-paged ingest with a cron
+sweep; a webhook that verifies and records; the review queue (add, split, match,
+transfer, exclude, undo); transfer-pair suggestion; user-defined rules; CSV and
+OFX/QFX import; and the Banking screen at `/portal/banking`.
+
+Gates at the end of Phase 2: tsc 0 errors; lint clean on the changed files;
+unit 168 files / 2527 tests; integration 75 files / 981 tests, 0 failures,
+0 deadlocks (Phase 1 closed at 72 / 941).
+
+**The one thing that does NOT work end to end, and why.** Connecting a real bank
+needs Plaid's Link widget, which takes the customer's banking credentials in a
+browser context we never see and hands back a public token. Loading it requires
+live Plaid credentials, so the Connect button stops at the token and says so
+rather than appearing to work. Everything behind that point — exchange,
+encryption, account mapping, sync, webhook verification — is built and tested
+against the fixture, and `docs/plaid-security-answers.md` lists what the owner
+must supply. **File import needs none of this** and is a complete path into the
+books today.
+
 ---
 
 ## Not decided yet
