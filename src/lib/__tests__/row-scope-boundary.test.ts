@@ -99,6 +99,13 @@ const ALLOWED: Record<string, string> = {
     "Bookkeeping:create — accounting/owner only; projectId is a tag on a ledger row.",
   "src/server/modules/bookkeeping/actions.ts#updateTransactionAction":
     "Bookkeeping:update — accounting/owner only; projectId is a tag on a ledger row.",
+  "src/server/modules/books/actions.ts#postManualEntryAction":
+    "Bookkeeping:create — accounting/owner only. The projectId on a journal LINE is a " +
+    "department/job tag on a ledger row, not a deal being edited: the entry posts to the " +
+    "chart of accounts either way, and an unreachable projectId tags a line with a job the " +
+    "poster cannot see rather than modifying that job. " +
+    "IF `accountant_readonly` (Phase 3) IS EVER GRANTED Bookkeeping:create, this entry stops " +
+    "being true — that role exists to change nothing, so it must hold read/export only.",
   "src/server/modules/contractor-pay/actions.ts#generateContractorPayAction":
     "Takes no row id; ContractorInvoice:update is accounting/owner only.",
   "src/server/modules/costs/actions.ts#deleteProjectCostAction": "Commission:update — finance roles only.",

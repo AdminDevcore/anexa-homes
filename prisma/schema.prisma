@@ -447,9 +447,11 @@ model CompanySettings {
   // falls back to DEFAULT_CLAIM_STATUSES in code. The key is frozen on create so
   // renaming a status never breaks the code that keys off it (scope gating).
   claimStatuses              Json     @default("[]")
-  // Bookkeeping integration (bank / QuickBooks). Key stored for the connector.
-  bookkeepingProvider        String? // "quickbooks" | "plaid" | "manual"
-  bookkeepingApiKey          String?
+  // `bookkeepingProvider` / `bookkeepingApiKey` were here: a picker between
+  // "quickbooks", "plaid" and "manual", plus a key. Nothing ever read either to
+  // do anything — no sync ran and no transaction was ever fetched — while the
+  // bookkeeping page told the owner "Connected · plaid". A real bank connection
+  // is a BankConnection row with an encrypted token and a live status.
   // Weekly open-task reminder digest (cron). On by default; toggled in Settings.
   weeklyTaskRemindersEnabled Boolean  @default(true)
   // Weekly "overdue jobs" digest to managers/admins (cron). On by default; toggled in Settings.
@@ -1612,6 +1614,11 @@ model FileAsset {
   // Bookkeeping: a receipt / invoice attached to a transaction.
   transactionId       String?
   transaction         Transaction?       @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  // Substantiation for a ledger entry: the pay stub behind a payroll posting,
+  // the receipt behind an expense. `transactionId` above is the single-entry
+  // ledger's version of the same idea and stays until that table is retired.
+  journalEntryId      String?
+  journalEntry        JournalEntry?      @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
   uploadedById        String?
   uploadedBy          User?              @relation(fields: [uploadedById], references: [id])
   createdAt           DateTime           @default(now())
@@ -2892,7 +2899,8 @@ model JournalEntry {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  lines JournalLine[]
+  lines       JournalLine[]
+  attachments FileAsset[]
 
   /// The duplicate guard. Postgres treats NULLs as distinct, so any number of
   /// hand-written entries (sourceId NULL) coexist while a keyed source can
@@ -2910,7 +2918,21 @@ model JournalLine {
   entry     JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
 
   accountId String
-  account   LedgerAccount @relation(fields: [accountId], references: [id])
+  /**
+   * Cascade, deliberately, and it is NOT a licence to delete accounts.
+   *
+   * Without it the FK defaults to Restrict, and deleting a COMPANY fails:
+   * the cascade from company reaches ledger_accounts while journal_lines still
+   * reference them, so Postgres refuses the whole delete. That surfaced as a
+   * test teardown failing on `journal_lines_accountId_fkey`, but it would have
+   * been a company-deletion failure in production just the same.
+   *
+   * An account with postings is still never deleted — `systemKey` marks the
+   * protected ones and the rest are DEACTIVATED, which the posting service
+   * refuses to post to. That rule lives in code, where it can explain itself,
+   * rather than in an FK that can only say "restrict".
+   */
+  account   LedgerAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
   /// Exactly one of these is non-zero, enforced by the posting service — which
   /// is the ONLY thing allowed to write this table. Integer cents, never a

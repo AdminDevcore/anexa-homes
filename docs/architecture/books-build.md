@@ -206,6 +206,74 @@ stay matched rather than posting a second time.
 
 ---
 
+## Phase 1 — what was built, and the decisions taken while building it (2026-09-16)
+
+### The shape
+
+Six tables: `ledger_accounts`, `journal_entries`, `journal_lines`, `bank_accounts`,
+`accounting_period_locks`, `finance_audit_events`. Four enums. One service —
+`src/server/modules/books/posting.ts` — is the ONLY thing permitted to write the
+ledger, and it enforces balance, the period lock, the duplicate guard and the
+audit record in one place.
+
+### Decisions taken during the build
+
+**The vertical tag lives on `JournalLine`, not `JournalEntry`.** Registered
+TAGGED with `projectId` as its provenance. One entry can then carry lines for
+both departments — a single cheque paying a roofing sub and a solar sub — which
+an entry-level tag could not express at all. Everything else (`LedgerAccount`,
+`JournalEntry`, `BankAccount`, the audit tables) is SHARED: one legal entity,
+one chart, one set of books.
+
+**`debitCents` / `creditCents`, not one signed amount.** A debit and a credit
+are different facts, not opposite signs of the same fact, and "balanced" has to
+be expressible to be checkable. The single-entry `transactions` table could not
+state the rule, so nothing enforced it.
+
+**`projectId` and `vendorId` are real foreign keys.** Free text is how the old
+ledger made "expenses by vendor" and the 1099 unanswerable: `Acme Roofing LLC`
+and `Acme Roofing` were two payees, and renaming a vendor orphaned their
+history — sometimes dropping a total below the $600 filing threshold, which
+does not produce a wrong form, it produces no form.
+
+**`JournalLine.account` cascades on delete.** Found by a test teardown failing on
+`journal_lines_accountId_fkey`: the FK defaults to Restrict, so deleting a
+company cascaded into `ledger_accounts` while lines still referenced them and
+Postgres refused the whole delete. It would have failed the same way in
+production. Accounts with postings are still never deleted — they are
+deactivated, and the posting service refuses an inactive account.
+
+**Voiding writes a reversing entry.** Nothing is ever deleted. The original stays
+marked `void`, the two point at each other, and the pair nets to zero.
+
+**Commissions seed at 6000 (operating), subcontractor labour at 5000 (job cost).**
+Preserved from the existing payroll posting, where it was already right: a rep's
+commission is paid out of the job's profit, so costing it to the job makes every
+deal look worse the better it was sold.
+
+**The fake bank connection is deleted** — `setBookkeepingConnectionAction`, the
+dialog, and `CompanySettings.bookkeepingProvider` / `bookkeepingApiKey`. Nothing
+ever read either value; no sync ran and no transaction was ever fetched, while
+the page told the owner "Connected · plaid". Checked read-only against
+production first: one `company_settings` row, both columns NULL, so the drop
+destroys nothing.
+
+**Encryption keys are versioned** — `v1.<keyId>:iv:tag:ct`, with `FINANCE_ENC_KEY`
+preferred for new writes. Legacy 3-part blobs are tried against every configured
+key, which reverses the old behaviour where introducing a higher-priority key
+silently orphaned everything sealed under a lower-priority one.
+
+### An operational note for future sessions
+
+`globalSetup` runs `prisma migrate deploy` against the shared `vertical_test`
+schema. **Never run two integration processes at once**: two concurrent
+`migrate deploy` calls on that schema destroyed `_prisma_migrations` and several
+tables, which then presents as P3005 and "table does not exist" in suites that
+have nothing to do with the change being tested. Repair is to drop and recreate
+`vertical_test` and deploy once, in a single process.
+
+---
+
 ## Not decided yet
 
 These decisions leave some questions open. Settle each one before the phase that

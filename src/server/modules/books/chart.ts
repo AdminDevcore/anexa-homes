@@ -244,41 +244,59 @@ export const SEED_CHART: SeedAccount[] = [
 export async function ensureChartOfAccounts(companyId: string): Promise<{ created: number }> {
   const existing = await prisma.ledgerAccount.findMany({
     where: { companyId },
-    select: { id: true, number: true },
+    select: { number: true },
   });
-  const idByNumber = new Map(existing.map((a) => [a.number, a.id]));
+  const have = new Set(existing.map((a) => a.number));
+  const missing = SEED_CHART.filter((a) => !have.has(a.number));
+  if (missing.length === 0) return { created: 0 };
 
-  let created = 0;
-  // Two passes so a child can point at a parent created in the same run,
-  // whatever order SEED_CHART happens to list them in.
-  for (const account of SEED_CHART) {
-    if (idByNumber.has(account.number)) continue;
-    const row = await prisma.ledgerAccount.create({
-      data: {
-        companyId,
-        number: account.number,
-        name: account.name,
-        type: account.type,
-        subtype: account.subtype,
-        systemKey: account.systemKey ?? null,
-        taxLine: account.taxLine ?? null,
-        description: account.description ?? null,
-      },
-      select: { id: true },
+  /**
+   * ONE STATEMENT, not one per account.
+   *
+   * This was a loop of ~45 sequential `create` calls, and the cost was not the
+   * round trips. Seeding a company held RowShareLock on `companies` and
+   * `ledger_accounts` for well over a second, and anything taking an
+   * AccessExclusiveLock in that window — `TRUNCATE companies CASCADE`, which is
+   * how most integration suites reset — deadlocked against it (Postgres 40P01).
+   * The failures landed in whichever suite lost the race, so they read as
+   * unrelated flakes in code nobody had touched.
+   *
+   * `skipDuplicates` makes the idempotency a DATABASE property rather than a
+   * read-then-write: two callers seeding the same company at once both succeed,
+   * where the check-first loop had a window between the read and the create.
+   */
+  await prisma.ledgerAccount.createMany({
+    data: missing.map((account) => ({
+      companyId,
+      number: account.number,
+      name: account.name,
+      type: account.type,
+      subtype: account.subtype,
+      systemKey: account.systemKey ?? null,
+      taxLine: account.taxLine ?? null,
+      description: account.description ?? null,
+    })),
+    skipDuplicates: true,
+  });
+
+  // Parents are resolved afterwards, by NUMBER, now that every row exists — so
+  // a child may be listed before its parent in SEED_CHART.
+  const withParents = SEED_CHART.filter((a) => a.parent);
+  if (withParents.length > 0) {
+    const rows = await prisma.ledgerAccount.findMany({
+      where: { companyId },
+      select: { id: true, number: true, parentId: true },
     });
-    idByNumber.set(account.number, row.id);
-    created += 1;
+    const byNumber = new Map(rows.map((r) => [r.number, r]));
+    for (const account of withParents) {
+      const row = byNumber.get(account.number);
+      const parent = byNumber.get(account.parent!);
+      if (!row || !parent || row.parentId === parent.id) continue;
+      await prisma.ledgerAccount.update({ where: { id: row.id }, data: { parentId: parent.id } });
+    }
   }
 
-  for (const account of SEED_CHART) {
-    if (!account.parent) continue;
-    const id = idByNumber.get(account.number);
-    const parentId = idByNumber.get(account.parent);
-    if (!id || !parentId) continue;
-    await prisma.ledgerAccount.update({ where: { id }, data: { parentId } });
-  }
-
-  return { created };
+  return { created: missing.length };
 }
 
 /**

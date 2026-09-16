@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
+import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { TEST_DATABASE_URL } from "@/server/vertical/__tests__/global-setup";
 import { postJournalEntry, voidJournalEntry, setPeriodLock, getPeriodLock } from "../posting";
@@ -40,8 +40,15 @@ const system = () => ({ kind: "system" as const, label: "test-runner" });
 
 const DAY = new Date("2026-06-15T12:00:00Z");
 
+/**
+ * A FRESH COMPANY PER TEST, rather than `TRUNCATE "companies" CASCADE`.
+ *
+ * Every assertion in this file is already scoped by companyId, so a new company
+ * IS the isolation — and it keeps the suite inside the repo's no-raw-SQL rule,
+ * which the truncate would otherwise have needed an allowlist entry to break.
+ * Deleting the company at the end cascades to everything created under it.
+ */
 async function resetFixtures() {
-  await db.$executeRawUnsafe('TRUNCATE TABLE "companies" CASCADE');
   const company = await db.company.create({
     data: { name: "Ledger Co", slug: `ledger-${process.pid}-${Date.now()}`, overheadPct: 0, paFeePct: 0 },
   });
@@ -80,7 +87,15 @@ async function resetFixtures() {
   materialsId = (await systemAccountId(companyId, "materials"))!;
 }
 
-beforeAll(resetFixtures);
+/**
+ * NO CASCADE DELETE IN TEARDOWN, deliberately.
+ *
+ * Each test gets its own company and every assertion is scoped to it, so
+ * deleting it buys no isolation. What it did buy was a large cascading delete
+ * holding locks while other suites take an AccessExclusiveLock to
+ * `TRUNCATE companies CASCADE` — which deadlocked (Postgres 40P01) and failed
+ * suites unrelated to this one. The schema is disposable; globalSetup rebuilds it.
+ */
 beforeEach(resetFixtures);
 afterAll(async () => {
   await db.$disconnect();
@@ -197,7 +212,9 @@ describe("an entry balances or nothing is written", () => {
       data: { name: "Other", slug: `other-${process.pid}-${Date.now()}` },
     });
     await ensureChartOfAccounts(other.id);
-    const theirs = await db.ledgerAccount.findFirstOrThrow({ where: { companyId: other.id, number: "1020" } });
+    const theirs = await db.ledgerAccount.findFirstOrThrow({
+      where: { companyId: other.id, number: "1020" },
+    });
 
     const res = await postJournalEntry(
       deposit({ lines: [{ accountId: theirs.id, debitCents: 100 }, { accountId: revenueId, creditCents: 100 }] })
