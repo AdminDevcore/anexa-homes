@@ -411,6 +411,7 @@ model Company {
   bankConnections      BankConnection[]
   bankFeedTransactions BankFeedTransaction[]
   webhookEvents        WebhookEvent[]
+  bankRules            BankRule[]
 
   @@map("companies")
   solarContractUnlocks SolarContractUnlock[]
@@ -2709,6 +2710,7 @@ model BookkeepingVendor {
   createdAt     DateTime @default(now())
 
   journalLines JournalLine[]
+  bankRules    BankRule[]
 
   @@index([companyId])
   @@map("bookkeeping_vendors")
@@ -2849,6 +2851,10 @@ model LedgerAccount {
 
   lines       JournalLine[]
   bankAccount BankAccount?
+  /// Rules that post here. Cascading with the account is deliberate: a rule
+  /// whose destination is gone is not a rule, and leaving it would silently
+  /// stop categorising the rows it used to catch.
+  bankRules   BankRule[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -3060,6 +3066,7 @@ model BankAccount {
 
   reconciliations  BankReconciliation[]
   feedTransactions BankFeedTransaction[]
+  bankRules        BankRule[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -3218,6 +3225,81 @@ model WebhookEvent {
   @@unique([provider, eventId])
   @@index([status, receivedAt])
   @@map("webhook_events")
+}
+
+/// A user's standing instruction for categorising feed rows.
+///
+/// SHARED, like everything else in the feed: the rule belongs to the company's
+/// bookkeeping, and the department lands on the JournalLine it produces.
+///
+/// A rule SUGGESTS by default. `autoPost` exists because a bookkeeper with two
+/// hundred identical fuel receipts a month genuinely wants them booked without
+/// touching each one — but it is off unless asked for, because a wrong rule that
+/// posts is a wrong rule that has already written to the books, and undoing it
+/// means a reversing entry for every row it touched.
+model BankRule {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  name    String
+  enabled Boolean @default(true)
+  /// Lower runs first. Ties break on createdAt, so ordering is total and a rule
+  /// cannot silently depend on insertion order.
+  priority Int    @default(100)
+
+  /// Which account this rule watches. NULL means every account.
+  bankAccountId String?
+  bankAccount   BankAccount? @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+
+  /// money_in / money_out / any — matched against the SIGN of the row, so a
+  /// rule for "Shell" cannot accidentally catch a refund from Shell.
+  direction BankRuleDirection @default(any)
+
+  /// Case-insensitive match against description and merchant name.
+  matchText String?
+  matchType BankRuleMatch @default(contains)
+
+  /// Optional bounds, in cents, on the ABSOLUTE amount.
+  minAmountCents Int?
+  maxAmountCents Int?
+
+  /// What the rule does: the account to post to, and how to tag it.
+  accountId String
+  account   LedgerAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  vertical  Vertical?
+  vendorId  String?
+  vendor    BookkeepingVendor? @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+  memo      String?
+
+  /// Post without asking. Off unless explicitly enabled — see the note above.
+  autoPost Boolean @default(false)
+
+  /// Bookkeeping, not accounting: how often this rule has fired, so a rule that
+  /// matches nothing (or everything) is visible rather than merely suspected.
+  timesApplied Int       @default(0)
+  lastAppliedAt DateTime?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([companyId, enabled, priority])
+  @@index([bankAccountId])
+  @@index([accountId])
+  @@map("bank_rules")
+}
+
+enum BankRuleDirection {
+  money_in
+  money_out
+  any
+}
+
+enum BankRuleMatch {
+  contains
+  equals
+  starts_with
 }
 
 enum BankConnectionStatus {

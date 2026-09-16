@@ -4,6 +4,7 @@ import { encryptField, decryptField } from "@/server/lib/crypto";
 import { voidJournalEntry, type PostingActor } from "@/server/modules/books/posting";
 import { createBankAccount } from "@/server/modules/books/bank-accounts";
 import { bankFeedProvider, configuredProviderId } from "./index";
+import { applyAutoPostRules } from "./rules";
 import type { BankFeedProvider, ProviderAccountKind, ProviderTransaction } from "./types";
 
 /**
@@ -363,7 +364,7 @@ export async function syncConnection(args: {
 export async function syncAllConnections(args: {
   actor: PostingActor;
   limit?: number;
-}): Promise<{ synced: number; results: SyncResult[] }> {
+}): Promise<{ synced: number; results: SyncResult[]; autoPosted: number }> {
   const connections = await prisma.bankConnection.findMany({
     where: { status: { in: ["active", "error"] } },
     orderBy: [{ lastSyncedAt: "asc" }],
@@ -377,7 +378,33 @@ export async function syncAllConnections(args: {
       await syncConnection({ companyId: c.companyId, connectionId: c.id, actor: args.actor })
     );
   }
-  return { synced: results.length, results };
+
+  /**
+   * Then let the standing instructions act on what arrived.
+   *
+   * ONCE PER COMPANY, not once per connection: rules are company-wide and a
+   * company with three connections would otherwise sweep its queue three times,
+   * doing the same work twice for nothing.
+   *
+   * After the sync rather than during it, so a rule can never post a row in the
+   * same pass that is still being paged in — and a failure here cannot leave a
+   * half-ingested connection behind, because ingest has already finished.
+   */
+  let autoPosted = 0;
+  for (const companyId of new Set(connections.map((c) => c.companyId))) {
+    try {
+      const applied = await applyAutoPostRules({ companyId, actor: args.actor });
+      autoPosted += applied.posted;
+      for (const failure of applied.errors) {
+        console.error(`[bank-feeds] auto-post failed for ${failure.feedTransactionId}: ${failure.error}`);
+      }
+    } catch (err) {
+      // A broken rule must not cost us the sync that already succeeded.
+      console.error(`[bank-feeds] rules failed for company ${companyId}`, err);
+    }
+  }
+
+  return { synced: results.length, results, autoPosted };
 }
 
 /** Dollars from a signed cent amount, for display. */
