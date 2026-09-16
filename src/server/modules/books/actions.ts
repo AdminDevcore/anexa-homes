@@ -9,6 +9,7 @@ import { prisma } from "@/server/db/client";
 import { postJournalEntry, voidJournalEntry, setPeriodLock, type PostingActor } from "./posting";
 import { ensureChartOfAccounts } from "./chart";
 import { createBankAccount, postTransfer } from "./bank-accounts";
+import { closeFiscalYear, reopenFiscalYear } from "./year-end";
 
 /**
  * THE FINANCE ACTION SURFACE.
@@ -230,6 +231,61 @@ export async function postTransferAction(input: z.infer<typeof transferSchema>) 
   if (!res.ok) return res;
   revalidatePath("/portal/bookkeeping");
   return { ok: true as const };
+}
+
+const yearSchema = z.object({
+  year: z.number().int().min(2000).max(2100),
+  lockOverrideReason: z.string().max(300).optional(),
+});
+
+/**
+ * Close a fiscal year into Retained Earnings.
+ *
+ * `gate("update")` establishes that the caller may touch the books at all;
+ * OWNER-ONLY is enforced inside `closeFiscalYear` against the actor's role, not
+ * here, so the rule survives a future cron or import that never goes through
+ * this action. Same division as `setPeriodLockAction`.
+ */
+export async function closeFiscalYearAction(input: z.infer<typeof yearSchema>) {
+  const { user, actor, denied } = await gate("update");
+  if (denied) return denied;
+  const parsed = yearSchema.safeParse(input);
+  if (!parsed.success) return fail("Pick a year to close.");
+
+  const res = await closeFiscalYear({
+    companyId: user!.companyId,
+    year: parsed.data.year,
+    actor: actor!,
+    lockOverrideReason: parsed.data.lockOverrideReason,
+  });
+  if (!res.ok) return res;
+
+  revalidatePath("/portal/books");
+  return { ok: true as const, entryId: res.entryId, netIncomeCents: res.netIncomeCents };
+}
+
+const reopenSchema = z.object({
+  year: z.number().int().min(2000).max(2100),
+  reason: z.string().min(1).max(300),
+});
+
+/** Reopen a closed year by reversing the close. Never a delete. */
+export async function reopenFiscalYearAction(input: z.infer<typeof reopenSchema>) {
+  const { user, actor, denied } = await gate("update");
+  if (denied) return denied;
+  const parsed = reopenSchema.safeParse(input);
+  if (!parsed.success) return fail("Say why the year is being reopened.");
+
+  const res = await reopenFiscalYear({
+    companyId: user!.companyId,
+    year: parsed.data.year,
+    reason: parsed.data.reason,
+    actor: actor!,
+  });
+  if (!res.ok) return res;
+
+  revalidatePath("/portal/books");
+  return { ok: true as const, reversalId: res.reversalId };
 }
 
 const accountSchema = z.object({
