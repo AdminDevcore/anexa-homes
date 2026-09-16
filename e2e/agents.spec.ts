@@ -149,3 +149,33 @@ test("accounting reads an agent and its config, with no Run now and nothing to e
   await page.goto("/portal/agents/new");
   await page.waitForURL(/\/portal\/agents$/, { timeout: 15000 });
 });
+
+/**
+ * The Runs page. Navigates only — it grants nothing and changes nothing, so it
+ * needs no restore of its own, and it logs in as the admin rather than Priya.
+ * It DOES read the success run the admin test above wrote, so run the file.
+ */
+
+test("Runs puts Needs a human first, and the status filter narrows the feed", async ({ page }) => {
+  // Reads the success run the admin test above wrote: run the whole file.
+  await login(page, "admin@anexahomes.com");
+  await page.goto("/portal/agents/runs");
+
+  const needs = page.getByRole("heading", { name: /Needs a human/ });
+  const all = page.getByRole("heading", { name: "All runs" });
+  await expect(needs).toBeVisible();
+  await expect(all).toBeVisible();
+  expect((await needs.boundingBox())!.y).toBeLessThan((await all.boundingBox())!.y);
+
+  const status = page.getByRole("group", { name: "Status" });
+  await status.getByRole("link", { name: "Success", exact: true }).click();
+  await expect(page).toHaveURL(/[?&]status=success/);
+  await expect(status.getByRole("link", { name: "Success", exact: true })).toHaveAttribute("aria-current", "true");
+  const rows = page.getByTestId("agent-run");
+  await expect(rows.first()).toBeVisible();
+  expect(new Set(await rows.evaluateAll((els) => els.map((el) => el.getAttribute("data-status"))))).toEqual(new Set(["success"]));
+
+  await status.getByRole("link", { name: "Failed", exact: true }).click();
+  await expect(page).toHaveURL(/[?&]status=failed/);
+  await expect(page.getByText("No runs match these filters.")).toBeVisible();
+});
