@@ -1198,6 +1198,84 @@ reason anyway.
 Gates after this slice: tsc 0 errors, eslint 0 on every touched file, unit
 **192 files / 2807 tests**, integration **101 files / 1319 tests**.
 
+## The lost-phone path, and a cross-tenant hole found while building it
+(2026-09-17)
+
+Enrolment became reachable in the previous section. Removal did not, and the
+consequence is one that arrives on its own schedule: **a person who loses both
+their phone and their recovery codes could never approve a payment again.** The
+only remedy would have been editing the production database by hand — the thing
+this entire module exists to avoid.
+
+`resetEnrollment` already existed and was tested. Like enrolment before it, it
+simply had no door.
+
+### The hole the door would have opened
+
+Adding a caller meant reading the function properly, and it was this:
+
+```ts
+await prisma.userMfa.deleteMany({ where: { userId: args.userId } });
+```
+
+`UserMfa` carries a `companyId`. The delete ignored it. So an owner at one
+company could have cleared a second factor belonging to a **different
+company's** user — a cross-tenant delete of a security control.
+
+The function's own comment said the caller "is responsible for checking that".
+That responsibility had never been discharged by anyone, because the function
+had no caller at all. It was not a latent bug so much as a loaded one: harmless
+only while unreachable, and live the moment a door appeared.
+
+The general shape is worth naming, because this build has now hit it twice:
+**an unreachable function's safety claims are untested claims.** Nothing
+exercises them, so nothing contradicts them, and they read as true right up
+until the first caller.
+
+### Both rules moved into the module
+
+The tenant scope is now part of the `WHERE` clause, and owner-only is enforced
+in `resetEnrollment` rather than at the action. The second matters because the
+natural gate for a team screen is `can(…, "update", "User")` — which admits an
+**admin**, not just the owner. Stating the narrower rule at the caller would
+have made it true for exactly as long as each future caller remembered to
+restate it. Same reasoning as the period lock and the year-end close.
+
+The action adds only what an action can: establishing who is asking, and
+resolving the target through the caller's own company so an id from the browser
+cannot name a stranger.
+
+### It is audited, and nothing else about a team change is
+
+Team edits — role changes, deletions — currently write no audit row at all.
+This one does, because removing a second factor is the single team edit that
+weakens a money control. The row names who did it, to whom, and whether a factor
+was actually there to remove.
+
+### On screen
+
+A card on the member page showing whether a factor is active and how many
+recovery codes remain. The removal button appears for the **owner only** and
+never on your own account — a factor you can strip yourself protects nothing,
+since anyone holding a live session could remove it before moving money. The
+status is not even queried for a viewer who would not be shown it.
+
+### A trap in my own tooling
+
+An edit to the test file matched nothing and aborted. The match strings had six
+leading spaces; the file has four. I had built them from earlier output piped
+through `sed 's/^/  /'` for readability, so the two-space **display** prefix
+became part of the pattern.
+
+The assertion caught it and nothing was written — which is the argument for
+asserting a match count before every scripted edit rather than trusting a
+replace to have done something. **Never build an exact-match string from output
+that was reformatted for display; re-read the file raw.**
+
+Gates for this slice: tsc 0 errors, eslint 0 across all five touched files,
+unit **192 files / 2807 tests**, integration **101 files / 1321 tests** (+2, the
+two new refusals: a non-owner, and a target in another company).
+
 ## Not decided yet
 
 These decisions leave some questions open. Settle each one before the phase that
