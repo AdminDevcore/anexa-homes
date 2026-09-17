@@ -47,7 +47,10 @@ const { runInVertical } = await import("@/server/vertical/context");
 const { can } = await import("@/server/rbac/guards");
 const { putObject } = await import("@/server/storage");
 const { GET } = await import("../[id]/route");
-const { uploadTransactionAttachmentAction } = await import("@/server/modules/bookkeeping/actions");
+const { uploadTransactionAttachmentAction, deleteTransactionAttachmentAction } = await import(
+  "@/server/modules/bookkeeping/actions"
+);
+const { deleteFileAction, moveFileAction } = await import("@/server/modules/files/actions");
 const { postRunToBookkeeping } = await import("@/server/modules/payroll/post-bookkeeping");
 
 const stamp = `${process.pid}-${Date.now()}`;
@@ -289,5 +292,85 @@ describe("an ordinary deal file is unaffected", () => {
 
   it("is still refused to a manager with nobody on the deal", async () => {
     expect((await open(people.manager, dealFileId)).status).toBe(403);
+  });
+});
+
+/* ── DELETING AND MOVING ──────────────────────────────────────────────────
+ * The deal folders' generic delete and move actions authorise a file by its
+ * deal, and a file with no deal used to pass that check outright. So anyone
+ * holding File:update (every admin and manager) could delete or refile a
+ * receipt or a pay stub by id. Finance records now need Bookkeeping update.
+ *
+ * The Bookkeeping screen never uses these actions. It deletes a receipt with
+ * its own deleteTransactionAttachmentAction, which is how accounting (holding
+ * no File grant at all) removes one. The last test proves that path still works.
+ *
+ * Every case works on a fresh copy of the real row, so a refusal that fails
+ * cannot take the shared receipt or stub down with it.
+ */
+describe("the generic file actions leave finance records alone", () => {
+  /** A new row identical to `fileId`: same transaction, same stored bytes. */
+  async function copyOf(fileId: string) {
+    const f = await raw.fileAsset.findUniqueOrThrow({ where: { id: fileId } });
+    return (
+      await raw.fileAsset.create({
+        data: {
+          companyId: f.companyId,
+          kind: f.kind,
+          scope: f.scope,
+          name: f.name,
+          storageKey: f.storageKey,
+          mimeType: f.mimeType,
+          size: f.size,
+          transactionId: f.transactionId,
+          uploadedById: f.uploadedById,
+        },
+        select: { id: true },
+      })
+    ).id;
+  }
+
+  function as<T>(who: Person, fn: () => Promise<T>) {
+    current = who;
+    return runInVertical("roofing", fn);
+  }
+
+  const records = [
+    ["receipt", () => receiptId],
+    ["pay stub", () => payStubId],
+  ] as const;
+
+  for (const [label, source] of records) {
+    it(`an admin and a manager cannot delete a ${label}`, async () => {
+      for (const who of [people.admin, people.manager]) {
+        const id = await copyOf(source());
+        const res = await as(who, () => deleteFileAction(id));
+        expect(res.ok, `${who.role} deleted a ${label}`).toBe(false);
+        expect(res.ok ? "" : res.error).toMatch(/Bookkeeping/);
+        expect(await raw.fileAsset.count({ where: { id } })).toBe(1);
+      }
+    });
+
+    it(`an admin and a manager cannot move a ${label} into a deal folder`, async () => {
+      for (const who of [people.admin, people.manager]) {
+        const id = await copyOf(source());
+        const res = await as(who, () => moveFileAction(id, "contract"));
+        expect(res.ok, `${who.role} moved a ${label}`).toBe(false);
+        expect(res.ok ? "" : res.error).toMatch(/Bookkeeping/);
+        expect((await raw.fileAsset.findUniqueOrThrow({ where: { id } })).category).toBeNull();
+      }
+    });
+  }
+
+  it("the super admin, who holds Bookkeeping update, is not blocked by the guard", async () => {
+    const id = await copyOf(receiptId);
+    expect(await as(people.owner, () => deleteFileAction(id))).toEqual({ ok: true });
+    expect(await raw.fileAsset.count({ where: { id } })).toBe(0);
+  });
+
+  it("accounting still deletes a receipt from the Bookkeeping screen's own action", async () => {
+    const id = await copyOf(receiptId);
+    expect(await as(people.accounting, () => deleteTransactionAttachmentAction(id))).toEqual({ ok: true });
+    expect(await raw.fileAsset.count({ where: { id } })).toBe(0);
   });
 });

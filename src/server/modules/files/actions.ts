@@ -45,6 +45,19 @@ async function fileParentAccessible(
   return true;
 }
 
+/**
+ * Receipts and pay stubs hang off a ledger Transaction and belong to
+ * Bookkeeping. They have no deal, so `fileParentAccessible` lets them straight
+ * through, and File:update (every admin and manager) would otherwise be enough
+ * to delete or refile one by id. The Bookkeeping screen removes a receipt with
+ * its own deleteTransactionAttachmentAction; these generic actions only reach a
+ * finance record for somebody who holds Bookkeeping update anyway.
+ */
+function financeRecordLocked(user: AccessUser, file: { transactionId: string | null }): boolean {
+  return !!file.transactionId && !can(user, "update", "Bookkeeping");
+}
+const FINANCE_RECORD_REFUSAL = "Receipts and pay stubs are Bookkeeping records and can only be changed in Bookkeeping.";
+
 const CALL_MAX_BYTES = 100 * 1024 * 1024; // 100MB — call recordings (audio, uncompressed)
 
 // Dedicated call-recording slots on a deal (QC Call). Kept in sync with
@@ -390,6 +403,7 @@ export async function moveFileAction(id: string, category: string) {
       category: true,
       projectId: true,
       leadId: true,
+      transactionId: true,
       lead: { select: { vertical: true } },
     },
   });
@@ -397,6 +411,7 @@ export async function moveFileAction(id: string, category: string) {
   // Same sentence as a missing file: whether it exists on another rep's deal
   // is not something an id-guesser should learn.
   if (!(await fileParentAccessible(user, file))) return { ok: false as const, error: "File not found." };
+  if (financeRecordLocked(user, file)) return { ok: false as const, error: FINANCE_RECORD_REFUSAL };
   if (!can(user, "update", "File") && file.uploadedById !== user.userId) {
     return { ok: false as const, error: "You can only move your own uploads." };
   }
@@ -510,12 +525,13 @@ export async function deleteFileAction(id: string) {
   }
   const file = await prisma.fileAsset.findFirst({
     where: { id, companyId: user.companyId },
-    select: { id: true, uploadedById: true, category: true, projectId: true, leadId: true },
+    select: { id: true, uploadedById: true, category: true, projectId: true, leadId: true, transactionId: true },
   });
   if (!file) return { ok: false as const, error: "File not found." };
   // Same sentence as a missing file: whether it exists on another rep's deal
   // is not something an id-guesser should learn.
   if (!(await fileParentAccessible(user, file))) return { ok: false as const, error: "File not found." };
+  if (financeRecordLocked(user, file)) return { ok: false as const, error: FINANCE_RECORD_REFUSAL };
 
   /* A submitted invoice is the contractor's evidence that he billed, so it
    * outranks the "your own uploads" rule that would otherwise let him take it
