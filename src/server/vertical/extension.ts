@@ -138,6 +138,15 @@ function stampData(model: string, data: unknown, vertical: ActiveVertical, edit 
     // Only nested-write shapes matter. connect/disconnect/set reference rows by
     // id and are covered by the fact that reading an out-of-vertical id is
     // already blocked.
+    //
+    // NOT covered: a nested `update`/`updateMany`/`delete`/`deleteMany` (or an
+    // upsert's update branch) reached through a parent, e.g.
+    // `lead.update({ data: { tasks: { updateMany: { where, data } } } })`.
+    // Prisma runs it inside the PARENT's operation, so this extension only
+    // ever sees the parent model: the child's where is not filtered to the
+    // workspace and its data is not checked or stamped. The parent's own scope
+    // is the only guard, and nothing checks the child rows it reaches against
+    // the workspace. Write those through the child model instead.
     const next: Json = { ...node };
     let touched = false;
 
@@ -265,19 +274,21 @@ function stampWhere(model: string, where: unknown, vertical: ActiveVertical): Js
  * by id throw a validation error inside a workspace — ticking a task done and
  * deleting one both broke in production.
  *
- * An explicit `vertical` in the caller's where still wins, so a screen can ask
- * for only-company (`null`) or only-this-workspace rows deliberately.
+ * An explicit `vertical` in the caller's where can only NARROW. A screen can
+ * still ask for only-company (`null`) or only-this-workspace rows, because both
+ * intersect the filter to exactly those rows. A foreign string is refused
+ * outright; anything else (`undefined`, `{ not: null }`, `{ in: [...] }`,
+ * `{ equals: ... }`) is intersected like any other caller condition. It used
+ * to skip the filter, so a roofing session could read solar tasks by asking
+ * for them indirectly.
  */
 function stampWhereOptional(model: string, where: unknown, vertical: ActiveVertical): Json {
   const base = isPlainObject(where) ? where : {};
-  if ("vertical" in base) {
-    const explicit = base.vertical;
-    if (explicit != null && typeof explicit === "string" && explicit !== vertical) {
-      throw new CrossVerticalAccessError(
-        `Refusing to read ${model} from vertical "${explicit}" while acting in "${vertical}".`
-      );
-    }
-    return { ...base };
+  const explicit = base.vertical;
+  if (typeof explicit === "string" && explicit !== vertical) {
+    throw new CrossVerticalAccessError(
+      `Refusing to read ${model} from vertical "${explicit}" while acting in "${vertical}".`
+    );
   }
   const { AND, ...rest } = base;
   const callerAnd = AND === undefined ? [] : Array.isArray(AND) ? AND : [AND];

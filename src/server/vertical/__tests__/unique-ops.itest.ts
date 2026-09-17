@@ -159,7 +159,9 @@ describe("SCOPED_OPTIONAL: the caller's own filters still narrow", () => {
   it("a caller AND, in object or array form, is kept alongside the workspace filter", async () => {
     const [asArray, asObject] = await roofing(async () => [
       await db.task.findFirst({ where: { AND: [{ id: solarTask }, { companyId }] } }),
-      await db.task.findUnique({ where: { id: roofTask, AND: { title: "nope" } } }),
+      // The caller's AND MATCHES the solar row, so only the workspace filter
+      // can make this null — a dropped filter cannot pass by accident.
+      await db.task.findUnique({ where: { id: solarTask, AND: { title: "Solar task" } } }),
     ]);
     expect(asArray).toBeNull();
     expect(asObject).toBeNull();
@@ -181,6 +183,134 @@ describe("SCOPED_OPTIONAL: the caller's own filters still narrow", () => {
     await expect(
       roofing(() => db.task.findUnique({ where: { id: solarTask, vertical: "solar" } }))
     ).rejects.toBeInstanceOf(CrossVerticalAccessError);
+  });
+});
+
+describe("SCOPED_OPTIONAL: an explicit vertical filter can only narrow", () => {
+  // A string vertical is checked (foreign = throw). Anything else — undefined,
+  // or a filter object — used to skip the workspace filter entirely, so a
+  // roofing session could read solar tasks by asking for them indirectly.
+  const indirect: Array<[string, Record<string, unknown>]> = [
+    ["vertical: undefined", { vertical: undefined }],
+    ["vertical: { not: null }", { vertical: { not: null } }],
+    ['vertical: { in: ["solar"] }', { vertical: { in: ["solar"] } }],
+    ['vertical: { equals: "solar" }', { vertical: { equals: "solar" } }],
+  ];
+
+  for (const [label, filter] of indirect) {
+    it(`${label} never returns the solar task from roofing`, async () => {
+      const [many, unique, first, count] = await roofing(async () => [
+        await db.task.findMany({ where: { companyId, ...filter }, select: { id: true } }),
+        await db.task.findUnique({ where: { id: solarTask, ...filter } }),
+        await db.task.findFirst({ where: { id: solarTask, ...filter } }),
+        await db.task.count({ where: { id: solarTask, ...filter } }),
+      ]);
+      expect(many.map((t) => t.id)).not.toContain(solarTask);
+      expect(unique).toBeNull();
+      expect(first).toBeNull();
+      expect(count).toBe(0);
+    });
+  }
+
+  it("vertical: undefined still sees this workspace and the company tasks", async () => {
+    const rows = await roofing(() =>
+      db.task.findMany({ where: { companyId, vertical: undefined }, select: { id: true } })
+    );
+    expect(rows.map((t) => t.id).sort()).toEqual([roofTask, companyTask].sort());
+  });
+
+  it("null and the active workspace still select exactly their rows", async () => {
+    const [company, roof, roofOrSolar] = await roofing(async () => [
+      await db.task.findMany({ where: { companyId, vertical: null }, select: { id: true } }),
+      await db.task.findMany({ where: { companyId, vertical: "roofing" }, select: { id: true } }),
+      await db.task.findMany({
+        where: { companyId, vertical: { in: ["roofing", "solar"] } },
+        select: { id: true },
+      }),
+    ]);
+    expect(company.map((t) => t.id)).toEqual([companyTask]);
+    expect(roof.map((t) => t.id)).toEqual([roofTask]);
+    expect(roofOrSolar.map((t) => t.id)).toEqual([roofTask]);
+  });
+});
+
+describe("SCOPED_OPTIONAL: every read and write shape stays inside the workspace", () => {
+  it("count, aggregate and groupBy never see the solar task", async () => {
+    const [count, agg, groups] = await roofing(async () => [
+      await db.task.count({ where: { companyId } }),
+      await db.task.aggregate({ where: { companyId }, _count: { _all: true } }),
+      await db.task.groupBy({ by: ["vertical"], where: { companyId }, _count: { _all: true } }),
+    ]);
+    expect(count).toBe(2);
+    expect(agg._count._all).toBe(2);
+    expect(groups.map((g) => g.vertical).sort()).toEqual([null, "roofing"].sort());
+  });
+
+  it("deleteMany only deletes this workspace's and the company tasks", async () => {
+    const { count } = await roofing(() => db.task.deleteMany({ where: { companyId } }));
+    expect(count).toBe(2);
+    const left = await raw.task.findMany({ where: { companyId }, select: { id: true } });
+    expect(left.map((t) => t.id)).toEqual([solarTask]);
+  });
+
+  it("an empty caller AND (array or object) does not drop the filter", async () => {
+    const [arrMany, objMany, arrUnique, objUnique] = await roofing(async () => [
+      await db.task.findMany({ where: { companyId, AND: [] }, select: { id: true } }),
+      await db.task.findMany({ where: { companyId, AND: {} }, select: { id: true } }),
+      await db.task.findUnique({ where: { id: solarTask, AND: [] } }),
+      await db.task.findUnique({ where: { id: solarTask, AND: {} } }),
+    ]);
+    expect(arrMany.map((t) => t.id)).not.toContain(solarTask);
+    expect(objMany.map((t) => t.id)).not.toContain(solarTask);
+    expect(arrUnique).toBeNull();
+    expect(objUnique).toBeNull();
+  });
+
+  it("a caller NOT does not drop the filter", async () => {
+    const [notRoof, notNull, notUnique] = await roofing(async () => [
+      await db.task.findMany({ where: { companyId, NOT: { title: "Roof task" } }, select: { id: true } }),
+      await db.task.findMany({ where: { companyId, NOT: [{ vertical: null }] }, select: { id: true } }),
+      await db.task.findUnique({ where: { id: solarTask, NOT: { title: "Roof task" } } }),
+    ]);
+    expect(notRoof.map((t) => t.id)).toEqual([companyTask]);
+    expect(notNull.map((t) => t.id)).toEqual([roofTask]);
+    expect(notUnique).toBeNull();
+  });
+
+  it("batched findUnique calls (one tick, and a $transaction array) never return the solar task", async () => {
+    const tick = await roofing(() =>
+      Promise.all([
+        db.task.findUnique({ where: { id: roofTask } }),
+        db.task.findUnique({ where: { id: solarTask } }),
+        db.task.findUnique({ where: { id: companyTask } }),
+      ])
+    );
+    expect(tick.map((t) => t?.id ?? null)).toEqual([roofTask, null, companyTask]);
+
+    const batch = await roofing(() =>
+      db.$transaction([
+        db.task.findUnique({ where: { id: solarTask } }),
+        db.task.findUnique({ where: { id: roofTask } }),
+      ])
+    );
+    expect(batch.map((t) => t?.id ?? null)).toEqual([null, roofTask]);
+  });
+
+  it("an upsert of the solar id from roofing leaves the solar row untouched", async () => {
+    const before = await raw.task.findUniqueOrThrow({ where: { id: solarTask } });
+    const result = await roofing(() =>
+      db.task.upsert({
+        where: { id: solarTask },
+        create: { companyId, title: "Upsert fallback" },
+        update: { title: "Hijacked", status: "done" },
+      })
+    );
+    // The solar row is invisible, so the update branch cannot fire; whatever
+    // the create branch made lives in roofing and is a different row.
+    expect(result.id).not.toBe(solarTask);
+    expect(result.vertical).toBe("roofing");
+    const after = await raw.task.findUniqueOrThrow({ where: { id: solarTask } });
+    expect(after).toEqual(before);
   });
 });
 
