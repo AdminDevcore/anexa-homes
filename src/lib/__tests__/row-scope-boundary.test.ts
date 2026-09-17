@@ -106,6 +106,21 @@ const ALLOWED: Record<string, string> = {
     "poster cannot see rather than modifying that job. " +
     "IF `accountant_readonly` (Phase 3) IS EVER GRANTED Bookkeeping:create, this entry stops " +
     "being true — that role exists to change nothing, so it must hold read/export only.",
+  "src/server/modules/books/ar-ap-actions.ts#createInvoiceAction":
+    "Bookkeeping:create — accounting/owner only. The projectId says which JOB is being " +
+    "billed, so the invoice lands in that job's department revenue; it is a tag on a " +
+    "receivable, not a deal being edited. Reaching an invisible job would file revenue " +
+    "against work the biller cannot see rather than modifying that work. Same reasoning, " +
+    "and the same caveat, as postManualEntryAction above: if accountant_readonly is ever " +
+    "granted Bookkeeping:create, this entry stops being true.",
+  "src/server/modules/books/ar-ap-actions.ts#createBillAction":
+    "Bookkeeping:create — accounting/owner only. The projectId is the optional job a COST " +
+    "is attributed to, for job costing; the bill posts to the expense account either way.",
+  "src/server/modules/books/ar-ap-actions.ts#syncExpectedFundingsAction":
+    "Bookkeeping:create — accounting/owner only. Reads the deal's financing to work out " +
+    "what the lender owes and writes the expected milestones. It creates no customer data " +
+    "and changes nothing on the deal; a leadAccessible check here would gate a finance " +
+    "role's own ledger against a sales scope that role does not have.",
   "src/server/modules/contractor-pay/actions.ts#generateContractorPayAction":
     "Takes no row id; ContractorInvoice:update is accounting/owner only.",
   "src/server/modules/costs/actions.ts#deleteProjectCostAction": "Commission:update — finance roles only.",
