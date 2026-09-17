@@ -241,6 +241,8 @@ enum NotificationEvent {
   commission_approved
   payroll_approved
   automation_failed
+  agent_run_failed
+  agent_needs_human
 }
 
 enum NotificationChannel {
@@ -371,6 +373,8 @@ model Company {
   automationRules          AutomationRule[]
   pipelineFilterViews      PipelineFilterView[]
   automationRuns           AutomationRun[]
+  agents                   Agent[]
+  agentRuns                AgentRun[]
   notifications            Notification[]
   conversations            Conversation[]
   messages                 Message[]
@@ -634,28 +638,31 @@ model User {
   createdAt                   DateTime             @default(now())
   updatedAt                   DateTime             @updatedAt
 
-  leadsAssigned   Lead[]               @relation("LeadAssignedRep")
-  leadsSet        Lead[]               @relation("LeadSetter")
-  leadsCreated    Lead[]               @relation("LeadCreatedBy")
-  customerLeads   Lead[]               @relation("LeadCustomerUser")
-  projectsManaged Project[]            @relation("ProjectManager")
-  tasksAssigned   Task[]               @relation("TaskAssignee")
-  tasksCreated    Task[]               @relation("TaskCreatedBy")
-  notes           Note[]
-  filesUploaded   FileAsset[]
-  dailyReports    DailyReport[]
-  commissions     Commission[]         @relation("CommissionUser")
-  contractorPays  ContractorPay[]      @relation("ContractorPayContractor")
-  overridesEarned CommissionOverride[] @relation("OverrideBeneficiary")
-  overridesOnMe   CommissionOverride[] @relation("OverrideSource")
-  payrollItems    PayrollItem[]
-  activityLogs    ActivityLog[]
-  stageMoves      LeadStageEvent[]     @relation("LeadStageEventMovedBy")
-  appointmentMoves LeadAppointmentReschedule[] @relation("LeadAppointmentRescheduleMovedBy")
-  crewMemberships CrewMember[]
-  invitationsSent Invitation[]         @relation("InviteInviter")
-  passwordResets  PasswordResetToken[]
-  notifications   Notification[]
+  leadsAssigned      Lead[]                      @relation("LeadAssignedRep")
+  leadsSet           Lead[]                      @relation("LeadSetter")
+  leadsCreated       Lead[]                      @relation("LeadCreatedBy")
+  customerLeads      Lead[]                      @relation("LeadCustomerUser")
+  projectsManaged    Project[]                   @relation("ProjectManager")
+  tasksAssigned      Task[]                      @relation("TaskAssignee")
+  tasksCreated       Task[]                      @relation("TaskCreatedBy")
+  notes              Note[]
+  filesUploaded      FileAsset[]
+  dailyReports       DailyReport[]
+  commissions        Commission[]                @relation("CommissionUser")
+  contractorPays     ContractorPay[]             @relation("ContractorPayContractor")
+  overridesEarned    CommissionOverride[]        @relation("OverrideBeneficiary")
+  overridesOnMe      CommissionOverride[]        @relation("OverrideSource")
+  payrollItems       PayrollItem[]
+  activityLogs       ActivityLog[]
+  stageMoves         LeadStageEvent[]            @relation("LeadStageEventMovedBy")
+  agentsUpdated      Agent[]                     @relation("AgentUpdatedBy")
+  agentRunsTriggered AgentRun[]                  @relation("AgentRunTriggeredBy")
+  agentRunsResolved  AgentRun[]                  @relation("AgentRunResolvedBy")
+  appointmentMoves   LeadAppointmentReschedule[] @relation("LeadAppointmentRescheduleMovedBy")
+  crewMemberships    CrewMember[]
+  invitationsSent    Invitation[]                @relation("InviteInviter")
+  passwordResets     PasswordResetToken[]
+  notifications      Notification[]
 
   conversationsCreated    Conversation[]       @relation("ConversationCreator")
   conversationMembers     ConversationMember[] @relation("ConvMemberUser")
@@ -1002,8 +1009,9 @@ model LeadStageEvent {
   /// `via`), and on moves made before anyone was recorded.
   movedById String?
   movedBy   User?          @relation("LeadStageEventMovedBy", fields: [movedById], references: [id], onDelete: SetNull)
-  /// Why no person is named: "automation" (a rule moved it) or "signature" (the
-  /// homeowner's signature did). Null on a person's move.
+  /// Why no person is named: "automation" (a rule moved it), "signature" (the
+  /// homeowner's signature did) or "agent" (an agent's change passed the human
+  /// gate on its own). Null on a person's move.
   via       String?
 
   @@index([leadId, enteredAt])
@@ -1166,7 +1174,7 @@ model Lead {
   activityLogs           ActivityLog[]
   stageEvents            LeadStageEvent[]
   appointmentReschedules LeadAppointmentReschedule[]
-  knocks                 Knock[]                 @relation("KnockLead")
+  knocks                 Knock[]                     @relation("KnockLead")
   scope                  ScopeOfWork?
   estimate               Estimate?
   proposals              Proposal[]
@@ -1180,6 +1188,7 @@ model Lead {
   solarDealAdders        SolarDealAdder[]
   feedPosts              DealFeedPost[]
   automationRuns         AutomationRun[]
+  agentRuns              AgentRun[]
 
   @@index([companyId, stageId])
   @@index([companyId, assignedRepId])
@@ -2352,7 +2361,7 @@ model NotificationRule {
   // Event-specific match conditions, e.g. { "stageId": "..." } or { "status": "in_production" }.
   conditions    Json              @default("{}")
   // Who receives it: { roles: Role[], userIds: string[], dynamic: string[] }
-  // dynamic targets: assigned_rep | project_manager | customer | lead_creator | all_admins | all_managers
+  // dynamic targets: assigned_rep | project_manager | customer | lead_creator | task_assignee | all_admins | all_managers | agents_access
   recipients    Json              @default("{}")
   // Channels: ["in_app","email","sms"]
   channels      Json              @default("[\"in_app\"]")
@@ -5337,6 +5346,13 @@ model SolarFinance {
   lenderProductId String?
   lenderProduct   SolarLenderProduct? @relation(fields: [lenderProductId], references: [id], onDelete: SetNull)
 
+  /// The ways to pay the rep ticked on the Financing step: "cash" and/or
+  /// rate-sheet row ids. The proposal's payment menu is built from exactly
+  /// these, beside the quoted option. Plain ids, not a relation: a retired row
+  /// simply stops being offered, and the documents already generated froze
+  /// their menus.
+  shortlistIds String[] @default([])
+
   // ── Cash / Loan ─────────────────────────────────────────────────────────
   /// Sticker price per watt, cents. Includes the dealer fee on a LOAN.
   grossPpwCents               Int   @default(0)
@@ -6640,4 +6656,123 @@ model LenderFunding {
   @@index([companyId, status])
   @@index([leadId])
   @@map("lender_fundings")
+}
+
+// ---------------------------------------------------------------------------
+// Agents: back-office automation, registered as rows and run on a clock.
+// See docs/superpowers/specs/2026-09-15-agents-control-plane-design.md.
+// Both models are SHARED (not in src/server/vertical/models.ts): pages filter by
+// the viewer's workspaces, and every handler executes inside runInVertical.
+// ---------------------------------------------------------------------------
+
+enum AgentDepartment {
+  permit
+  operations
+  accounting
+  sales_escalation
+}
+
+enum AgentRunTrigger {
+  scheduled
+  manual
+  event
+}
+
+enum AgentRunStatus {
+  queued
+  running
+  success
+  failed
+  needs_human
+}
+
+enum AgentRunResolution {
+  applied
+  closed
+}
+
+/// One registered agent: which handler runs, for which product, on what
+/// clock, with what settings. A row, not a page.
+model Agent {
+  id                String          @id @default(uuid())
+  companyId         String
+  company           Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name              String
+  description       String          @default("")
+  /// Key into the handler registry, e.g. "bank.ntp_poll".
+  handlerKey        String
+  /// "Product" in the UI. NULL = both Roofing and Solar. `others` is refused on save.
+  vertical          Vertical?
+  department        AgentDepartment
+  /// Scheduling only. A disabled agent can still be run by hand, after a confirmation.
+  enabled           Boolean         @default(false)
+  /// 5-field cron, UTC. NULL = never on the clock (manual or event only).
+  schedule          String?
+  /// When the tick next picks it up. NULL unless enabled AND scheduled.
+  nextRunAt         DateTime?
+  /// Ceiling for one run, 5–240 seconds.
+  timeoutSeconds    Int             @default(60)
+  /// Handler settings. References to secrets only, never secret values.
+  config            Json            @default("{}")
+  /// True: the agent may flag work, but may move a deal only into an
+  /// isActionRequired stage.
+  requiresHumanGate Boolean         @default(true)
+  updatedById       String?
+  updatedBy         User?           @relation("AgentUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  runs AgentRun[]
+
+  @@unique([companyId, name])
+  @@index([enabled, nextRunAt])
+  @@map("agents")
+}
+
+/// One execution of one agent in one workspace. Written for every run —
+/// successes, failures, no-ops, and the ones a human has to finish.
+/// This table is the audit trail.
+model AgentRun {
+  id             String              @id @default(uuid())
+  companyId      String
+  company        Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /// NoAction: an agent with history cannot be deleted (disable it instead),
+  /// while deleting a company still cascades through both tables.
+  agentId        String
+  agent          Agent               @relation(fields: [agentId], references: [id], onDelete: NoAction)
+  /// The deal, when the whole run is about one. SetNull: deleting a deal must
+  /// not erase the record of what an agent did to it.
+  leadId         String?
+  lead           Lead?               @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  /// Customer name and address as they read at run time.
+  leadLabel      String?
+  /// The workspace this run executed in. A "both" agent writes one run per workspace.
+  vertical       Vertical
+  trigger        AgentRunTrigger
+  status         AgentRunStatus
+  triggeredById  String?
+  triggeredBy    User?               @relation("AgentRunTriggeredBy", fields: [triggeredById], references: [id], onDelete: SetNull)
+  createdAt      DateTime            @default(now())
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  summary        String              @default("")
+  detail         Json                @default("{}")
+  /// Full error text and stack.
+  error          String?
+  resolvedById   String?
+  resolvedBy     User?               @relation("AgentRunResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+  resolvedAt     DateTime?
+  resolution     AgentRunResolution?
+  resolutionNote String?
+
+  /// At most one queued or running run per agent per workspace. The partial
+  /// unique index agent_runs_one_in_flight, written by hand in the migration,
+  /// enforces this; Prisma cannot declare a partial index.
+  @@index([companyId, createdAt])
+  @@index([companyId, status, createdAt])
+  @@index([agentId, createdAt])
+  @@index([agentId, vertical, status])
+  @@index([status, startedAt])
+  @@index([leadId])
+  @@map("agent_runs")
 }

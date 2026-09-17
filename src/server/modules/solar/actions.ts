@@ -496,6 +496,61 @@ export async function setSolarDealLenderAction(input: z.infer<typeof dealLenderS
   return { ok: true as const, clearedProduct, restampedAdders: restamped };
 }
 
+/**
+ * THE WAYS TO PAY THE REP TICKED on the Financing step, which become the
+ * proposal's payment menu beside the quoted option.
+ *
+ * Saved the instant a card is ticked, like the lender: generation reads the
+ * row, and a tick that waited for the Save button would be a tick a rep can
+ * lose by generating first.
+ *
+ * Not behind the signed lock. It moves no money on this deal — it decides what
+ * the NEXT version offers, and a signed document keeps the menu it froze.
+ *
+ * Ids are checked against this company's rate sheet; anything else is dropped
+ * rather than refused, so a card retired while the screen was open cannot
+ * wedge the rest of the list.
+ */
+const shortlistSchema = z.object({
+  leadId: z.string().min(1),
+  ids: z.array(z.string().min(1)).max(100),
+});
+
+export async function setSolarShortlistAction(input: z.infer<typeof shortlistSchema>) {
+  const user = await requireUser();
+  if (!can(user, "update", "Lead")) return fail("Not allowed.");
+  const parsed = shortlistSchema.safeParse(input);
+  if (!parsed.success) return fail("Invalid selection.");
+  const { leadId } = parsed.data;
+
+  const lead = await leadAccessible(user, leadId);
+  if (!lead) return fail("Deal not found.");
+  if (lead.vertical !== "solar") return fail("This is not a solar deal.");
+
+  const ids = await ownShortlistIds(user.companyId, parsed.data.ids);
+
+  // updateMany: a deal priced for the first time has no row yet, and its ticks
+  // ride in with the first Save instead — see saveSolarFinanceAction.
+  const { count } = await prisma.solarFinance.updateMany({
+    where: { companyId: user.companyId, leadId },
+    data: { shortlistIds: ids },
+  });
+
+  revalidatePath(`/portal/leads/${leadId}/solar-proposal`);
+  return { ok: true as const, saved: count > 0 };
+}
+
+/** The ids that are cash or a row on this company's rate sheet, in order. */
+async function ownShortlistIds(companyId: string, ids: string[]) {
+  const unique = [...new Set(ids)];
+  const rows = await prisma.solarLenderProduct.findMany({
+    where: { companyId, id: { in: unique.filter((id) => id !== "cash") } },
+    select: { id: true },
+  });
+  const known = new Set(rows.map((r) => r.id));
+  return unique.filter((id) => id === "cash" || known.has(id));
+}
+
 // ---------------------------------------------------------------------------
 // Providers — the utilities and retailers a company sells against
 // ---------------------------------------------------------------------------
@@ -730,6 +785,10 @@ const financeSchema = z.object({
   /// Which catalogue product this is quoted from. Its terms are read from the
   /// database, never from the client — see below.
   lenderProductId: z.string().nullable().optional(),
+  /// The ticked ways to pay, for a deal saved for the first time — ticks on a
+  /// deal with no finance row yet have nowhere else to land. See
+  /// setSolarShortlistAction.
+  shortlistIds: z.array(z.string().min(1)).max(100).optional(),
 });
 
 /**
@@ -781,7 +840,11 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
    * `deal-money.ts` now, called from all of them, so there is one answer to
    * what a house costs rather than one per caller. See that file.
    */
-  const data = await dealMoneyColumns(user.companyId, f.leadId, f);
+  const { shortlistIds, ...money } = f;
+  const data = {
+    ...(await dealMoneyColumns(user.companyId, f.leadId, money)),
+    ...(shortlistIds ? { shortlistIds: await ownShortlistIds(user.companyId, shortlistIds) } : {}),
+  };
 
   const saved = await prisma.solarFinance.upsert({
     where: { leadId: f.leadId },
@@ -804,7 +867,7 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
       contractPriceCents: true, itcEstimateCents: true, rateMillsPerKwh: true,
       monthlyPaymentCents: true, escalatorPct: true, termYears: true, aprPct: true,
       loanTermMonths: true, downPaymentCents: true, loanMonthlyPaymentCents: true,
-      lenderProductId: true,
+      lenderProductId: true, shortlistIds: true,
     },
   });
 

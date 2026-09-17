@@ -795,6 +795,8 @@ export async function generateProposalVersion(
       grossPpwCents: finance.grossPpwCents,
       dealerFeePct: finance.dealerFeePct,
     },
+    // What the rep ticked on the Financing step, and nothing they did not.
+    shortlistIds: finance.shortlistIds,
     programmes: programmes.map((p): CatalogueProgramme => ({
       ...p,
       lender: {

@@ -1,7 +1,8 @@
-import type { NotificationChannel, NotificationEvent, Role } from "@prisma/client";
+import type { NotificationChannel, NotificationEvent, Role, Vertical } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { emailBrandFor } from "@/server/modules/notifications/brand";
 import { brandedEmailTemplate } from "@/server/modules/notifications/email-templates";
+import { AGENT_ACCESS_ROLE } from "@/server/modules/agents/access";
 import type { RecipientConfig } from "./types";
 import { sendEmail, sendSms } from "./delivery";
 
@@ -15,9 +16,21 @@ export type FireArgs = {
   taskId?: string | null;
   stageId?: string | null;
   status?: string | null;
+  /** The agent a run belongs to, for agent_run_failed / agent_needs_human. */
+  agentName?: string | null;
+  /**
+   * The run's own workspace, for an agent-level alert with no deal (e.g. "No
+   * handler is registered") — there is no lead/project/task to read a
+   * vertical off of, so the caller states it. A deal still wins when one is
+   * present: see `originVertical` below.
+   */
+  vertical?: Vertical | null;
 };
 
 type Tokens = Record<string, string>;
+
+/** Agent events carry a sentence in `status`, not an enum value. */
+const AGENT_EVENTS: ReadonlySet<NotificationEvent> = new Set<NotificationEvent>(["agent_run_failed", "agent_needs_human"]);
 
 function fillTokens(tpl: string, tokens: Tokens): string {
   return tpl.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_m, k: string) => tokens[k] ?? "");
@@ -85,7 +98,11 @@ async function run(args: FireArgs) {
     lead: customerName,
     project: project?.projectNumber ?? "",
     stage: stage?.name ?? "",
-    status: (args.status ?? "").replace(/_/g, " "),
+    // Enum statuses read better with spaces ("in production"). An agent's status
+    // is a sentence that can name a handler key ("bank.ntp_poll"), so it passes
+    // through untouched.
+    status: AGENT_EVENTS.has(args.event) ? (args.status ?? "") : (args.status ?? "").replace(/_/g, " "),
+    agent: args.agentName ?? "",
     document: doc?.title ?? "",
     task: task?.title ?? "",
     actor: actor ? `${actor.firstName} ${actor.lastName}`.trim() : "System",
@@ -99,8 +116,10 @@ async function run(args: FireArgs) {
   // webhook fires with no workspace open at all, and stamping "whatever the
   // actor had selected" would file a Solar alert under Roofing. NULL is the
   // honest answer for a genuinely company-level event (payroll approved), and it
-  // shows in every workspace.
-  const originVertical = lead?.vertical ?? project?.vertical ?? task?.vertical ?? null;
+  // shows in every workspace. args.vertical is the fallback for an agent-level
+  // alert that has no deal to read a vertical off of (see FireArgs.vertical);
+  // a real deal still wins over it.
+  const originVertical = lead?.vertical ?? project?.vertical ?? task?.vertical ?? args.vertical ?? null;
 
   // --- Load branding for the from-name + branded email template ---
   const { brand, fromName } = await emailBrandFor(args.companyId);
@@ -122,6 +141,25 @@ async function run(args: FireArgs) {
   }
   const dynamicRoleUsers = (roleList: string[]) => usersByRoles(roleList);
 
+  // Holders of the Agents access switch (modules/agents/access.ts): managers
+  // whose permission overrides carry Agent:approve. Read now, when the alert
+  // fires, so switching someone off stops the next alert with no rule to edit.
+  let agentsAccessIds: string[] | null = null;
+  async function agentsAccessUsers(): Promise<string[]> {
+    if (agentsAccessIds) return agentsAccessIds;
+    const users = await prisma.user.findMany({
+      where: {
+        companyId: args.companyId,
+        status: "active",
+        role: AGENT_ACCESS_ROLE,
+        permissions: { path: ["Agent:approve"], equals: true },
+      },
+      select: { id: true },
+    });
+    agentsAccessIds = users.map((u) => u.id);
+    return agentsAccessIds;
+  }
+
   for (const rule of rules) {
     if (!conditionMatches(rule.event, rule.conditions as Record<string, unknown>, args)) continue;
 
@@ -139,6 +177,7 @@ async function run(args: FireArgs) {
       if (id) recipientIds.add(id);
       if (dyn === "all_admins") for (const x of await dynamicRoleUsers(["admin", "super_admin"])) recipientIds.add(x);
       if (dyn === "all_managers") for (const x of await dynamicRoleUsers(["manager"])) recipientIds.add(x);
+      if (dyn === "agents_access") for (const x of await agentsAccessUsers()) recipientIds.add(x);
     }
 
     // Note: the person who performed the action IS notified if they're in the
@@ -232,6 +271,9 @@ function buildLink(args: FireArgs, ids: { leadId?: string | null; projectId?: st
       return "/portal/commissions";
     case "payroll_approved":
       return "/portal/payroll";
+    case "agent_run_failed":
+    case "agent_needs_human":
+      return "/portal/agents/runs";
     default:
       return "/portal/dashboard";
   }

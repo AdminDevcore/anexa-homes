@@ -416,6 +416,51 @@ async function main() {
     data: { companyId: company.id, type: "system", message: `${COMPANY_NAME} CRM initialized.`, actorId: owner.id },
   });
 
+  // Agents: the Hello Agent and its starter alerts in both workspaces — the same
+  // rows migration 20260916100200_agents_seed_rows gives every existing company.
+  await prisma.agent.create({
+    data: {
+      companyId: company.id,
+      name: "Hello Agent",
+      description: "Test agent. Logs hello and records a successful run, proving the runner and run log work end to end.",
+      handlerKey: "system.hello",
+      vertical: null,
+      department: "operations",
+      enabled: false,
+      requiresHumanGate: true,
+      config: {},
+    },
+  });
+  const agentAlertRecipients = { roles: ["super_admin", "admin"], userIds: [], dynamic: ["agents_access"] };
+  await prisma.notificationRule.createMany({
+    data: (["roofing", "solar"] as const).flatMap((vertical) => [
+      {
+        companyId: company.id,
+        vertical,
+        name: "Agent run failed → Agents access",
+        event: "agent_run_failed" as const,
+        conditions: {},
+        recipients: agentAlertRecipients,
+        channels: ["in_app"],
+        titleTemplate: "Agent failed: {{agent}}",
+        bodyTemplate: "{{status}}",
+        active: true,
+      },
+      {
+        companyId: company.id,
+        vertical,
+        name: "Agent needs a human → Agents access",
+        event: "agent_needs_human" as const,
+        conditions: {},
+        recipients: agentAlertRecipients,
+        channels: ["in_app"],
+        titleTemplate: "Needs a human: {{agent}}",
+        bodyTemplate: "{{status}}",
+        active: true,
+      },
+    ]),
+  });
+
   console.log("✅ Clean seed complete.");
   console.log(`   Company: ${COMPANY_NAME} (slug: anexa-homes)`);
   const missing = [

@@ -1,6 +1,7 @@
 import type { Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { roleGrants } from "@/server/rbac/matrix";
+import { hasAgentsAccess } from "@/server/modules/agents/access";
 import { roleLabel } from "@/lib/roles";
 
 // Hierarchy order for grouping/sorting by role.
@@ -201,7 +202,15 @@ export type UserDetail = TeamMember & {
   managerId: string | null;
   managerName: string | null;
   reports: TeamReport[]; // reps reporting to this user (if a manager)
+  /** The ROLE's grant summary, for display. Not the override column. */
   permissions: RolePermission[];
+  /**
+   * The Agents access switch, derived from the `User.permissions` override
+   * column — a different thing entirely from `permissions` above. Exposed as
+   * the derived boolean so the page never reads the raw column, and so the
+   * word `permissions` never means two things on one screen.
+   */
+  agentsAccess: boolean;
   activity: {
     assignedLeads: number;
     openTasks: number;
@@ -275,6 +284,10 @@ export async function getUserDetail(companyId: string, userId: string): Promise<
       solarCompanyLeadFlatCents: true,
       verticals: true,
       teamName: true,
+      // The per-person override column, read here so the member page does not
+      // have to query it a second time. Returned below as the derived
+      // `agentsAccess` boolean, never raw.
+      permissions: true,
       salesRepId: true,
       salesRep: { select: { firstName: true, lastName: true, manager: { select: { teamName: true } } } },
       managerId: true,
@@ -345,6 +358,7 @@ export async function getUserDetail(companyId: string, userId: string): Promise<
     managerName: u.manager ? `${u.manager.firstName} ${u.manager.lastName}`.trim() : null,
     reports: reports.map((r) => ({ ...asPerson(r), canvassers: r.canvassers.map(asPerson) })),
     permissions: rolePermissionSummary(u.role),
+    agentsAccess: hasAgentsAccess(u.permissions),
     activity: {
       assignedLeads,
       openTasks,

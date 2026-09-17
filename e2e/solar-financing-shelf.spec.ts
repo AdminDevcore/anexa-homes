@@ -266,6 +266,52 @@ test.describe(FLAG_ON ? "solar financing shelf" : "solar financing shelf (flag o
     });
   });
 
+  /**
+   * A tick is what the customer's proposal offers, so it has to outlive the
+   * screen. It used to be browser state only, while generation put cash and
+   * every lender on the menu anyway — "Pay in full" and Amos on a PPA proposal
+   * whose rep had ticked neither.
+   */
+  test("a ticked card is saved on the deal, because the proposal offers it", async ({ page }) => {
+    await login(page, "owner@anexahomes.com");
+    await toSolar(page);
+
+    const name = lenderName("Tick");
+    await addLender(page, name);
+    await addLoan(page, name, "5.49", "240", "20");
+    await addLoan(page, name, "4.49", "300", "26");
+
+    const leadId = await openSolarDeal(page);
+    const financing = `/portal/leads/${leadId}/solar-proposal?step=financing`;
+    await page.goto(financing);
+
+    // Quote and save first, so the deal has a finance row for the tick to land on.
+    await offerCard(page, name, /20 yr · 5\.49% · fee 20%/).click();
+    await page.getByRole("button", { name: `Quote this: ${name} 20 yr · 5.49% · fee 20%` }).click();
+    await expect(page.getByText(`Quoting ${name}`)).toBeVisible({ timeout: 15000 });
+    await page.getByRole("button", { name: "Save financing" }).click();
+    await expect(page.getByText("Financing saved")).toBeVisible({ timeout: 15000 });
+
+    /** Click a card and wait for the server action that saves the tick. */
+    const toggle = async (terms: RegExp) => {
+      const saved = page.waitForResponse(
+        (r) => r.request().method() === "POST" && r.request().headers()["next-action"] != null
+      );
+      await offerCard(page, name, terms).click();
+      await saved;
+    };
+
+    const other = /25 yr · 4\.49% · fee 26%/;
+    await toggle(other);
+    await page.goto(financing);
+    await expect(offerCard(page, name, other)).toHaveAttribute("aria-pressed", "true", { timeout: 15000 });
+
+    // And unticking is saved too — it is how a rep takes an option off the menu.
+    await toggle(other);
+    await page.goto(financing);
+    await expect(offerCard(page, name, other)).toHaveAttribute("aria-pressed", "false", { timeout: 15000 });
+  });
+
   test("cash is a column of the comparison, not a mode hidden behind it", async ({ page }) => {
     await login(page, "owner@anexahomes.com");
     await toSolar(page);

@@ -65,6 +65,7 @@ import {
   saveSolarDesignAction,
   saveSolarFinanceAction,
   setSolarDealLenderAction,
+  setSolarShortlistAction,
   validateSolarDealAction,
 } from "@/server/modules/solar/actions";
 import {
@@ -299,6 +300,8 @@ export type SolarFinanceView = {
   /// Which rate-sheet row this was quoted from. Provenance: the terms above are
   /// copies taken when the rep chose it.
   lenderProductId: string | null;
+  /// The ways to pay ticked on the shelf, which become the proposal's menu.
+  shortlistIds: string[];
 } | null;
 
 function money(cents: number) {
@@ -1060,20 +1063,39 @@ export function SolarFinancePanel({
   /**
    * Which programmes are on the table, and which one the deal is quoted on.
    *
-   * The shortlist is a working set, not a saved one — a rep shows a homeowner
-   * four ways to pay and one of them wins. It opens holding whatever the deal
-   * already quotes so the comparison is never empty on a deal already priced.
+   * The shortlist is SAVED: what is ticked here is the payment menu the
+   * customer's proposal offers beside the quoted option, and nothing unticked
+   * goes on it. It used to be a working set that lived only in this screen,
+   * while generation offered cash and every lender anyway.
+   *
+   * A deal with nothing saved opens holding whatever it already quotes, so the
+   * comparison is never empty on a deal already priced.
    */
   const quotedId = lenderProductId || (product === "cash" ? CASH_OFFER_ID : null);
   const [shortlist, setShortlist] = React.useState<string[]>(() =>
-    finance?.lenderProductId
-      ? [finance.lenderProductId]
-      : (finance?.product ?? "cash") === "cash"
-        ? [CASH_OFFER_ID]
-        : []
+    finance?.shortlistIds?.length
+      ? finance.shortlistIds
+      : finance?.lenderProductId
+        ? [finance.lenderProductId]
+        : (finance?.product ?? "cash") === "cash"
+          ? [CASH_OFFER_ID]
+          : []
   );
-  const toggleShortlist = (id: string) =>
-    setShortlist((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+  /**
+   * Saved on the spot, like the lender: generation reads the row, so a tick
+   * held for the Save button is a tick lost by generating first. A deal with
+   * no finance row yet keeps it here and sends it with its first Save.
+   */
+  async function toggleShortlist(id: string) {
+    const prev = shortlist;
+    const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+    setShortlist(next);
+    const res = await setSolarShortlistAction({ leadId, ids: next });
+    if (!res.ok) {
+      setShortlist(prev);
+      toast.error(res.error);
+    }
+  }
 
   /**
    * The one basis every column is priced on.
@@ -1480,6 +1502,7 @@ export function SolarFinancePanel({
       // has ever been filled in on a real deal, so there is nothing to lose;
       // saving a row written before the form went is what clears it.
       lenderProductId: lenderProductId || null,
+      shortlistIds: shortlist,
     });
     setBusy(false);
     if (!res.ok) return toast.error(res.error);
@@ -1562,6 +1585,9 @@ export function SolarFinancePanel({
         quotedLabel={
           chosen ? [lender?.name, chosen.name].filter(Boolean).join(" · ") || lenderProductLabel(chosen) : null
         }
+        // Live, not the saved row: quoting a PPA column hides the price before
+        // the save that would have zeroed it.
+        quotedProduct={product}
         canEdit={canEdit}
         onChange={setBasePpwCents}
       />

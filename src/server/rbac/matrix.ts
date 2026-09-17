@@ -72,6 +72,12 @@ export const RESOURCES = [
   "Knowledge", // training library / knowledge base (role-gated)
   "Scope", // scope-of-work job cost calculator (costs management-only)
   "Proposal", // customer-facing roofing presentation / proposal builder
+  // Back-office automation agents and their run log. Config edits are
+  // owner/admin only by ROLE (see modules/agents/access.ts, which ignores
+  // overrides for them); owners and admins also run and resolve by role,
+  // and managers with the Agents access switch get read/run/approve per
+  // person through Team → member.
+  "Agent",
 ] as const;
 
 export const ACTIONS = [
@@ -83,6 +89,7 @@ export const ACTIONS = [
   "approve",
   "sign",
   "export",
+  "run", // start something now — an agent's Run now
   "manage", // implies all of the above for that resource
 ] as const;
 
@@ -170,6 +177,10 @@ const GRANTS: Partial<Record<Role, Grant>> = {
     Knowledge: ALL,
     Scope: ALL,
     Proposal: ALL,
+    // "manage", like every other line here — but there is no delete action on
+    // an agent anywhere in the app: disabling is how one is retired, exactly as
+    // the admin grant below spells out. The Roles page reads this "full access".
+    Agent: ALL,
   },
 
   admin: {
@@ -198,6 +209,8 @@ const GRANTS: Partial<Record<Role, Grant>> = {
     Knowledge: ALL,
     Scope: ALL,
     Proposal: ALL,
+    // No delete: nothing deletes an agent — disabling is how one is retired.
+    Agent: ["create", "read", "update", "run", "approve"],
   },
 
   manager: {
@@ -302,6 +315,9 @@ const GRANTS: Partial<Record<Role, Grant>> = {
     Knowledge: ["read"],
     Scope: ["read"],
     Proposal: ["read"],
+    // Reads agents and their runs. Running and resolving belong to owners
+    // and admins by role, and to managers with the Agents access switch.
+    Agent: ["read"],
   },
 
   /**

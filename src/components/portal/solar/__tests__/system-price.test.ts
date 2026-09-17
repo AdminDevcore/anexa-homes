@@ -158,3 +158,49 @@ describe("SystemPriceCard — the dealer fee on the battery", () => {
     expect(html).toContain("$72,000 for the Battery × 2 at its catalogue price.");
   });
 });
+
+/**
+ * A lease or PPA carries no system price: the save zeroes it (see
+ * `financeRowForProduct`), so an editor here took a price, said "Financing
+ * saved", and reopened on the company default. Reported 2026-09-16 on an Axess
+ * PPA as "it keeps going back to the old one".
+ */
+describe("SystemPriceCard — a lease or PPA has no system price", () => {
+  const thirdParty = {
+    canEdit: true,
+    basePpwCents: 250,
+    batteryPriceCents: 0,
+    batteryQty: 0,
+    quotedFeePct: null,
+    quotedMaxFinalPpwCents: null,
+    quotedMinBasePpwCents: null,
+    quotedLabel: "Axess Energy · Axess 30 Year PPA",
+  } satisfies Partial<Props>;
+
+  it("offers no price to edit on a PPA, and says why", () => {
+    const { html, read } = card({ ...thirdParty, quotedProduct: "ppa" });
+
+    expect(html).toContain("No system price on a PPA");
+    expect(html).toContain("per kWh");
+    expect(html).not.toContain("Edit the base price per watt");
+    expect(html).not.toContain("Reset");
+    // No gross either: a figure the deal does not keep is not its price.
+    expect(read("gross-total")).toBeNull();
+  });
+
+  it("does the same on a lease", () => {
+    const { html, read } = card({ ...thirdParty, quotedProduct: "lease" });
+
+    expect(html).toContain("No system price on a lease");
+    expect(html).not.toContain("Edit the base price per watt");
+    expect(read("gross-total")).toBeNull();
+  });
+
+  it("still opens the price on a loan", () => {
+    const { html, read } = card({ ...thirdParty, quotedProduct: "loan" });
+
+    expect(html).toContain("Edit the base price per watt");
+    expect(html).not.toContain("No system price");
+    expect(read("gross-total")).toBe(31900);
+  });
+});
