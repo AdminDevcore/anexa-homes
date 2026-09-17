@@ -142,6 +142,7 @@ describe("a PV deal is judged exactly as before", () => {
 
   it("behaves identically with no systemType at all", () => {
     // A caller not yet updated must be judged as it was: absent means pv.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- the discard IS the point: it drops systemType to build the legacy shape.
     const { systemType: _drop, ...legacy } = PV;
     expect(validateDesign(legacy as DesignForValidation, A)).toEqual(validateDesign(PV, A));
   });
