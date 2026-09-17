@@ -8,6 +8,7 @@ import {
   type PostingActor,
 } from "./posting";
 import { bucketFor, daysOverdue, emptyBucketTotals, type AgingBucket } from "./aging";
+import { SYSTEM_ACCOUNT_KEYS, systemAccountId } from "./chart";
 
 /**
  * VENDOR BILLS — what we owe, from the day the vendor billed us.
@@ -114,6 +115,37 @@ export async function createBill(input: CreateBillInput): Promise<BillResult> {
     vertical = project?.vertical ?? null;
   }
 
+  /**
+   * RESOLVE THE EXPENSE TARGET BEFORE WRITING.
+   *
+   * A caller may name the account by id or by system key — `materials` rather
+   * than a uuid only this company's chart knows. Both are accepted above, but
+   * only the id was ever persisted, so a bill given a KEY saved with a null
+   * `expenseAccountId` and then could never be posted: `postBillAccrual` reads
+   * that column and refuses with "This bill has no expense account", about a
+   * bill whose caller had supplied one. A non-draft failed on creation; a draft
+   * saved and became permanently unpostable.
+   *
+   * The key is resolved to the account id here and THAT is stored, so the bill
+   * records the account it actually landed in. Storing the key instead would
+   * mean a later edit to the chart silently re-pointed a historical bill, and
+   * would need a column that earns nothing.
+   *
+   * An unknown key fails here, before a row exists, rather than at posting time.
+   */
+  let expenseAccountId = input.expenseAccountId ?? null;
+  if (!expenseAccountId && input.expenseSystemKey) {
+    // `find` both validates the key and narrows it to SystemAccountKey.
+    const key = SYSTEM_ACCOUNT_KEYS.find((k) => k === input.expenseSystemKey);
+    if (!key) {
+      return { ok: false, error: `There is no system account called "${input.expenseSystemKey}".` };
+    }
+    expenseAccountId = await systemAccountId(input.companyId, key);
+    if (!expenseAccountId) {
+      return { ok: false, error: "That expense account is not set up on this company yet." };
+    }
+  }
+
   const bill = await prisma.bill.create({
     data: {
       companyId: input.companyId,
@@ -124,7 +156,7 @@ export async function createBill(input: CreateBillInput): Promise<BillResult> {
       billedAt: input.billedAt,
       dueAt: input.dueAt ?? null,
       projectId,
-      expenseAccountId: input.expenseAccountId ?? null,
+      expenseAccountId,
       vertical,
       memo: input.memo ?? null,
       createdById: input.actor.kind === "user" ? input.actor.userId : null,
