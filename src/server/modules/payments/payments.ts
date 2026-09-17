@@ -1,4 +1,4 @@
-import type { PaymentStatus } from "@prisma/client";
+import { Prisma, type PaymentStatus } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { verifyMfa } from "@/server/auth/mfa";
 import { payBill } from "@/server/modules/books/bills";
@@ -416,24 +416,43 @@ export async function applyPaymentEvent(args: {
       })
     : null;
 
+  /**
+   * An event about a transfer we have never heard of is answered before any
+   * write. There is no company to attribute it to, and the first version
+   * attempted the insert anyway with `companyId: ""` — which cannot satisfy the
+   * foreign key, so it always failed and was then reported by the catch below
+   * as "already had this one".
+   */
+  if (!payment) return { ok: true, applied: false, status: null };
+
   // Recorded FIRST, and the unique index is what makes redelivery safe: the
   // second attempt throws here, before anything is applied.
   try {
     await prisma.paymentEvent.create({
       data: {
-        companyId: payment?.companyId ?? "",
-        paymentId: payment?.id ?? null,
+        companyId: payment.companyId,
+        paymentId: payment.id,
         providerId: args.providerId,
         providerEventId: args.eventId,
         kind: args.kind,
         payload: args.payload as object,
       },
     });
-  } catch {
-    return { ok: true, applied: false, status: null };
+  } catch (err) {
+    /**
+     * ONLY a duplicate means "we already had this one".
+     *
+     * The first version caught everything, so ANY failure to store the event —
+     * a dropped connection, a constraint we did not anticipate — was reported
+     * as a redelivery and the event was never applied. That silently loses a
+     * settlement or a return, which are the two things this function exists to
+     * apply, and it loses them while answering success.
+     */
+    const duplicate =
+      err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
+    if (duplicate) return { ok: true, applied: false, status: null };
+    return { ok: false, error: "That event could not be recorded." };
   }
-
-  if (!payment) return { ok: true, applied: false, status: null };
   if (!args.status) return { ok: true, applied: true, status: null };
 
   if (args.status === "settled") {
