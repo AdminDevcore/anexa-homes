@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { FileBarChart } from "lucide-react";
+import { FileBarChart, Receipt, CreditCard } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { PageHeader } from "@/components/portal/ui";
@@ -51,6 +51,20 @@ export default async function BooksPage() {
             {STATEMENT_META[slug].title}
           </Link>
         ))}
+        <Link
+          href="/portal/books/receivables"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium transition-colors hover:border-gold/40 hover:bg-muted/40"
+        >
+          <Receipt className="size-4 text-gold" />
+          Receivables
+        </Link>
+        <Link
+          href="/portal/books/payables"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium transition-colors hover:border-gold/40 hover:bg-muted/40"
+        >
+          <CreditCard className="size-4 text-gold" />
+          Payables
+        </Link>
       </nav>
 
       <BooksClient data={data} canEdit={canEdit} isOwner={isOwner} />
