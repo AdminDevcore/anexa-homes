@@ -910,6 +910,104 @@ and cooling-off duration as settings rather than constants; any real provider
 adapter; and a test of the webhook ROUTE itself, as against the provider
 verification beneath it, which has 19.
 
+## Merging main, and what the merge taught (2026-09-17)
+
+Main moved 64 commits ahead of the merge base (`ea30fbb`) with the agents
+control plane, which left PR #39 unmergeable. The merge itself was additive —
+two conflicts, both of them "we each appended at the end of the same file" —
+but the way the first resolution failed is worth writing down, because the
+check that was supposed to catch it was the problem.
+
+### A model can lose its closing brace and still look present
+
+Deleting the conflict markers in `schema.prisma` also removed the two lines
+adjacent to them: `LenderFunding`'s closing `}` and the leading `// ---`
+separator of main's comment block. The model was left unterminated, so it
+swallowed main's `AgentDepartment` enum and Prisma read `permit`, `operations`
+and `accounting` as malformed *fields of LenderFunding* — six P1012 errors.
+
+It was nearly committed as verified, for two separate reasons:
+
+- The check grepped `model X {` for each expected name and found all of them.
+  That pattern still matches a model whose closing brace is gone, so it could
+  never have detected this. It answered "is the declaration line present",
+  which is not the question.
+- `prisma validate` was read through `tail -2`, which showed only the CLI
+  version banner. The error was in the output and got clipped. **Read the exit
+  code, not a slice of the log.**
+
+The replacements are cheap and actually load-bearing: brace balance across the
+whole file must be zero; the set of top-level declaration names must equal the
+union of both parents' sets exactly (218 = 218, nothing missing, nothing
+invented, nothing duplicated, main contributing exactly its six `Agent*`
+names); and `prisma validate` and `prisma generate` must both exit 0. The merge
+commit records the whole episode rather than presenting a clean resolution.
+
+### The chain was replayed from empty, which it had never been
+
+Every migration on this branch had only ever been *applied incrementally* to a
+schema that already existed. That proves less than it appears to: it never
+exercises the ordering of the full chain, and it is not what CI or a fresh
+production database do. So `vertical_books` was dropped and recreated empty and
+the whole chain replayed: **206 migrations applied, 0 failed or rolled back,
+129 tables**. Then `migrate diff` against the result reported *"This is an empty
+migration."* — the merged `schema.prisma` is exactly what the chain builds, with
+no drift in either direction.
+
+### Duplicate migration timestamps are left alone, deliberately
+
+The merged chain has five colliding timestamp prefixes. Three of them
+(`20260819030000`, `20260910020000`, `20260914000000`) were already on main and
+are applied in production; the other two are `20260916150000` (both this
+branch's) and `20260916200000`, where this branch's
+`phase5_payments_payees_mfa` meets main's `solar_finance_shortlist_ids`.
+
+The instinct was to rename this branch's migration. That would have been wrong:
+duplicate prefixes are an established pattern here, Prisma orders by the full
+directory name rather than the prefix, the colliding pairs touch unrelated
+tables, and renaming an already-applied migration orphans its row in
+`_prisma_migrations`. All five applied cleanly in the from-empty replay, which
+is the evidence that matters.
+
+### Post-merge gate results
+
+| Gate | Result |
+| --- | --- |
+| `prisma migrate diff` | empty migration — no drift |
+| `tsc --noEmit` | exit 0, zero errors |
+| Unit (`vitest run`) | 192 files, 2807 tests, exit 0 |
+| Integration | 99 files, **1288 tests**, exit 0 |
+| ESLint | 53 errors repo-wide, none introduced here (below) |
+
+Integration grew 1154 → 1288 on merging main's suites plus the ACH webhook
+route test added here.
+
+Typecheck failed once, on `croner` — main added it to `package.json` and
+`pnpm install` had not been run since the merge. The same missing module was
+also the entire cause of the two "failed" unit files, which were import
+failures rather than assertion failures (2772 tests passed, 0 failed, while two
+files could not load). `pnpm install --frozen-lockfile` succeeded, which also
+confirms main's `package.json` and lockfile are consistent.
+
+### The lint baseline, and a probe that was thrown away
+
+ESLint reports 53 errors across 21 files. Exactly one of those files is one this
+branch touched: `bookkeeping-client.tsx`, one
+`react-hooks/set-state-in-effect` at line 629.
+
+The first attempt to clear it copied main's version of the file to a scratch
+directory and linted it there, which reported zero errors. **That result was
+discarded rather than used.** ESLint resolves its config from the file's
+location, so a file sitting outside the repo gets a different config — "zero
+errors" there most likely means *no rules ran*, not *no violations*. It would
+have cleared the finding on worthless evidence.
+
+What settles it instead does not depend on lint config at all: the flagged block
+is byte-identical to code in `origin/main` at line 652, and this branch's entire
+diff on that file is one `lucide-react` import line plus 68 deletions — no
+statement was added anywhere near it, only line numbers moved. The rule fires
+12 times across the repo in files this branch never touched. Pre-existing.
+
 ## Not decided yet
 
 These decisions leave some questions open. Settle each one before the phase that
