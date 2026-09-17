@@ -1,3 +1,4 @@
+import type { Role } from "@prisma/client";
 import { prisma } from "@/server/db/client";
 import { encryptField, decryptField } from "@/server/lib/crypto";
 import {
@@ -268,20 +269,42 @@ export async function regenerateRecoveryCodes(args: {
  * Remove a confirmed factor — the lost-phone path.
  *
  * Deliberately takes the acting user separately from the subject: this is an
- * OWNER action performed for somebody else, and the caller is responsible for
- * checking that. A user cannot quietly remove their own factor, because then
- * anyone with a live session could strip the control before moving money.
+ * OWNER action performed for somebody else. A user cannot quietly remove their
+ * own factor, because then anyone with a live session could strip the control
+ * before moving money.
+ *
+ * BOTH REMAINING RULES ARE ENFORCED HERE RATHER THAN AT THE CALLER, and the
+ * previous version of this comment is why. It said the caller was responsible
+ * for checking that the actor was an owner — a responsibility nobody had ever
+ * discharged, because until the team action landed this function had NO caller
+ * at all. A rule that lives in the caller is a rule the next caller forgets.
  */
 export async function resetEnrollment(args: {
+  companyId: string;
   userId: string;
   actorUserId: string;
-}): Promise<{ ok: true } | { ok: false; error: string }> {
+  actorRole: Role;
+}): Promise<{ ok: true; removed: boolean } | { ok: false; error: string }> {
   if (args.userId === args.actorUserId) {
     return {
       ok: false,
       error: "Ask an owner to remove your authenticator. You cannot remove your own.",
     };
   }
-  await prisma.userMfa.deleteMany({ where: { userId: args.userId } });
-  return { ok: true };
+
+  // OWNER-ONLY. `can(…, "update", "User")` also admits an admin, and this is the
+  // control that guards money movement, so the narrower rule is stated where
+  // every future caller inherits it — as the period lock and the year-end close
+  // both do with their own owner checks.
+  if (args.actorRole !== "super_admin") {
+    return { ok: false, error: "Only an owner can remove someone's authenticator." };
+  }
+
+  // SCOPED BY COMPANY. This filtered on userId alone, which meant an owner at
+  // one company could clear a second factor belonging to another company's user
+  // — a cross-tenant delete that only stayed harmless while nothing called it.
+  const { count } = await prisma.userMfa.deleteMany({
+    where: { userId: args.userId, companyId: args.companyId },
+  });
+  return { ok: true, removed: count > 0 };
 }

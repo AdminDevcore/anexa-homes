@@ -242,17 +242,59 @@ describe("removing a factor", () => {
    * money, and the factor protects nothing. */
   it("refuses to let somebody remove their own", async () => {
     await enrol();
-    const res = await resetEnrollment({ userId, actorUserId: userId });
+    const res = await resetEnrollment({ companyId, userId, actorUserId: userId, actorRole: "super_admin" });
     expect(res.ok).toBe(false);
     expect(await isMfaEnrolled(userId)).toBe(true);
   });
 
   it("lets somebody else remove it — the lost-phone path", async () => {
     await enrol();
-    const res = await resetEnrollment({ userId, actorUserId: otherUserId });
+    const res = await resetEnrollment({
+      companyId, userId, actorUserId: otherUserId, actorRole: "super_admin",
+    });
     expect(res.ok).toBe(true);
+    if (res.ok) expect(res.removed, "it reported removing nothing").toBe(true);
     expect(await isMfaEnrolled(userId)).toBe(false);
     // And the codes went with it.
     expect(await mfaStatus(userId)).toMatchObject({ recoveryCodesRemaining: 0 });
+  });
+
+  /**
+   * `can(…, "update", "User")` admits an admin as well as the owner, and this is
+   * the control that guards money movement — so the narrower rule lives in the
+   * module rather than holding only for as long as each caller restates it.
+   */
+  it("refuses anyone who is not the owner", async () => {
+    await enrol();
+    const res = await resetEnrollment({
+      companyId, userId, actorUserId: otherUserId, actorRole: "admin",
+    });
+    expect(res.ok).toBe(false);
+    expect(await isMfaEnrolled(userId), "an admin stripped a second factor").toBe(true);
+  });
+
+  /**
+   * The delete filtered on userId alone. Nothing had ever crossed a tenant
+   * boundary with it only because the function had no caller at all; the first
+   * one would have. A real second company, so this tests the boundary rather
+   * than a WHERE clause against an id that matches nothing anyway.
+   */
+  it("cannot reach a user in another company", async () => {
+    await enrol();
+    const other = await db.company.create({
+      data: { name: "Other Co", slug: `mfa-other-${process.pid}-${Date.now()}-${rand()}` },
+    });
+
+    const res = await resetEnrollment({
+      companyId: other.id,
+      userId,
+      actorUserId: otherUserId,
+      actorRole: "super_admin",
+    });
+
+    // It succeeds having deleted nothing, which is exactly the point.
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.removed, "a cross-tenant delete matched a row").toBe(false);
+    expect(await isMfaEnrolled(userId), "a factor was removed from another company").toBe(true);
   });
 });
