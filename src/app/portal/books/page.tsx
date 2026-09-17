@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { FileBarChart, Receipt, CreditCard } from "lucide-react";
+import { FileBarChart, Receipt, CreditCard, Send } from "lucide-react";
 import { requireUser } from "@/server/auth/session";
 import { can } from "@/server/rbac/guards";
 import { PageHeader } from "@/components/portal/ui";
@@ -25,6 +25,10 @@ export default async function BooksPage() {
   const data = await getBooksOverview(user.companyId);
   const canEdit = can(user, "update", "Bookkeeping");
   const isOwner = user.role === "super_admin";
+  // Payments is a separate resource from Bookkeeping — reading the books and
+  // moving money are different powers — so the link is drawn only for someone
+  // the payments page will actually admit.
+  const canPay = can(user, "read", "Payment");
 
   return (
     <div className="space-y-6">
@@ -65,6 +69,15 @@ export default async function BooksPage() {
           <CreditCard className="size-4 text-gold" />
           Payables
         </Link>
+        {canPay && (
+          <Link
+            href="/portal/books/payments"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium transition-colors hover:border-gold/40 hover:bg-muted/40"
+          >
+            <Send className="size-4 text-gold" />
+            Payments
+          </Link>
+        )}
       </nav>
 
       <BooksClient data={data} canEdit={canEdit} isOwner={isOwner} />
