@@ -46,10 +46,21 @@ async function openADotDetail(page: Page) {
       if (!clicked) continue;
       // Wait for the detail card's content to actually render (not just an empty
       // dialog shell whose fetch is still in flight under parallel load).
-      const ready = await page
-        .getByRole("dialog")
-        .getByText("Estimated property value")
-        .isVisible({ timeout: 10000 })
+      //
+      // MUST be toBeVisible, not isVisible({ timeout }). isVisible() reports the
+      // CURRENT state and returns in ~2ms; its timeout option is inert. Used as a
+      // readiness check it fired before the property-value fetch resolved (~800ms),
+      // returned false every time, and only ever "passed" when a previous
+      // iteration had left a populated dialog on screen. That made the outcome
+      // depend on how many pins the loop had to retry: a rep sees 7 and got there
+      // by luck, a manager sees 3 (knockScope grants blank pins only in their own
+      // territories) and never did — which read as a manager-only product bug for
+      // three months and was not one.
+      const ready = await expect(
+        page.getByRole("dialog").getByText("Estimated property value"),
+      )
+        .toBeVisible({ timeout: 10000 })
+        .then(() => true)
         .catch(() => false);
       if (ready) return;
     }
