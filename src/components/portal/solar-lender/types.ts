@@ -44,9 +44,9 @@ export type LenderRow = {
    * cents, dealer fee and adders included. Null — nearly every lender — leaves
    * pricing exactly as it was.
    */
-  maxFinalPpwCents: number | null;
+  priceRulePpwCents: number | null;
   /** Whether that figure is a ceiling or this partner's flat price. */
-  finalPpwMode: "cap" | "flat";
+  priceRuleMode: "cap" | "flat";
   /**
    * What this partner hands back for signing today, and how it is arrived at.
    * `none` — every lender until somebody sets a rule — leaves it to the rep to
@@ -61,8 +61,8 @@ export type LenderRow = {
    */
   minBasePpwCents: number | null;
   minBasePricePerBatteryCents: number | null;
-  maxFinalPricePerBatteryCents: number | null;
-  finalBatteryPriceMode: "cap" | "flat";
+  priceRulePerBatteryCents: number | null;
+  priceRuleBatteryMode: "cap" | "flat";
   /**
    * Whether this partner funds an array with no storage on it. `warn` is what
    * every lender did before the column existed.
@@ -322,15 +322,15 @@ export function draftFrom(lender: LenderRow) {
       lender.fieldMap.map((m) => [m.wireField, { sourceKey: m.sourceKey, literal: m.literal ?? "" }])
     ) as Record<string, { sourceKey: string | null; literal: string }>,
     batteryPayMode: lender.batteryPayMode,
-    ppwMode: (lender.maxFinalPpwCents == null
+    ppwMode: (lender.priceRulePpwCents == null
       ? "normal"
-      : lender.finalPpwMode) as PricingMode,
-    maxFinalPpw: ppwToDollars(lender.maxFinalPpwCents),
+      : lender.priceRuleMode) as PricingMode,
+    maxFinalPpw: ppwToDollars(lender.priceRulePpwCents),
     minBasePpw: ppwToDollars(lender.minBasePpwCents),
-    batteryMode: (lender.maxFinalPricePerBatteryCents == null
+    batteryMode: (lender.priceRulePerBatteryCents == null
       ? "normal"
-      : lender.finalBatteryPriceMode) as PricingMode,
-    maxFinalBattery: batteryPriceToDollars(lender.maxFinalPricePerBatteryCents),
+      : lender.priceRuleBatteryMode) as PricingMode,
+    maxFinalBattery: batteryPriceToDollars(lender.priceRulePerBatteryCents),
     minBaseBattery: batteryPriceToDollars(lender.minBasePricePerBatteryCents),
     /**
      * Which price the figures above fix, programme by programme. Keyed by

@@ -13,7 +13,7 @@ import type { AccessUser } from "@/server/rbac/guards";
  * with them.
  *
  * That last part is the sharp end. `SolarDealComp` correctly freezes the pay
- * RATES at signing, but a redline is measured against `basePriceCents`, which
+ * RATES at signing, but a redline is measured against `baseKeptCents`, which
  * payroll recomputes live from `SolarFinance` on every run. Raising the price
  * after signature therefore raised the rep's own commission, on their own deal,
  * with no lock and no trail.

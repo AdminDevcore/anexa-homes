@@ -1,6 +1,7 @@
 import { prisma } from "@/server/db/client";
 import { getSolarSettings } from "./settings";
 import { builderHref, validateProposalReadiness, type ValidationIssue } from "@/lib/solar-validation";
+import { resolveDealerFee } from "@/lib/solar-dealer-fee";
 
 /**
  * The one readiness computation, shared by the builder's check button and by
@@ -109,9 +110,29 @@ export async function readSolarReadiness(
           factorWithPaydownMicros: true,
           factorWithoutPaydownMicros: true,
           financesStorageOnly: true,
+          // The fee the deal is actually PRICED at — see the resolution below.
+          dealerFeePct: true,
         },
       })
     : null;
+
+  /**
+   * THE ONE FEE RULE (D8), asked here for the same reason it is asked in
+   * generation: the floor below is measured on what survives the fee, so
+   * readiness and pricing have to be measuring the same one.
+   *
+   * They were not. This read `finance.dealerFeePct` — the copy cached on the
+   * deal — while `financeRowForProduct` priced from the programme's current
+   * rate. On production that is a 65% cached against a programme publishing 0%,
+   * so `pricing.below_lender_floor` was refusing five deals on a number no
+   * other part of the system used.
+   */
+  const dealerFee = resolveDealerFee({
+    product: finance.product,
+    programmePct: quotedProduct?.dealerFeePct,
+    dealPct: finance.dealerFeePct,
+    companyDefaultPct: assumptions.defaultDealerFeePct,
+  });
 
   const productIssues: ValidationIssue[] = [];
   if (finance.product !== "cash" && !finance.lenderProductId && design.lenderId) {
@@ -170,7 +191,7 @@ export async function readSolarReadiness(
       },
       finance: {
         systemType: design.systemType,
-        stickerPricePerBatteryCents: finance.stickerPricePerBatteryCents,
+        stickerPricePerBatteryCents: finance.baseFinalPerBatteryCents,
         batteryQty: design.batteryQty,
         minBasePricePerBatteryCents: design.lender?.minBasePricePerBatteryCents ?? null,
         // Whether the QUOTED programme funds a storage-only job. Undefined when
@@ -178,15 +199,15 @@ export async function readSolarReadiness(
         // an unpriced deal already has its own.
         financesStorageOnly: quotedProduct?.financesStorageOnly,
         product: finance.product,
-        grossPpwCents: finance.grossPpwCents,
-        dealerFeePct: finance.dealerFeePct,
-        contractPriceCents: finance.contractPriceCents,
+        grossPpwCents: finance.baseFinalPpwCents,
+        dealerFeePct: dealerFee.pct,
+        contractPriceCents: finance.finalPriceCents,
         rateMillsPerKwh: finance.rateMillsPerKwh,
-        monthlyPaymentCents: finance.monthlyPaymentCents,
+        monthlyPaymentCents: finance.leasePaymentCents,
         escalatorPct: finance.escalatorPct,
         termYears: finance.termYears,
         downPaymentCents: finance.downPaymentCents,
-        loanMonthlyPaymentCents: finance.loanMonthlyPaymentCents,
+        loanMonthlyPaymentCents: finance.lenderMonthlyPaymentCents,
         aprPct: finance.aprPct,
         loanTermMonths: finance.loanTermMonths,
         minBasePpwCents: design.lender?.minBasePpwCents ?? null,

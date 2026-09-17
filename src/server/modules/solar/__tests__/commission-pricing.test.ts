@@ -3,6 +3,7 @@ import {
   commissionMeasure,
   compareWithSignedDocument,
   measureFromSignedDocument,
+  derivedPrice,
 } from "../commission-pricing";
 
 /**
@@ -11,10 +12,10 @@ import {
  * `pricing-stage1.itest.ts`.
  */
 
-const live = { systemWatts: 10_000, basePriceCents: 3_000_000, batteryQty: 1 };
+const live = { systemWatts: 10_000, baseKeptCents: 3_000_000, batteryQty: 1 };
 const frozen = {
   systemWatts: 9_600,
-  basePriceCents: 2_880_000,
+  baseKeptCents: 2_880_000,
   batteryQty: 1,
   pricedAt: new Date("2026-09-15T12:00:00Z"),
 };
@@ -23,24 +24,24 @@ describe("commissionMeasure", () => {
   it("reads the copy frozen at signing over the live deal", () => {
     expect(commissionMeasure(live, frozen)).toEqual({
       systemWatts: 9_600,
-      basePriceCents: 2_880_000,
+      baseKeptCents: 2_880_000,
       batteryQty: 1,
       frozen: true,
     });
   });
 
   it("still pays on the frozen copy when the live deal can no longer be priced", () => {
-    expect(commissionMeasure(null, frozen)?.basePriceCents).toBe(2_880_000);
+    expect(commissionMeasure(null, frozen)?.baseKeptCents).toBe(2_880_000);
   });
 
   it("reads the live deal until a measure is frozen", () => {
-    const unfrozen = { systemWatts: null, basePriceCents: null, batteryQty: null, pricedAt: null };
+    const unfrozen = { systemWatts: null, baseKeptCents: null, batteryQty: null, pricedAt: null };
     expect(commissionMeasure(live, unfrozen)).toEqual({ ...live, frozen: false });
     expect(commissionMeasure(live, null)).toEqual({ ...live, frozen: false });
   });
 
   it("does not treat a half-written row as frozen", () => {
-    expect(commissionMeasure(live, { ...frozen, basePriceCents: null })?.frozen).toBe(false);
+    expect(commissionMeasure(live, { ...frozen, baseKeptCents: null })?.frozen).toBe(false);
     expect(commissionMeasure(live, { ...frozen, pricedAt: null })?.frozen).toBe(false);
   });
 
@@ -50,7 +51,7 @@ describe("commissionMeasure", () => {
 });
 
 describe("compareWithSignedDocument", () => {
-  const deal = { systemType: "pv_storage" as const, systemWatts: 10_000, batteryQty: 1, finalPriceCents: 6_493_333 };
+  const deal = { systemType: "pv_storage" as const, systemWatts: 10_000, batteryQty: 1, finalPriceCents: derivedPrice(6_493_333) };
   const document = {
     financing: { contractPriceCents: 6_493_333, batteryQty: 1 },
     system: { sizeKwDc: 10 },
@@ -61,7 +62,7 @@ describe("compareWithSignedDocument", () => {
   });
 
   it("names every figure that moved", () => {
-    const moved = { ...deal, systemWatts: 10_400, batteryQty: 2, finalPriceCents: 6_600_000 };
+    const moved = { ...deal, systemWatts: 10_400, batteryQty: 2, finalPriceCents: derivedPrice(6_600_000) };
     const result = compareWithSignedDocument(moved, document);
     expect(result.matches).toBe(false);
     expect(result.differences).toEqual([
@@ -72,7 +73,7 @@ describe("compareWithSignedDocument", () => {
   });
 
   it("reads a storage job's batteries from its storage block and never compares watts", () => {
-    const storage = { systemType: "storage" as const, systemWatts: 0, batteryQty: 2, finalPriceCents: 4_800_000 };
+    const storage = { systemType: "storage" as const, systemWatts: 0, batteryQty: 2, finalPriceCents: derivedPrice(4_800_000) };
     const storageDocument = {
       financing: { contractPriceCents: 4_800_000 },
       system: { sizeKwDc: 7.2 }, // a stale size left on the design
@@ -104,7 +105,7 @@ describe("measureFromSignedDocument", () => {
   it("measures on the document's base with the deal's fee taken out of it", () => {
     expect(measureFromSignedDocument(document, loan)).toEqual({
       systemWatts: 10_000,
-      basePriceCents: 2_250_000,
+      baseKeptCents: 2_250_000,
       batteryQty: 1,
     });
   });
@@ -112,13 +113,13 @@ describe("measureFromSignedDocument", () => {
   it("takes no fee out of a cash deal, whatever the row carries", () => {
     expect(
       measureFromSignedDocument(document, { ...loan, product: "cash", dealerFeePct: 25 })
-        ?.basePriceCents
+        ?.baseKeptCents
     ).toBe(3_000_000);
   });
 
   it("stands a fee down rather than making nonsense of it", () => {
     for (const dealerFeePct of [0, 100, Number.NaN]) {
-      expect(measureFromSignedDocument(document, { ...loan, dealerFeePct })?.basePriceCents).toBe(
+      expect(measureFromSignedDocument(document, { ...loan, dealerFeePct })?.baseKeptCents).toBe(
         3_000_000
       );
     }
@@ -134,7 +135,7 @@ describe("measureFromSignedDocument", () => {
         },
         { ...loan, systemType: "storage" }
       )
-    ).toEqual({ systemWatts: 0, basePriceCents: 3_000_000, batteryQty: 2 });
+    ).toEqual({ systemWatts: 0, baseKeptCents: 3_000_000, batteryQty: 2 });
   });
 
   it("reads nothing off a document that carries no priced figures", () => {

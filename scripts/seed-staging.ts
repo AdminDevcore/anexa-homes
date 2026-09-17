@@ -234,8 +234,8 @@ async function main() {
       companyId: company.id,
       leadId: lead.id,
       product: "cash",
-      grossPpwCents: 350,
-      contractPriceCents: 8 * 1000 * 350,
+      baseFinalPpwCents: 350,
+      finalPriceCents: 8 * 1000 * 350,
     },
     update: {},
   });

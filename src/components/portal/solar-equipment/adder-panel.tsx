@@ -48,7 +48,7 @@ type Draft = {
   autoApply: boolean;
   minKw: string;
   maxKw: string;
-  financedOnTop: boolean;
+  outsidePriceRule: boolean;
 };
 
 const seed = (a: AdderItem): Draft => ({
@@ -61,7 +61,7 @@ const seed = (a: AdderItem): Draft => ({
   autoApply: a.autoApplyMinKw != null || a.autoApplyMaxKw != null,
   minKw: a.autoApplyMinKw != null ? String(a.autoApplyMinKw) : "",
   maxKw: a.autoApplyMaxKw != null ? String(a.autoApplyMaxKw) : "",
-  financedOnTop: a.financedOnTop,
+  outsidePriceRule: a.outsidePriceRule,
 });
 
 /** What each way of pricing actually does on a deal. */
@@ -129,7 +129,7 @@ export function AdderPanel({
     draft.minKw.trim() !== "" &&
     draft.maxKw.trim() !== "" &&
     Number(draft.minKw) >= Number(draft.maxKw);
-  const discountOnTop = draft.financedOnTop && draft.basis === "discount";
+  const discountOnTop = draft.outsidePriceRule && draft.basis === "discount";
   const blocked = noRate || noPrice || badBand || discountOnTop || draft.label.trim() === "";
 
   async function act(fn: () => Promise<{ ok: boolean; error?: string }>, okMsg: string) {
@@ -174,7 +174,7 @@ export function AdderPanel({
         // leave a band behind that keeps firing.
         autoApplyMinKw: draft.autoApply && draft.minKw.trim() !== "" ? Number(draft.minKw) : null,
         autoApplyMaxKw: draft.autoApply && draft.maxKw.trim() !== "" ? Number(draft.maxKw) : null,
-        financedOnTop: draft.financedOnTop,
+        outsidePriceRule: draft.outsidePriceRule,
       });
       if (!res.ok) return toast.error(res.error, { duration: 9000 });
       toast.success(`${draft.label.trim()} saved`);
@@ -203,7 +203,7 @@ export function AdderPanel({
             </Pill>
             <Pill>{ADDER_BASES[adder.basis].label}</Pill>
             {band && <Pill tone="solar">auto · {band}</Pill>}
-            {adder.financedOnTop && <Pill tone="solar">on top of a fixed price</Pill>}
+            {adder.outsidePriceRule && <Pill tone="solar">on top of a fixed price</Pill>}
             {rank != null && (
               <Pill>
                 #{rank} of {of}
@@ -287,7 +287,7 @@ export function AdderPanel({
             Rules
             {(adder.autoApplyMinKw != null ||
               adder.autoApplyMaxKw != null ||
-              adder.financedOnTop) && <span className="size-1.5 rounded-full bg-solar" aria-hidden />}
+              adder.outsidePriceRule) && <span className="size-1.5 rounded-full bg-solar" aria-hidden />}
           </TabsTrigger>
         </TabsList>
 
@@ -326,7 +326,7 @@ export function AdderPanel({
                   <StatRow label="Auto-applies" value={band ?? "no"} />
                   <StatRow
                     label="On top of a fixed price"
-                    value={adder.financedOnTop ? "yes" : "no"}
+                    value={adder.outsidePriceRule ? "yes" : "no"}
                   />
                   <StatRow label="Selling order" value={rank == null ? "retired" : `#${rank}`} />
                 </dl>
@@ -446,13 +446,13 @@ export function AdderPanel({
 
           <Panel
             title="Financed on top of a fixed price"
-            tone={draft.financedOnTop ? "accent" : "plain"}
+            tone={draft.outsidePriceRule ? "accent" : "plain"}
           >
             <ToggleRow
               label="Added above the partner's rate"
               description="For work a partner funds above its fixed or maximum $/W — a roof. The dealer fee still applies to it."
-              checked={draft.financedOnTop}
-              onChange={(v) => set("financedOnTop", v)}
+              checked={draft.outsidePriceRule}
+              onChange={(v) => set("outsidePriceRule", v)}
             />
             <Hint>
               On a lender with a fixed or maximum $/W this is added on top of that rate instead of

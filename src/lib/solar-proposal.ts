@@ -1,11 +1,9 @@
 import type { FinanceProduct } from "@prisma/client";
 import { factorQuote, factorMonthlyCents, hasPaymentFactor, type PaymentFactors } from "./solar-loan";
 import { resolveUtilityRateMills } from "./solar-energy";
+import { withoutDealerFee } from "./solar-lender-product";
 import {
   apportionCents,
-  pricePurchase,
-  priceStoragePurchase,
-  purchaseFromUnits,
   priceThirdParty,
   productionInYear,
   loanPaymentCents,
@@ -14,6 +12,7 @@ import {
   type PurchaseBreakdown,
   type ThirdPartyBreakdown,
 } from "./solar-money";
+import { priceDeal } from "./solar-price-deal";
 import { resolveSignToday, type SignTodayRule } from "@/lib/solar-sign-today";
 import {
   buildCreditLadder,
@@ -329,7 +328,7 @@ export function savingsModel(args: {
   purchase?: PurchaseBreakdown;
   thirdParty?: ThirdPartyBreakdown;
   ppaRateMills?: number | null;
-  leaseMonthlyCents?: number | null;
+  leasePaymentCents?: number | null;
   escalatorPct?: number | null;
   termYears?: number | null;
   assumptions: SolarAssumptions;
@@ -538,7 +537,7 @@ export function savingsModel(args: {
         solarPaymentCents =
           args.product === "ppa"
             ? Math.round((production * (args.ppaRateMills ?? 0) * esc) / 10)
-            : Math.round((args.leaseMonthlyCents ?? 0) * 12 * esc);
+            : Math.round((args.leasePaymentCents ?? 0) * 12 * esc);
       }
     }
 
@@ -707,10 +706,10 @@ export type YieldBasis = {
 export type SnapshotFinancing = {
   product: FinanceProduct;
   /** Cash/loan only. */
-  contractPriceCents: number | null;
-  grossPpwCents: number | null;
-  basePriceCents: number | null;
-  adderTotalCents: number | null;
+  finalPriceCents: number | null;
+  baseFinalPpwCents: number | null;
+  baseFinalCents: number | null;
+  addersFinalCents: number | null;
   /**
    * The extra work, named, as it was priced on the day.
    *
@@ -750,13 +749,13 @@ export type SnapshotFinancing = {
    * on every document generated before storage was charged for, which reads as
    * none — exactly what those documents were priced with.
    */
-  batteryPriceCents?: number;
+  equipmentFinalCents?: number;
   /** What that money buys, named the way the System chapter names it. */
   batteryLabel?: string;
   batteryQty?: number;
   finalPpwCents: number | null;
   /** Lease/PPA only. */
-  monthlyPaymentCents: number | null;
+  leasePaymentCents: number | null;
   rateMillsPerKwh: number | null;
   escalatorPct: number | null;
   termYears: number | null;
@@ -818,7 +817,7 @@ export type SnapshotFinancing = {
    * deal was written on, and a catalogue row can be renamed or retired long
    * before anybody goes looking for it.
    */
-  lenderProductLabel?: string | null;
+  programmeLabel?: string | null;
   /**
    * WHAT THE CUSTOMER IS FINANCING. v6 and later.
    *
@@ -992,7 +991,7 @@ export function optionSavings(o: ProposalPaymentOption, creditsApplied: boolean)
  * price is still what the system is being sold for.
  */
 export function quotedTotalCents(f: SnapshotFinancing): number | null {
-  return f.creditLadder ? f.creditLadder.quotedPriceCents : f.contractPriceCents;
+  return f.creditLadder ? f.creditLadder.quotedPriceCents : f.finalPriceCents;
 }
 
 /**
@@ -1029,8 +1028,13 @@ export type SolarProposalSnapshot = {
    * v8 models each option's horizon TWICE — with the household's credits
    * claimed and without — so the document's tax-credit switch moves the
    * year-by-year table with the headline instead of only the headline.
+   * v9 RESPELLS the price keys and adds nothing: `contractPriceCents` became
+   * `finalPriceCents`, and four others with it, so a key says WHAT a figure is
+   * instead of where it once sat in the arithmetic. No number moved. Every
+   * document written before this still carries the old spellings and is
+   * translated on the way out by `readProposalSnapshot`.
    */
-  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
   /**
    * Which revision of the pricing arithmetic produced these figures.
    *
@@ -1279,6 +1283,153 @@ export type SolarProposalSnapshot = {
 };
 
 /**
+ * The price keys as they were spelled before v9, paired with what they are
+ * called now.
+ *
+ * TWO LEGACY SPELLINGS CAN SHARE ONE CURRENT KEY — the lease payment has been
+ * called three things — so the pairs are applied in order and the FIRST one
+ * present wins. `monthlyPaymentCents` is the older of the two and is listed
+ * first for that reason; a document carrying both (nothing writes one) is
+ * answered by it.
+ */
+const LEGACY_FINANCING_KEYS = [
+  ["contractPriceCents", "finalPriceCents"],
+  ["grossPpwCents", "baseFinalPpwCents"],
+  ["basePriceCents", "baseFinalCents"],
+  ["adderTotalCents", "addersFinalCents"],
+  ["batteryPriceCents", "equipmentFinalCents"],
+  ["monthlyPaymentCents", "leasePaymentCents"],
+  // v9 as first shipped called it this; renamed once the FUNCTION of the same
+  // name in solar-money.ts made the spelling ambiguous at every call site.
+  ["leaseMonthlyCents", "leasePaymentCents"],
+  // The rate-sheet row a document was quoted from. Renamed away from
+  // `lenderProductLabel` for the same reason: that name is a FUNCTION.
+  ["lenderProductLabel", "programmeLabel"],
+] as const;
+
+/**
+ * A STORED DOCUMENT, READ THROUGH ONE DOOR.
+ *
+ * Every snapshot in the database was written by the builder of its day, and v9
+ * respelled the price keys. The documents already signed DO NOT CHANGE: a
+ * frozen page is the household's copy of what they agreed to, and rewriting one
+ * to suit a later vocabulary is the single thing a snapshot exists to prevent.
+ *
+ * So the translation happens on the way OUT, here, at the one place a stored
+ * snapshot becomes a typed one. A pre-v9 document read through this function
+ * answers to today's names; a v9 document passes through untouched; and a row
+ * carrying both spellings — which nothing writes, but a hand-edited row could —
+ * is answered by the current one, because that is the one a writer meant last.
+ *
+ * `schemaVersion` IS NOT RESTAMPED. It records the shape the document was
+ * WRITTEN in, renderers still branch on it, and a v7 page relabelled v9 would
+ * be a document claiming to be something it is not. This function changes how a
+ * key is spelled on the way to a caller, never what the stored row says it is.
+ *
+ * NOT OPTIONAL AT THE CALL SITE. The stored JSON is `unknown` as far as the
+ * compiler is concerned, so a reader that goes straight to `financing` type-
+ * checks perfectly and then reads `undefined` off every document written before
+ * this release. That failure is invisible to `tsc` and visible only in a test,
+ * which is exactly how it was found.
+ *
+ * RETURNS NULL for a row holding no document. `SolarProposal.snapshot` is a
+ * required column, so the callers reading one of those rows assert the result —
+ * exactly as the double cast this replaced already did, only visibly — while
+ * the callers that genuinely branch on absence keep their own null check.
+ */
+export function readProposalSnapshot(raw: unknown): SolarProposalSnapshot | null {
+  if (raw == null) return null;
+  if (typeof raw !== "object") return raw as SolarProposalSnapshot;
+
+  const snapshot = raw as Record<string, unknown>;
+  const financing = respellFinancing(snapshot.financing);
+
+  /**
+   * EVERY OPTION CARRIES ITS OWN COPY of the same block — `options[].financing`
+   * is a whole `SnapshotFinancing`, not a reference to the one above — and the
+   * payment menu on the customer's page reads it there. Translating only the
+   * top level leaves a legacy document rendering a menu of empty prices, which
+   * is the homeowner-facing half of this bug and the half no fixture had.
+   */
+  const storedOptions = snapshot.options;
+  let options: unknown[] | null = null;
+  if (Array.isArray(storedOptions)) {
+    let touched = false;
+    const next = storedOptions.map((option) => {
+      if (option == null || typeof option !== "object") return option;
+      const o = option as Record<string, unknown>;
+      const respelled = respellFinancing(o.financing);
+      /**
+       * The option's own menu label is a SIBLING of `financing`, not a key
+       * inside it, so `respellFinancing` above never sees it — and it is the
+       * string the payment menu actually prints. It carries the same frozen
+       * dealer fee and comes off the same way.
+       */
+      const label = typeof o.label === "string" ? withoutDealerFee(o.label) : o.label;
+      const relabelled = label !== o.label;
+      if (!respelled && !relabelled) return option;
+      touched = true;
+      return {
+        ...o,
+        ...(respelled ? { financing: respelled } : {}),
+        ...(relabelled ? { label } : {}),
+      };
+    });
+    if (touched) options = next;
+  }
+
+  // A v9 document is handed back as it came, rather than as a copy: nothing was
+  // translated, and a needless clone of a large frozen object helps no one.
+  if (!financing && !options) return raw as SolarProposalSnapshot;
+  return {
+    ...snapshot,
+    ...(financing ? { financing } : {}),
+    ...(options ? { options } : {}),
+  } as unknown as SolarProposalSnapshot;
+}
+
+/**
+ * One financing block with its price keys respelled, or null when there was
+ * nothing to respell — which lets each caller hand back the object it was given
+ * rather than an equal copy.
+ */
+function respellFinancing(financing: unknown): Record<string, unknown> | null {
+  if (financing == null || typeof financing !== "object") return null;
+  const next = { ...(financing as Record<string, unknown>) };
+  let respelled = false;
+  for (const [legacy, current] of LEGACY_FINANCING_KEYS) {
+    if (!(legacy in next)) continue;
+    if (next[current] === undefined) next[current] = next[legacy];
+    delete next[legacy];
+    respelled = true;
+  }
+
+  /**
+   * THE DEALER FEE COMES OFF THE PROGRAMME LABEL HERE, not in the renderer.
+   *
+   * A document frozen before `customerProductLabel` existed carries labels like
+   * "25 yr · 6.99% · fee 18%", and the fee is what the LENDER charges US — it
+   * is inside the price the household was quoted and is not a line they are
+   * ever shown. Three renderers were each taking it off on the way to the
+   * screen, which meant a fourth would print it.
+   *
+   * Stripping on the way out of the one door fixes every reader at once, and it
+   * is safe to do unconditionally: a label with no fee in it is returned
+   * unchanged, so a v9 document still takes the fast path below.
+   */
+  const label = next.programmeLabel;
+  if (typeof label === "string") {
+    const stripped = withoutDealerFee(label);
+    if (stripped !== label) {
+      next.programmeLabel = stripped;
+      respelled = true;
+    }
+  }
+
+  return respelled ? next : null;
+}
+
+/**
  * Which revision of the pricing arithmetic a document was built by.
  *
  * BUMP THIS when the maths that turns a design and a rate sheet into the
@@ -1396,7 +1547,7 @@ export type ProposalAlternative = {
   lenderApplyUrl?: string | null;
   loanFactors?: PaymentFactors | null;
   /** The rate-sheet row's own name, frozen for the funder's paperwork. */
-  lenderProductLabel?: string | null;
+  programmeLabel?: string | null;
   /**
    * THIS option's partner's sign-today rule.
    *
@@ -1439,7 +1590,7 @@ function priceOption(args: {
   lenderLogoUrl: string | null;
   lenderApplyUrl: string | null;
   loanFactors: PaymentFactors | null;
-  lenderProductLabel?: string | null;
+  programmeLabel?: string | null;
   /**
    * The company's federal-credit percentages, and which of them THIS deal
    * earns.
@@ -1475,31 +1626,34 @@ function priceOption(args: {
   const isPurchase = finance.product === "cash" || finance.product === "loan";
   const isStorage = args.systemType === "storage";
 
-  const purchase = !isPurchase
+  /**
+   * THE ONE PRICED DEAL THIS DOCUMENT IS BUILT FROM.
+   *
+   * `priceDeal()` rather than the two primitives this called before: one
+   * function for the array and for the batteries, so a storage document and a
+   * PV one climb the same ladder and cannot round differently from each other.
+   *
+   * NO PARTNER RULE IS PASSED, and that is deliberate. The ceiling was applied
+   * upstream in `proposal-generate.ts`, which caps and WRITES BACK, so the
+   * sticker arriving here is already the capped one. Handing the rule to
+   * `priceDeal` would solve the cap a second time against a figure that has
+   * already had it applied. `solar-no-rule-equivalence.test.ts` pins that a
+   * no-rule price is identical to what `pricePurchase` returned here before.
+   */
+  const deal = !isPurchase
     ? undefined
-    : isStorage
-      ? // Same ladder, counted in batteries. `purchaseFromUnits` renames the
-        // answer so everything downstream — the savings model, the menu, the
-        // customer's own breakdown — reads it exactly as it reads a PV one.
-        purchaseFromUnits(
-          priceStoragePurchase({
-            product: finance.product as "cash" | "loan",
-            batteryQty: design.batteryQty,
-            stickerPricePerBatteryCents: finance.stickerPricePerBatteryCents ?? 0,
-            dealerFeePct: finance.dealerFeePct,
-            adderTotalCents: finance.adderTotalCents,
-            onTopAdderTotalCents: finance.onTopAdderTotalCents ?? 0,
-          })
-        )
-      : pricePurchase({
-          product: finance.product as "cash" | "loan",
-          systemSizeKwDc: design.systemSizeKwDc,
-          stickerPpwCents: finance.grossPpwCents,
-          dealerFeePct: finance.dealerFeePct,
-          adderTotalCents: finance.adderTotalCents,
-          onTopAdderTotalCents: finance.onTopAdderTotalCents ?? 0,
-          batteryPriceCents: finance.batteryPriceCents ?? 0,
-        });
+    : priceDeal({
+        product: finance.product,
+        systemType: args.systemType,
+        systemSizeKwDc: design.systemSizeKwDc,
+        baseFinalPpwCents: finance.grossPpwCents,
+        baseFinalPerBatteryCents: finance.stickerPricePerBatteryCents ?? 0,
+        batteryQty: design.batteryQty,
+        dealerFeePct: finance.dealerFeePct,
+        addersInsideRuleCents: finance.adderTotalCents,
+        addersOutsideRuleCents: finance.onTopAdderTotalCents ?? 0,
+        equipmentChargesCents: finance.batteryPriceCents ?? 0,
+      });
 
   const thirdParty = !isPurchase
     ? priceThirdParty(
@@ -1525,7 +1679,7 @@ function priceOption(args: {
    * is the only defence against the failure this codebase keeps re-learning:
    * two numbers on one page that do not divide into each other.
    */
-  const documentPriceCents = purchase?.contractPriceCents ?? 0;
+  const documentPriceCents = deal?.finalPriceCents ?? 0;
 
   /**
    * What a payment factor gets applied to: the price above, less anything the
@@ -1553,12 +1707,12 @@ function priceOption(args: {
    */
   const signToday = resolveSignToday({
     rule: args.signTodayRule,
-    systemPriceCents: purchase?.baseStickerCents ?? 0,
+    systemPriceCents: deal?.baseFinalCents ?? 0,
     // The storage as the household signs for it — with the partner's fee on it
     // where the partner takes one — so the cap is measured over it too. See
     // `solar-sign-today`.
-    batteryPriceCents: purchase?.batteryStickerCents ?? 0,
-    systemWatts: purchase?.systemWatts ?? 0,
+    batteryPriceCents: deal?.equipmentFinalCents ?? 0,
+    systemWatts: deal?.systemWatts ?? 0,
     // The same percentages and the same tick-boxes the ladder below is built
     // from, so the rung and the net cost it lands on cannot disagree.
     creditRates: args.creditRates ?? CREDIT_RATES_DEFAULT,
@@ -1566,7 +1720,7 @@ function priceOption(args: {
     typedCents: args.signTodayTypedCents,
   });
 
-  const creditLadder: CreditLadder | null = purchase
+  const creditLadder: CreditLadder | null = deal
     ? buildCreditLadder({
         contractValueCents: documentPriceCents,
         quotedPriceCents: documentPriceCents,
@@ -1693,10 +1847,9 @@ function priceOption(args: {
       year1ProductionKwh: design.year1ProductionKwh,
       annualUsageKwh: design.annualUsageKwh,
       currentRateMillsPerKwh: args.currentRateMillsPerKwh,
-      purchase,
       thirdParty,
       ppaRateMills: finance.rateMillsPerKwh,
-      leaseMonthlyCents: finance.monthlyPaymentCents,
+      leasePaymentCents: finance.monthlyPaymentCents,
       escalatorPct: finance.escalatorPct,
       termYears: finance.termYears,
       assumptions: a,
@@ -1712,7 +1865,7 @@ function priceOption(args: {
       // The years bill the price the cost chapter prints — the partner's
       // contract value where there is one — and credit back whatever this
       // scenario says the household actually claims.
-      purchasePriceCents: purchase ? documentPriceCents : null,
+      purchasePriceCents: deal ? documentPriceCents : null,
       creditReliefCents: scenario.reliefCents,
       // A financed system is paid for monthly, so the years carry the payments
       // rather than the price. Both halves or neither — see `savingsModel`.
@@ -1794,16 +1947,16 @@ function priceOption(args: {
   const financing: SnapshotFinancing = {
     product: finance.product,
     // THE PRICE THE DOCUMENT QUOTES.
-    contractPriceCents: purchase ? documentPriceCents : null,
+    finalPriceCents: deal ? documentPriceCents : null,
     // Null on storage rather than the row's zero: there are no installed watts
     // for a rate to be per, and a renderer handed 0 prints "$0.00/W".
-    grossPpwCents: purchase && !isStorage ? finance.grossPpwCents : null,
+    baseFinalPpwCents: deal && !isStorage ? finance.grossPpwCents : null,
     // The system AT STICKER — the dealer fee included — because these three
     // rows are read as arithmetic by a homeowner: system price, plus extra
     // work, equals total. Quoting the pre-fee figure here would leave the
     // customer's own breakdown several thousand dollars short of the total
     // printed under it.
-    basePriceCents: purchase?.baseStickerCents ?? null,
+    baseFinalCents: deal?.baseFinalCents ?? null,
     // Likewise at sticker: the lender takes its percentage of the re-roof as
     // well as of the array, so the re-roof appears on the contract carrying
     // its share of the fee — unless it is financed ON TOP, in which case it
@@ -1811,8 +1964,8 @@ function priceOption(args: {
     // already holds. Null, not 0, when there are no adders — the renderer omits
     // the row rather than printing an "Adders $0" line the customer has to
     // parse.
-    adderTotalCents:
-      purchase && purchase.adderStickerCents > 0 ? purchase.adderStickerCents : null,
+    addersFinalCents:
+      deal && deal.addersFinalCents > 0 ? deal.addersFinalCents : null,
     // Only lines that cost something, and only on a purchase. A lease or a
     // PPA has no system price for an adder to sit on top of, and a $0 line
     // is a row the customer has to read to learn nothing.
@@ -1837,11 +1990,11 @@ function priceOption(args: {
     // dealer fee is taken on the whole gross, so each line of work carries its
     // share of it; a line flagged on top used to print at its own amount, which
     // was the fee on that line given away.
-    ...(purchase && finance.adders?.some((x) => x.amountCents > 0)
+    ...(deal && finance.adders?.some((x) => x.amountCents > 0)
       ? (() => {
           const lines = finance.adders!.filter((x) => x.amountCents > 0);
           const grossed = apportionCents(
-            purchase.adderStickerCents,
+            deal.addersFinalCents,
             lines.map((x) => x.amountCents)
           );
           return {
@@ -1868,12 +2021,12 @@ function priceOption(args: {
      * line here: swapping the catalogue's default battery next month must not
      * rewrite what this household was quoted, or what for.
      */
-    ...(purchase && purchase.batteryPriceCents > 0
+    ...(deal && deal.equipmentChargesCents > 0
       ? {
           // What the HOUSEHOLD pays for it, so the rows on their breakdown —
           // system, work, battery — still add up to the total. The catalogue
           // price itself unless the partner takes its fee on the battery.
-          batteryPriceCents: purchase.batteryStickerCents,
+          equipmentFinalCents: deal.equipmentFinalCents,
           batteryQty: design.batteryQty,
           ...(design.batteryLabel ? { batteryLabel: design.batteryLabel } : {}),
         }
@@ -1883,15 +2036,15 @@ function priceOption(args: {
     // which is the single failure this file has been bitten by most often —
     // see the cap-at-pricing note in solar-money.
     finalPpwCents:
-      purchase && !isStorage
+      deal && !isStorage
         ? design.systemSizeKwDc > 0
           ? Math.round(documentPriceCents / (design.systemSizeKwDc * 1000))
-          : Math.round(purchase.finalPpwCents)
+          : Math.round(deal.finalPpwCents)
         : null,
     // Lease/PPA carry no APR. Gating here as well as at the write means a
     // stale value left on the row by a product switch can never reach a
     // customer as a fabricated lender term.
-    monthlyPaymentCents: isPurchase ? null : finance.monthlyPaymentCents,
+    leasePaymentCents: isPurchase ? null : finance.monthlyPaymentCents,
     rateMillsPerKwh: finance.product === "ppa" ? finance.rateMillsPerKwh : null,
     escalatorPct: isPurchase ? null : finance.escalatorPct,
     termYears: finance.termYears,
@@ -1924,8 +2077,8 @@ function priceOption(args: {
     // Spread, not assigned null — the snapshot holds no undefined, and a key
     // that is simply not there is how a pre-v6 document says "nobody recorded
     // this", which is exactly what happened.
-    ...(finance.product === "loan" && args.lenderProductLabel
-      ? { lenderProductLabel: args.lenderProductLabel }
+    ...(finance.product === "loan" && args.programmeLabel
+      ? { programmeLabel: args.programmeLabel }
       : {}),
     /**
      * The money the payment is actually taken from.
@@ -1935,7 +2088,7 @@ function priceOption(args: {
      * the number the customer's document prints under "Amount financed",
      * directly above a payment that has to divide into it.
      */
-    ...(purchase ? { financedAmountCents: loanPrincipalCents } : {}),
+    ...(deal ? { financedAmountCents: loanPrincipalCents } : {}),
     /**
      * THE ONE PAGE THAT SAYS WHAT THE HOUSEHOLD ACTUALLY PAYS, frozen.
      *
@@ -1961,7 +2114,7 @@ function priceOption(args: {
       : finance.product === "loan"
         ? financing.loanMonthlyPaymentCents
         : finance.product === "lease"
-          ? financing.monthlyPaymentCents
+          ? financing.leasePaymentCents
           : year1
             ? Math.round(year1.solarPaymentCents / 12)
             : null;
@@ -2061,7 +2214,7 @@ export function buildProposalSnapshot(args: {
   /** The lender's CUSTOMER application link. Never the dealer portal. */
   lenderApplyUrl?: string | null;
   /** The quoted rate-sheet row's own name, for the funder's paperwork. */
-  lenderProductLabel?: string | null;
+  programmeLabel?: string | null;
   /**
    * The federal credits, as the company states them and as this deal earns
    * them. Document-wide rather than per option: the statute does not change
@@ -2173,7 +2326,7 @@ export function buildProposalSnapshot(args: {
     lenderLogoUrl: args.lenderLogoUrl ?? null,
     lenderApplyUrl: args.lenderApplyUrl ?? null,
     loanFactors: args.loanFactors ?? null,
-    lenderProductLabel: args.lenderProductLabel ?? null,
+    programmeLabel: args.programmeLabel ?? null,
     now: args.now,
   });
 
@@ -2213,7 +2366,7 @@ export function buildProposalSnapshot(args: {
       lenderLogoUrl: alt.lenderLogoUrl ?? null,
       lenderApplyUrl: alt.lenderApplyUrl ?? null,
       loanFactors: alt.loanFactors ?? null,
-      lenderProductLabel: alt.lenderProductLabel ?? null,
+      programmeLabel: alt.programmeLabel ?? null,
       // This column's partner, not the deal's. Cash carries none and falls to
       // whatever the rep typed, which is the same line the shelf draws.
       signTodayRule: alt.signTodayRule ?? null,
@@ -2246,7 +2399,7 @@ export function buildProposalSnapshot(args: {
       : null;
 
   return {
-    schemaVersion: 8,
+    schemaVersion: 9,
     calculationVersion: PRICING_CALCULATION_VERSION,
     systemType,
     // Null on anything that is not a storage deal, so a PV document cannot

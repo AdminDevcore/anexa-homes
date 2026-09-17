@@ -372,17 +372,17 @@ async function main() {
           companyId: company.id,
           leadId: solarLead.id,
           product: "loan",
-          grossPpwCents: 350,
+          baseFinalPpwCents: 350,
           dealerFeePct: 18,
-          adderTotalCents: 385000, // the MPU adder
-          contractPriceCents: 3885000,
+          addersInsideRuleCents: 385000, // the MPU adder
+          finalPriceCents: 3885000,
           itcEstimateCents: 0, // no federal credit configured — see SolarSettings
           aprPct: 6.99,
           loanTermMonths: 300,
           termYears: 25,
           // The lender's OWN figures from the approval, not computed here.
           downPaymentCents: 500000, // $5,000 down
-          loanMonthlyPaymentCents: 27400, // $274/mo as issued by GoodLeap
+          lenderMonthlyPaymentCents: 27400, // $274/mo as issued by GoodLeap
         },
       });
 

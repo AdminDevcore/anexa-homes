@@ -423,7 +423,7 @@ export type SolarPayResult = {
 /**
  * What the terms pay on this deal.
  *
- * `basePriceCents` is the BASE system price — what the company keeps for the
+ * `baseKeptCents` is the BASE system price — what the company keeps for the
  * system once the lender's cut comes out, and before adders. The base rather
  * than the final price because moving a deal onto expensive money has to come
  * out of the rep, not the company: the same $3.20/W sticker is worth $6,240 to
@@ -434,10 +434,10 @@ export type SolarPayResult = {
  */
 export function solarRepPayCents(
   terms: SolarPayTerms,
-  deal: { systemWatts: number; basePriceCents: number; batteryQty?: number }
+  deal: { systemWatts: number; baseKeptCents: number; batteryQty?: number }
 ): SolarPayResult {
   const watts = Math.max(0, Math.round(deal.systemWatts));
-  const basePpwCents = watts > 0 ? deal.basePriceCents / watts : 0;
+  const basePpwCents = watts > 0 ? deal.baseKeptCents / watts : 0;
 
   if (terms.basis === "battery_redline") {
     const qty = Math.max(0, Math.round(deal.batteryQty ?? 0));
@@ -445,14 +445,14 @@ export function solarRepPayCents(
     // GUARDED ON THE COUNT, not merely clamped at zero.
     //
     // Without the guard, a deal with no batteries pays
-    // `max(0, basePriceCents − redline × 0)` — the ENTIRE base price. That is
+    // `max(0, baseKeptCents − redline × 0)` — the ENTIRE base price. That is
     // the shape of this bug on the per-watt basis too, and it is worse than the
     // silent zero this basis exists to prevent: a rep would be paid the whole
     // system.
-    const amountCents = qty > 0 ? Math.max(0, deal.basePriceCents - redline * qty) : 0;
+    const amountCents = qty > 0 ? Math.max(0, deal.baseKeptCents - redline * qty) : 0;
     return {
       amountCents,
-      basisCents: qty > 0 ? Math.max(0, deal.basePriceCents) : 0,
+      basisCents: qty > 0 ? Math.max(0, deal.baseKeptCents) : 0,
       // There are no watts, so there is no per-watt figure to report. Zero here
       // is the honest answer rather than a division that did not happen.
       basePpwCents: 0,
@@ -480,10 +480,10 @@ export function solarRepPayCents(
   const redline = terms.redlineCentsPerWatt ?? 0;
   // Integer throughout: subtracting the redline's whole-system value beats
   // multiplying a per-watt overage that has already been rounded.
-  const amountCents = Math.max(0, deal.basePriceCents - redline * watts);
+  const amountCents = Math.max(0, deal.baseKeptCents - redline * watts);
   return {
     amountCents,
-    basisCents: Math.max(0, deal.basePriceCents),
+    basisCents: Math.max(0, deal.baseKeptCents),
     basePpwCents,
     overageCentsPerWatt: watts > 0 ? Math.max(0, basePpwCents - redline) : 0,
   };

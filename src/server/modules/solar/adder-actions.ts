@@ -68,7 +68,7 @@ const addSchema = z.object({
    * Only meaningful on a ONE-OFF typed straight onto the deal. A line picked
    * off the catalogue takes the catalogue's answer, whatever arrives here.
    */
-  financedOnTop: z.boolean().default(false),
+  outsidePriceRule: z.boolean().default(false),
   consumptionKwhPerYear: z.number().int().min(0).max(CONSUMPTION_MAX).nullish(),
 });
 
@@ -104,7 +104,7 @@ async function guard(
 /**
  * Recompute both cached adder totals and return what the extra work comes to.
  *
- * The two halves are priced by different rules — see `financedOnTop` — but a
+ * The two halves are priced by different rules — see `outsidePriceRule` — but a
  * caller being told what it just changed wants ONE number, and every one of
  * these actions returns the same one it always did.
  */
@@ -119,7 +119,7 @@ async function adderGrandTotal(companyId: string, leadId: string): Promise<numbe
    * See `recomputeDealMoney`.
    */
   await recomputeDealMoney(companyId, leadId);
-  return split.adderTotalCents + split.onTopAdderTotalCents;
+  return split.addersInsideRuleCents + split.addersOutsideRuleCents;
 }
 
 /** Everything that has to be re-rendered once the money moves. */
@@ -159,15 +159,15 @@ export async function addDealAdderAction(input: z.infer<typeof addSchema>) {
   // And the answer is the LENDER'S first: the catalogue's tick is the company's
   // general practice, the lender's rule is what this partner's paper actually
   // does with the work, and only the second one is a fact about the contract.
-  let financedOnTop = parsed.data.financedOnTop ?? false;
+  let outsidePriceRule = parsed.data.outsidePriceRule ?? false;
   if (equipmentId) {
     const item = await prisma.solarEquipment.findFirst({
       where: { id: equipmentId, companyId: g.user.companyId, kind: "adder" },
-      select: { id: true, financedOnTop: true },
+      select: { id: true, outsidePriceRule: true },
     });
     if (!item) return fail("That adder is not in the catalogue.");
     const rules = await lenderAdderRules(await dealLenderId(leadId));
-    financedOnTop = financedOnTopFor(rules, item.id, item.financedOnTop);
+    outsidePriceRule = financedOnTopFor(rules, item.id, item.outsidePriceRule);
   }
 
   const last = await prisma.solarDealAdder.findFirst({
@@ -188,7 +188,7 @@ export async function addDealAdderAction(input: z.infer<typeof addSchema>) {
       millsPerWatt,
       qty,
       showOnProposal: parsed.data.showOnProposal,
-      financedOnTop,
+      outsidePriceRule,
       consumptionKwhPerYear: parsed.data.consumptionKwhPerYear ?? null,
       sortOrder: (last?.sortOrder ?? 0) + 1,
     },
@@ -345,7 +345,7 @@ export async function syncDealCatalogueAddersAction(input: z.infer<typeof syncSc
       priceCents: true,
       priceMillsPerWatt: true,
       showOnProposal: true,
-      financedOnTop: true,
+      outsidePriceRule: true,
       rank: true,
     },
     orderBy: [{ rank: "asc" }, { model: "asc" }],

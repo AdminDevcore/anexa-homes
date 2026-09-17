@@ -16,7 +16,7 @@ const A: SolarAssumptions = {
   utilityEscalationPct: 3.5,
   kwhPerKwYear: 1450,
   utilityMeterFeeCents: 1000,
-  defaultGrossPpwCents: 350,
+  companyDefaultBasePpwCents: 350,
   defaultDealerFeePct: 18,
   minOffsetPct: 0,
   maxOffsetPct: 150,
@@ -121,9 +121,9 @@ describe("no incentive ever reaches a proposal", () => {
 describe("financing summary matches the product", () => {
   it("a loan shows a system price and no per-kWh rate", () => {
     const s = build();
-    expect(s.financing.contractPriceCents).toBe(3_500_000);
+    expect(s.financing.finalPriceCents).toBe(3_500_000);
     expect(s.financing.rateMillsPerKwh).toBeNull();
-    expect(s.financing.monthlyPaymentCents).toBeNull();
+    expect(s.financing.leasePaymentCents).toBeNull();
     expect(s.financing.lender).toBe("GoodLeap");
   });
 
@@ -135,7 +135,7 @@ describe("financing summary matches the product", () => {
         termYears: 25, aprPct: null,
       },
     });
-    expect(s.financing.contractPriceCents).toBeNull();
+    expect(s.financing.finalPriceCents).toBeNull();
     expect(s.financing.rateMillsPerKwh).toBe(145);
   });
 });
@@ -160,7 +160,7 @@ describe("25-year savings model", () => {
       year1ProductionKwh: 12_180,
       annualUsageKwh: 12_180, // fully offset, so no residual grid cost
       currentRateMillsPerKwh: 150,
-      leaseMonthlyCents: 18_500,
+      leasePaymentCents: 18_500,
       escalatorPct: 0,
       termYears: 25,
       assumptions: A,
@@ -179,7 +179,7 @@ describe("25-year savings model", () => {
       year1ProductionKwh: 12_180,
       annualUsageKwh: 12_180,
       currentRateMillsPerKwh: 150,
-      leaseMonthlyCents: 18_500,
+      leasePaymentCents: 18_500,
       escalatorPct: 0,
       termYears: 10,
       assumptions: A,
@@ -208,7 +208,7 @@ describe("a financed proposal bills the payment it quotes", () => {
     expect(monthly).toBeGreaterThan(0);
     expect(s.savings.years[0].solarPaymentCents).toBe(monthly * 12);
     // And emphatically NOT the whole contract.
-    expect(s.savings.years[0].solarPaymentCents).not.toBe(s.financing.contractPriceCents);
+    expect(s.savings.years[0].solarPaymentCents).not.toBe(s.financing.finalPriceCents);
   });
 
   it("carries the term, so the payment is not quoted open-ended", () => {
@@ -229,7 +229,7 @@ describe("a financed proposal bills the payment it quotes", () => {
       lender: null,
     });
     expect(s.financing.loanTermMonths).toBeNull();
-    expect(s.savings.years[0].solarPaymentCents).toBe(s.financing.contractPriceCents);
+    expect(s.savings.years[0].solarPaymentCents).toBe(s.financing.finalPriceCents);
   });
 
   it("prices every option in the menu the same way", () => {
@@ -369,7 +369,7 @@ describe("a published payment factor outranks our amortisation", () => {
     expect(withFactor.financing.loanMonthlyPaymentCents).not.toBe(
       withoutFactor.financing.loanMonthlyPaymentCents
     );
-    const principal = withFactor.financing.contractPriceCents ?? 0;
+    const principal = withFactor.financing.finalPriceCents ?? 0;
     expect(withFactor.financing.loanMonthlyPaymentCents).toBe(
       Math.round((principal * 5712) / 1_000_000)
     );
@@ -475,22 +475,22 @@ describe("the extra work is named on the customer's copy", () => {
     // At STICKER, not at catalogue: the lender takes 18% of the re-roof as well
     // as of the array, so what the customer signs for the extra work is the
     // catalogue price grossed up by the same fee. $15,460 becomes $18,853.66.
-    expect(s.financing.adderTotalCents).toBe(Math.round(1_546_000 / 0.82));
+    expect(s.financing.addersFinalCents).toBe(Math.round(1_546_000 / 0.82));
     expect(s.financing.adders![0].amountCents).toBeGreaterThan(1_450_000);
   });
 
   it("the lines add up to the total the contract is built on", () => {
     const s = build({ finance: { ...LOAN, adderTotalCents: 1_546_000, adders: ADDERS } });
     const summed = s.financing.adders!.reduce((n, a) => n + a.amountCents, 0);
-    expect(summed).toBe(s.financing.adderTotalCents);
+    expect(summed).toBe(s.financing.addersFinalCents);
   });
 
   it("the whole breakdown adds up: system + extra work = total price", () => {
     // The arithmetic a homeowner does at the kitchen table. Every row on the
     // document is at sticker, so the three of them agree to the cent.
     const s = build({ finance: { ...LOAN, adderTotalCents: 1_546_000, adders: ADDERS } });
-    expect(s.financing.basePriceCents! + s.financing.adderTotalCents!).toBe(
-      s.financing.contractPriceCents
+    expect(s.financing.baseFinalCents! + s.financing.addersFinalCents!).toBe(
+      s.financing.finalPriceCents
     );
   });
 
@@ -512,9 +512,9 @@ describe("the extra work is named on the customer's copy", () => {
     const [roof, steep] = s.financing.adders!;
     expect(Math.abs(roof.amountCents - Math.round(1_450_000 / 0.82))).toBeLessThanOrEqual(1); // fee included
     expect(Math.abs(steep.amountCents - Math.round(96_000 / 0.82))).toBeLessThanOrEqual(1); // fee included
-    expect(roof.amountCents + steep.amountCents).toBe(s.financing.adderTotalCents);
-    expect(s.financing.basePriceCents! + s.financing.adderTotalCents!).toBe(
-      s.financing.contractPriceCents
+    expect(roof.amountCents + steep.amountCents).toBe(s.financing.addersFinalCents);
+    expect(s.financing.baseFinalCents! + s.financing.addersFinalCents!).toBe(
+      s.financing.finalPriceCents
     );
   });
 
@@ -551,7 +551,7 @@ describe("the extra work is named on the customer's copy", () => {
   it("omits the key entirely on a design with no itemised adders", () => {
     const s = build({ finance: { ...LOAN, adderTotalCents: 385_000 } });
     expect("adders" in s.financing).toBe(false);
-    expect(s.financing.adderTotalCents).toBe(Math.round(385_000 / 0.82));
+    expect(s.financing.addersFinalCents).toBe(Math.round(385_000 / 0.82));
   });
 
   it("names nothing on a lease, which has no system price to add to", () => {
@@ -565,7 +565,7 @@ describe("the extra work is named on the customer's copy", () => {
       },
     });
     expect("adders" in s.financing).toBe(false);
-    expect(s.financing.adderTotalCents).toBeNull();
+    expect(s.financing.addersFinalCents).toBeNull();
   });
 });
 

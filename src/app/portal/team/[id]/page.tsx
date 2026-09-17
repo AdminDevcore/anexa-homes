@@ -247,7 +247,7 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
                 solarCompanyLeadFlatCents: detail.solarCompanyLeadFlatCents,
               }}
               solarExample={{
-                grossPpwCents: solarSettings?.defaultGrossPpwCents ?? 350,
+                basePpwCents: solarSettings?.companyDefaultBasePpwCents ?? 350,
                 dealerFeePct: solarSettings?.defaultDealerFeePct ?? 18,
               }}
               perWattLenders={perWattLenders.map((l) => l.name)}

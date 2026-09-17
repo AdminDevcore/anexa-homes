@@ -140,10 +140,10 @@ export function solarLeadValueCents(src: SolarPriceSource | null | undefined): n
 export function snapshotPriceSource(f: SnapshotFinancing): SolarPriceSource {
   return {
     product: f.product,
-    contractPriceCents: f.contractPriceCents,
+    contractPriceCents: f.finalPriceCents,
     // THAT DOCUMENT'S OWN ladder, never today's percentages.
     netAfterCreditsCents: f.creditLadder?.netCostCents ?? null,
-    monthlyPaymentCents: f.monthlyPaymentCents,
+    monthlyPaymentCents: f.leasePaymentCents,
     rateMillsPerKwh: f.rateMillsPerKwh,
   };
 }

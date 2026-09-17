@@ -35,8 +35,8 @@ const SNAPSHOT = {
   energy: { annualUsageKwh: 14000 },
   financing: {
     product: "loan",
-    contractPriceCents: 6050000,
-    monthlyPaymentCents: null,
+    finalPriceCents: 6050000,
+    leasePaymentCents: null,
     rateMillsPerKwh: null,
   },
 } as unknown as SolarProposalSnapshot;
@@ -116,7 +116,7 @@ describe("resolveReportedSystem", () => {
         inverter: null,
         battery: null,
       },
-      financing: { product: "cash", contractPriceCents: 3080000 },
+      financing: { product: "cash", finalPriceCents: 3080000 },
     } as unknown as SolarProposalSnapshot;
     const got = resolveReportedSystem({ proposal: { ...PROPOSAL, snapshot: v1 }, design: DESIGN });
     expect(got!.moduleLabel).toBe("Q CELLS Q.PEAK");
@@ -245,8 +245,8 @@ describe("systemDrift", () => {
       ...SNAPSHOT,
       financing: {
         product: "lease",
-        contractPriceCents: null,
-        monthlyPaymentCents: 21500,
+        finalPriceCents: null,
+        leasePaymentCents: 21500,
         rateMillsPerKwh: null,
       },
     } as unknown as SolarProposalSnapshot;
@@ -275,13 +275,13 @@ describe("systemDrift", () => {
  */
 const LADDER_FINANCING = {
   product: "loan",
-  contractPriceCents: 6050000,
-  basePriceCents: 3460000,
-  adderTotalCents: 690000,
-  batteryPriceCents: 1900000,
+  finalPriceCents: 6050000,
+  baseFinalCents: 3460000,
+  addersFinalCents: 690000,
+  equipmentFinalCents: 1900000,
   batteryQty: 2,
   finalPpwCents: 550,
-  monthlyPaymentCents: null,
+  leasePaymentCents: null,
   rateMillsPerKwh: null,
 } as unknown as SnapshotFinancing;
 
@@ -309,8 +309,8 @@ describe("frozenPriceLadder", () => {
 
   it("quotes no rate per watt on a storage job, which has no watts", () => {
     const l = frozenPriceLadder(
-      { ...LADDER_FINANCING, basePriceCents: 1900000, adderTotalCents: null,
-        batteryPriceCents: 1900000, contractPriceCents: 1900000, finalPpwCents: null
+      { ...LADDER_FINANCING, baseFinalCents: 1900000, addersFinalCents: null,
+        equipmentFinalCents: 1900000, finalPriceCents: 1900000, finalPpwCents: null
       } as unknown as SnapshotFinancing,
       0
     )!;
@@ -322,7 +322,7 @@ describe("frozenPriceLadder", () => {
   it("falls back to the total less what is priced separately, for an old document", () => {
     // Generated before the base was frozen: the customer's own cost chapter
     // reads it the same way, so this card cannot disagree with the sheet.
-    const old = { ...LADDER_FINANCING, basePriceCents: null } as unknown as SnapshotFinancing;
+    const old = { ...LADDER_FINANCING, baseFinalCents: null } as unknown as SnapshotFinancing;
     const l = frozenPriceLadder(old, 11)!;
     expect(l.base.totalCents).toBe(6050000 - 690000 - 1900000);
   });
@@ -330,8 +330,8 @@ describe("frozenPriceLadder", () => {
   it("has no ladder for a lease, which is sold as a monthly", () => {
     const lease = {
       product: "lease",
-      contractPriceCents: null,
-      monthlyPaymentCents: 21500,
+      finalPriceCents: null,
+      leasePaymentCents: 21500,
     } as unknown as SnapshotFinancing;
     expect(frozenPriceLadder(lease, 11)).toBeNull();
   });

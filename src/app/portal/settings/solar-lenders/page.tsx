@@ -52,10 +52,10 @@ export default async function SolarLendersPage({
       // set and to show its last four — the plaintext never leaves the server,
       // and the encrypted blob never reaches the browser.
       apiBaseUrl: true, apiProductSlug: true, apiKeyEncrypted: true,
-      logoUpdatedAt: true, maxFinalPpwCents: true, minBasePpwCents: true,
-      finalPpwMode: true,
-      minBasePricePerBatteryCents: true, maxFinalPricePerBatteryCents: true,
-      finalBatteryPriceMode: true,
+      logoUpdatedAt: true, priceRulePpwCents: true, minBasePpwCents: true,
+      priceRuleMode: true,
+      minBasePricePerBatteryCents: true, priceRulePerBatteryCents: true,
+      priceRuleBatteryMode: true,
       batteryRule: true,
       // What this partner hands back for signing today — see
       // `solar-sign-today`.
@@ -72,7 +72,7 @@ export default async function SolarLendersPage({
       fieldMap: { select: { wireField: true, sourceKey: true, literal: true } },
       /// What this partner does with each adder, where it has overruled the
       /// catalogue. Absent ids fall back to the catalogue's own answer.
-      adderRules: { select: { equipmentId: true, financedOnTop: true } },
+      adderRules: { select: { equipmentId: true, outsidePriceRule: true } },
       /**
        * The hardware this partner approves, and what IT calls each piece.
        *
@@ -108,7 +108,7 @@ export default async function SolarLendersPage({
     select: {
       id: true, manufacturer: true, model: true, description: true,
       adderBasis: true, priceCents: true, priceMillsPerWatt: true,
-      financedOnTop: true,
+      outsidePriceRule: true,
     },
   });
 
@@ -133,7 +133,7 @@ export default async function SolarLendersPage({
         initialTab={one(params.tab)}
         canEdit={can(user, "update", "Settings")}
         sellableEquipment={sellable}
-        targetNetPpwCents={settings.targetNetPpwCents}
+        targetBasePpwCents={settings.targetBasePpwCents}
         creditRates={settings.creditRates}
         adderCatalogue={adders.map((a) => ({
           id: a.id,
@@ -144,7 +144,7 @@ export default async function SolarLendersPage({
             flatCents: a.priceCents,
             millsPerWatt: a.priceMillsPerWatt,
           }),
-          catalogueOnTop: a.financedOnTop,
+          catalogueOnTop: a.outsidePriceRule,
         }))}
         lenders={lenders.map((l) => ({
           id: l.id,
@@ -160,12 +160,12 @@ export default async function SolarLendersPage({
           creditInstructions: l.creditInstructions,
           repPayMode: l.repPayMode,
           batteryPayMode: l.batteryPayMode,
-          maxFinalPpwCents: l.maxFinalPpwCents,
-          finalPpwMode: l.finalPpwMode,
+          priceRulePpwCents: l.priceRulePpwCents,
+          priceRuleMode: l.priceRuleMode,
           minBasePpwCents: l.minBasePpwCents,
           minBasePricePerBatteryCents: l.minBasePricePerBatteryCents,
-          maxFinalPricePerBatteryCents: l.maxFinalPricePerBatteryCents,
-          finalBatteryPriceMode: l.finalBatteryPriceMode,
+          priceRulePerBatteryCents: l.priceRulePerBatteryCents,
+          priceRuleBatteryMode: l.priceRuleBatteryMode,
           batteryRule: l.batteryRule,
           signTodayMode: l.signTodayMode,
           signTodayFixedCents: l.signTodayFixedCents,
@@ -178,7 +178,7 @@ export default async function SolarLendersPage({
           submissionDelivery: l.submissionDelivery,
           fieldMap: l.fieldMap,
           adderRules: Object.fromEntries(
-            l.adderRules.map((r) => [r.equipmentId, r.financedOnTop])
+            l.adderRules.map((r) => [r.equipmentId, r.outsidePriceRule])
           ),
           approvedEquipment: l.approvals
             .map((a) => ({

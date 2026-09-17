@@ -90,7 +90,7 @@ describe("golden: the worked example, by value (docs/PRICING_LOGIC.md §4.2)", (
 
   it("prices the ladder", () => {
     expect(ladderFigures(we.priced.breakdown)).toMatchObject({
-      basePriceCents: 3_000_000,
+      baseKeptCents: 3_000_000,
       addersCents: 370_000,
       equipmentChargesCents: 1_500_000,
       grossPriceCents: 4_870_000,
@@ -287,7 +287,7 @@ describe("golden: every pure pricing site, every golden deal", () => {
       managerOverrideCents({ type: "percentage", percent: 10, flatAmount: 0, perWattMills: 0 }, { systemWatts, repNetCents });
     expect({
       ...perDeal((d, t) => {
-        const deal = { systemWatts: t.watts, basePriceCents: t.priced.breakdown.basePriceCents, batteryQty: d.batteryQty };
+        const deal = { systemWatts: t.watts, baseKeptCents: t.priced.breakdown.baseKeptCents, batteryQty: d.batteryQty };
         const redline = solarRepPayCents(REDLINE, deal);
         const perWatt = solarRepPayCents(PER_WATT, deal);
         return { redline, perWatt, overrideOnRedline: override(redline.amountCents, t.watts) };
@@ -295,7 +295,7 @@ describe("golden: every pure pricing site, every golden deal", () => {
       storageOnly: (() => {
         const deal = {
           systemWatts: 0,
-          basePriceCents: STORAGE.priced.breakdown.basePriceCents,
+          baseKeptCents: STORAGE.priced.breakdown.baseKeptCents,
           batteryQty: STORAGE_DEAL.batteryQty,
         };
         return {

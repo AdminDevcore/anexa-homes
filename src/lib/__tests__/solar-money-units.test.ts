@@ -55,7 +55,7 @@ describe("priceUnits", () => {
       adderTotalCents: 0,
     });
     expect(b.dealerFeeCents).toBe(0);
-    expect(b.basePriceCents).toBe(20_000_00);
+    expect(b.baseKeptCents).toBe(20_000_00);
   });
 
   it("stands a fee of 100% or more down rather than dividing by zero", () => {
@@ -110,7 +110,7 @@ describe("pricePurchase still prices PV exactly as it did", () => {
   it("still keeps the per-watt rates it always reported", () => {
     const b = pricePurchase(pv);
     expect(b.finalPpwCents).toBeCloseTo(b.contractPriceCents / 10_140, 9);
-    expect(b.basePpwCents).toBeCloseTo(b.basePriceCents / 10_140, 9);
+    expect(b.basePpwCents).toBeCloseTo(b.baseKeptCents / 10_140, 9);
     expect(b.grossPpwCents).toBeCloseTo(b.grossPriceCents / 10_140, 9);
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { pricePurchase, priceStoredPurchase, priceUnits } from "@/lib/solar-money";
-import { adderTotals } from "@/lib/solar-adders";
+import { adderTotals, type AdderLine } from "@/lib/solar-adders";
 
 /**
  * EVERY CUSTOMER SELL-SIDE ADDER IS IN THE GROSS, BEFORE THE DEALER FEE.
@@ -9,7 +9,7 @@ import { adderTotals } from "@/lib/solar-adders";
  *           (roof, MPU, trenching, electrical, panel upgrades, …)
  *   final = gross / (1 − fee)
  *
- * `financedOnTop` — a roof on a capped partner such as Amos — is NOT an
+ * `outsidePriceRule` — a roof on a capped partner such as Amos — is NOT an
  * exception to the fee. It only decides that the work sits ABOVE the partner's
  * $/W ceiling instead of coming out of the system price.
  */
@@ -119,10 +119,10 @@ describe("on a capped partner the roof rides above the $/W ceiling — fee inclu
 
 describe("deal adder lines: split by the flag, and both halves reach the fee", () => {
   it("a roof on top plus MPU and trenching inside prices exactly like all of it inside", () => {
-    const lines = [
-      { id: "roof", label: "Re-roof", basis: "flat" as const, flatCents: $(7_000), millsPerWatt: null, qty: 1, financedOnTop: true },
-      { id: "mpu", label: "MPU", basis: "flat" as const, flatCents: $(2_500), millsPerWatt: null, qty: 1, financedOnTop: false },
-      { id: "trench", label: "Trenching", basis: "perFoot" as const, flatCents: $(30), millsPerWatt: null, qty: 60, financedOnTop: false },
+    const lines: AdderLine[] = [
+      { id: "roof", label: "Re-roof", basis: "flat" as const, flatCents: $(7_000), millsPerWatt: null, qty: 1, outsidePriceRule: true },
+      { id: "mpu", label: "MPU", basis: "flat" as const, flatCents: $(2_500), millsPerWatt: null, qty: 1, outsidePriceRule: false },
+      { id: "trench", label: "Trenching", basis: "perFoot" as const, flatCents: $(30), millsPerWatt: null, qty: 60, outsidePriceRule: false },
     ];
     const t = adderTotals(lines, 10_000);
     expect(t.onTopCents).toBe($(7_000));

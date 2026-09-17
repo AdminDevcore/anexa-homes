@@ -1,7 +1,7 @@
 import { prisma } from "@/server/db/client";
 import { snapshotPriceSource, solarContractRevenueCents } from "@/lib/solar-deal-value";
 import { REPORTED_PROPOSAL_ORDER } from "@/lib/solar-system-of-record";
-import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
+import { readProposalSnapshot } from "@/lib/solar-proposal";
 
 /**
  * What each of these solar deals CONTRACTED for, read from the document it is
@@ -51,7 +51,7 @@ export async function solarContractByLead(
 
   for (const row of rows) {
     if (out.has(row.leadId)) continue; // a later version of a lead already answered
-    const snapshot = row.snapshot as unknown as SolarProposalSnapshot | null;
+    const snapshot = readProposalSnapshot(row.snapshot);
     if (!snapshot?.financing) continue;
     const cents = solarContractRevenueCents(snapshotPriceSource(snapshot.financing));
     // A deal quoted at nothing — a lease, a PPA, an unpriced draft — books

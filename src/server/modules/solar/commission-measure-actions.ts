@@ -95,7 +95,7 @@ export async function refreezeCommissionMeasureAction(input: z.infer<typeof sche
       type: "system",
       message:
         `${user.fullName} re-froze the commission measure from ${from}: ` +
-        `${outcome.measure.systemWatts} W, base ${usd(outcome.measure.basePriceCents)}, ` +
+        `${outcome.measure.systemWatts} W, base ${usd(outcome.measure.baseKeptCents)}, ` +
         `${outcome.measure.batteryQty} batteries — reason: ${reason}` +
         (outcome.differences.length > 0
           ? ` · the deal still differs: ${outcome.differences.join("; ")}`

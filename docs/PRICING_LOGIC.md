@@ -1240,6 +1240,119 @@ The brief for counsel is `docs/legal/2026-09-15-credit-ownership-brief.md`: fact
 
 **Both reworks landed before Stage 2 started**, in the second commit on the branch. See the two new rows in §8.9 and findings #4 and #5 in §8.11.
 
+### 8.13 Stage 2: the exact spellings (PROPOSED — awaiting owner confirmation)
+
+§8.8 approved the vocabulary; this is the spelling of every identifier, read off what each field HOLDS today rather than off its current name. Surface: **22 schema fields across 7 models, ~2,400 references in ~122 files** (38 of them test files).
+
+**Prisma columns — code-only renames via `@map`, no column renames.**
+
+| Model.field today | What it holds | Becomes |
+|---|---|---|
+| `SolarFinance.contractPriceCents` | "Final contract price" — the quoted, fee-inclusive, pre-credit price (Tessa: $87,120) | `finalPriceCents` |
+| `SolarFinance.adderTotalCents` | adders INSIDE the partner's price, at catalogue | `addersInsideRuleCents` |
+| `SolarFinance.onTopAdderTotalCents` | adders outside it | `addersOutsideRuleCents` |
+| `SolarFinance.stickerPricePerBatteryCents` | per-battery sticker | `baseFinalPerBatteryCents` |
+| `SolarFinance.monthlyPaymentCents` | "Lease only: fixed monthly payment" | `leaseMonthlyCents` |
+| `SolarFinance.itcEstimateCents` | always null, legacy | dropped |
+| `SolarLender.maxFinalPpwCents` / `finalPpwMode` | the price rule | `priceRulePpwCents` / `priceRuleMode` |
+| `SolarLender.maxFinalPricePerBatteryCents` / `finalBatteryPriceMode` | its per-battery twins | `priceRulePerBatteryCents` / `priceRuleBatteryMode` |
+| `SolarSettings.defaultGrossPpwCents` / `targetNetPpwCents` | company defaults | `defaultBasePpwCents` / `targetBasePpwCents` |
+| `SolarSettings.creditIncentiveLabel` | unused | retired |
+| `financedOnTop` (`SolarLenderAdderRule`, `SolarEquipment`, `SolarDealAdder`) | outside the price rule | `outsidePriceRule` |
+| `CompareRow.netPpwCents` | what the company keeps per watt after the lender's cut and the adders | `grossPpwCents` |
+| `SolarLender.submissionAmountBasis` | retired by **D6, which is Stage 5** | unchanged in Stage 2 |
+| `SolarLender.batteryInsideFee` | already retired, guarded by `solar-battery-fee-retired.test.ts` | unchanged until its drop migration |
+
+**Snapshot (`SnapshotFinancing`) — 32 keys, of which these carry money.** Renaming them makes the stored JSON of **43 production documents** old-shaped, so it needs `schemaVersion: 9` plus a reader for v1–v8.
+
+| Snapshot key today | What it holds | Becomes |
+|---|---|---|
+| `financing.contractPriceCents` | the contract value the credits come off (Tessa: $167,120) | `finalPriceCents` |
+| `financing.grossPpwCents` | the **sticker** $/W, fee in — not the vocabulary's "gross" | `baseFinalPpwCents` |
+| `financing.basePriceCents` | the system AT STICKER | `baseFinalCents` |
+| `financing.adderTotalCents` | adders at sticker | `addersFinalCents` |
+| `financing.batteryPriceCents` | the battery at sticker | `equipmentFinalCents` |
+| `financing.monthlyPaymentCents` | lease monthly | `leaseMonthlyCents` |
+| `financing.itcEstimateCents`, `itcPct`, `stateIncentiveNote` | always null, legacy | dropped |
+
+The golden projections at the bottom of `pricing-golden-deals.ts` already speak this vocabulary (`baseFinalCents`, `addersFinalCents`, `equipmentFinalCents`, `finalCents`, `stickerPpwCents`), which is the seam §8.6 designed: **a rename edits a projection, never a pinned value.**
+
+**A CI guard** modelled on `solar-battery-fee-retired.test.ts` fails if any retired spelling returns to `src/`.
+
+**Three conflicts in §8.8's map, put to the owner before any editing.** See §8.14 once answered.
+
+### 8.14 Stage 2 spellings: the three conflicts, decided (2026-09-15)
+
+1. **`SolarFinance.grossPpwCents` → `baseFinalPpwCents` now; `soldBasePpwCents` at D5.** The column holds the sticker with the dealer fee inside it, so Stage 2 names it for what it holds. Stage 4 changes the stored value to the pre-fee sold base and renames it again, in the stage that moves the number. A field is never left carrying a name that is untrue.
+2. **`loanMonthlyPaymentCents` is kept, renamed `lenderMonthlyPaymentCents`.** §8.8 called it retired, but it is the lender's OWN issued figure, deliberately stored because a derived payment can contradict it on a promotional or re-amortised loan — and it is the figure the customer is quoted. Retiring it moves a customer-facing number, which is not Stage 2's to move.
+3. **The snapshot's money keys are renamed, `schemaVersion` goes to 9, and a reader maps v1–v8 on the way in.** Stored documents are never rewritten: the 43 production documents, 9 of them signed, keep the exact JSON they were issued with and render the figures they were signed against.
+
+### 8.15 A fourth correction to §8.8's map: `marginCents` is not dead
+
+§8.8 lists `marginCents` as "deleted". It is not dead and Stage 2 keeps it. It is computed in `solar-money.ts:433`, carried on both breakdown types (`:336`, `:388`), propagated through `purchaseFromUnits` (`:534`, `:1123`) and **read at `:1237`**, where a partner's percentage basis is taken as a share of it. A test pins it (`solar-money.test.ts:260`).
+
+Deleting it would remove the percentage-basis path, which moves money and is not Stage 2's to move. It keeps its name in this stage; if the vocabulary wants it renamed, that is a decision for the stage that touches the percentage basis.
+
+**Method note for the rest of Stage 2.** Renames are driven by the TYPE, never by text. A field is renamed on its type definition, `tsc` then enumerates exactly the call sites that read that field on that type, and only those are edited. Proved on `SnapshotFinancing.contractPriceCents`: one definition change, 29 errors, 12 files, no false positives. It matters here because `contractPriceCents`, `basePriceCents`, `adderTotalCents` and `grossPpwCents` each exist on `PurchaseBreakdown`, on the `SolarFinance` row AND in the stored snapshot, and the three do not rename to the same word.
+
+**Order is load-bearing in `CompareRow`**, which carries both names: rename `grossPpwCents` → `baseFinalPpwCents` FIRST, then `netPpwCents` → `grossPpwCents`. The other order collapses both into one field.
+
+### 8.16 Stage 2, slice 1: the snapshot money keys, read through one door (2026-09-15)
+
+**Landed.** The six money keys on `SnapshotFinancing` carry the §8.13 spellings, the builder stamps `schemaVersion: 9`, and `PRICING_CALCULATION_VERSION` **stays 6** — the shape moved, the arithmetic did not, which is the distinction the type's own doc comment insists on.
+
+**There was no choke point, and that is the whole finding.** Every reader cast the raw Prisma JSON straight to `SolarProposalSnapshot`, so nothing sat between the stored document and the code reading it. The rename therefore type-checked perfectly — `tsc` exit 0 — and broke 19 integration tests, because a stored v7 document answers `undefined` to every new name. `readProposalSnapshot` is now that door: it respells `financing` on the way out, hands a v9 document back uncopied, prefers the current spelling where a row carries both, and **never restamps `schemaVersion`** — a v7 page relabelled v9 would be a document claiming to be something it is not. Nine production cast sites route through it.
+
+**Two readers the compiler could not see.** `commission-pricing.ts`'s `measureFromSignedDocument` and `compareWithSignedDocument` take `snapshot: unknown` and reach for `s.financing?.basePriceCents` / `contractPriceCents` through a structural cast. Renaming the type does not touch them and no error is raised. Had this slice shipped without routing them, **every one of the 43 pre-v9 documents would have frozen the commission measure from the live deal instead of the signed document** — silently, and in direct contradiction of owner decision #2. `as unknown` and `Record<string, unknown>` defeat the type-directed method completely; only a test finds these.
+
+**Every option nests its own copy, and no fixture had one.** `ProposalPaymentOption.financing` is a whole `SnapshotFinancing` (`solar-proposal.ts:886`), not a reference to the document's — and `components/proposal/solar/index.tsx:335` reads it *there* to draw the customer's payment menu. The first cut of this reader translated only the top level, which would have left a legacy document rendering a menu of empty prices on the page a homeowner opens. Nothing caught it: **every legacy fixture in the integration suite is `financing`-only and carries no `options` array**, so the nested path was untested and the suite was green while the bug was live. The reader now respells each option's block as well. `scripts/backfill-credit-scenario.ts`, which reads that nested block for its credit maths, takes **two views of one row** — the reader's for reading, the stored object for writing back — so a frozen document is never respelled on disk by a backfill.
+
+**One site deliberately still reads raw.** `snapshotFingerprint` hashes the canonical JSON with keys sorted at every level, so respelled keys produce a different digest. Routing it through the reader would change the fingerprint hex printed on the signature certificate of every already-signed document. `proposal-signature.ts:173` keeps reading `proposal.snapshot` directly; the local variable above it is routed and independent.
+
+**Scope correction.** The snapshot's `loanMonthlyPaymentCents` → `loanMonthlyCents` is **deferred**, against the earlier intention to fold it in. Of its 21 references nearly all are the `SolarFinance` row and the `validateFinance` shape; only one is the snapshot. Running that rename beside the pending Prisma rename to `lenderMonthlyPaymentCents` would put two same-named renames in one working set. It costs one line in the reader's mapping table later.
+
+**Legacy fixtures are kept verbatim.** The old-key snapshots in the integration tests carry `schemaVersion` 2 and 7 and are the only legacy-shaped documents under test. They were not modernised — they are the regression evidence that the reader works on exactly what production holds. The one test that did change, `pricing-stage1.itest.ts`, strips a key from a *freshly generated* document to simulate an unpriced one; it now filters both spellings so it cannot silently assert against a fully priced document.
+
+**The CI text guard is deferred to the end of Stage 2.** A `solar-battery-fee-retired.test.ts`-style "no file mentions this string" assertion would fail on correct code today: `contractPriceCents` is still a live `SolarFinance` column and a Nova `ReportedPrice` field. The guard goes in once the remaining slices have landed; until then the reader's own behaviour test holds the line.
+
+**Verified at slice close.** `tsc` 0 · unit 2495/2495 · lint clean on every touched file · integration back to its baseline of 7 (`retention` ×6, `visit-crew` ×1, both pre-existing on main). The rename opened 19 integration failures and closed all 19. One further failure, `stage-history`, proved to be a parallel-contention flake: it passes 10/10 twice in isolation and touches no pricing code.
+
+### 8.17 Two more corrections to §8.13's map, found before slice 2 edited anything
+
+§8.13 heads its Prisma table "code-only renames via `@map`, no column renames", then lists two rows that are not renames at all. Both are wrong, and both stay as they are in Stage 2.
+
+1. **`SolarSettings.creditIncentiveLabel` is NOT unused.** §8.13 says "unused | retired". It is read at `src/app/portal/leads/[id]/page.tsx:690` (`incentiveLabel: solarSettings.creditIncentiveLabel`) and it has a live text input bound to it in `src/components/portal/solar-settings-form.tsx` (`:68`, `:196`, `:495`). Retiring it would delete a setting the company edits by hand.
+2. **`SolarFinance.itcEstimateCents` is not free to drop.** §8.13 says "always null, legacy | dropped". It is a declared prop on `solar-panels.tsx:289` and pinned by three tests — and one of those, `solar-money.test.ts:298`, is a GUARD asserting the pricing source no longer mentions it. Dropping a column is also a destructive migration against production, which is neither a rename nor Stage 2's to do: "Stage 2 changes no numbers and no paperwork."
+
+Together with §8.15's `marginCents` correction this is the **third** row of §8.13/§8.8 that does not survive contact with the code. Treat that map as a proposal to be verified field by field, never as a worklist: check every "retired"/"dropped" claim against `git grep` before touching it.
+
+**Also incomplete:** §8.13's table does not list `SolarFinance.grossPpwCents` or `loanMonthlyPaymentCents` at all — their spellings come from §8.14's decisions (1) and (2). The Prisma slice renames seven `SolarFinance` fields, not the five the table shows.
+
+### 8.18 Stage 2, slice 2: the SolarFinance columns, renamed behind `@map` (2026-09-16)
+
+**Landed.** Seven `SolarFinance` fields take their §8.13/§8.14 spellings — `baseFinalPpwCents`, `baseFinalPerBatteryCents`, `addersInsideRuleCents`, `addersOutsideRuleCents`, `finalPriceCents`, `leaseMonthlyCents`, `lenderMonthlyPaymentCents`. Every one carries `@map("<old column>")`.
+
+**No column was renamed, and that is proven rather than asserted.** `prisma migrate diff` after the rename is byte-identical to the baseline captured before it, and mentions `solar_finance`, `RENAME COLUMN` and `DROP COLUMN` exactly **zero** times. No migration is produced; production is untouched. Capture the baseline FIRST — this repo has pre-existing drift, so "clean" is not the empty string.
+
+**`SolarFinanceView` and `AdderSplit` follow the row**, and are not scope creep: the first is field-for-field the row's shape, the second is handed straight to `solarFinance.update` as its `data`. Leaving them would have meant writing `grossPpwCents: row.baseFinalPpwCents` at every construction site — the two-vocabularies rot this rework exists to delete. The other named types (`PurchaseBreakdown`, `PurchaseInput`, `CompareRow`, `CompareBasis`, `FinanceRow`, `FinanceInput`, `SolarPriceSource`, `ReportedPrice`) keep their spellings: §8.13 specifies none of them, and renaming them would be inventing vocabulary nobody approved.
+
+**TWO DEFECTS THE COMPILER COULD NOT SEE.** Both shipped past `tsc` 0, unit 2495 green and lint clean. Only the integration suite found them.
+
+1. **`dealMoneyColumns` returned one vocabulary and three callers wrote it to another.** `DERIVED_KEYS` made it worse by serving three duties at once — the read key for the derivation's answer, the read key for the STORED row, and the write key into Prisma. After the rename it read `undefined` off the row, so every column compared as changed (quietly breaking that function's own "writes only when a figure moved" promise), and then wrote a column Prisma does not have. Fixed by translating once at that function's exit, which also repaired `proposal-reprice-actions.ts:348` — a write **no failing test covered**.
+2. **Every adder on every deal silently priced at zero.** `financeRowForProduct({ ...f, ...adders, batteryPriceCents })`: `AdderSplit` had just been renamed to the column vocabulary, and `FinanceInput`'s adder fields are **optional**. So the spread contributed two keys nothing reads and omitted the two that are read, leaving `?? 0`. This is the one derivation that prices every deal. **A spread is exempt from excess-property checking and a missing optional is not an error**, so no type system anywhere could have reported it; the only symptom is the contract price ceasing to follow the adders. Now mapped explicitly.
+
+**Two corrections to claims made while working this slice.** (a) The Prisma write blindness was first attributed to spreads skipping excess-property checks; at *that* site the real cause was the explicit `Record<string, unknown>` widening plus a `readonly string[]` key list. (b) The spread mechanism is nonetheless real — it is what caused the adder zeroing, a different site entirely. Both statements were made before the evidence justified them.
+
+**A known sibling, not a live bug.** `property/owner-records.ts:83` builds `const data: Record<string, unknown> = {}` and passes it to `prisma.knock.update`. Structurally identical to the `DERIVED_KEYS` trap. `Knock` is untouched by this rename, so nothing is broken today — but it is waiting for whichever rename reaches that model.
+
+**Method note, earned the hard way.** Four separate structural regexes over call syntax produced false negatives or false positives in this slice — lexical containment could not find spread-built payloads, `[^}]*` could not cross a nested `{ leadId }`, and a positional diff of a snapshot reported 44 phantom value changes that were only alphabetical reordering. What actually worked: the **runtime error's own file:line**, a **type sweep for `Record<string, unknown>`**, **`tsc` after renaming a type definition**, and **key-aware** comparison. Prefer a detector that cannot silently return empty.
+
+**Goldens: only names moved.** 13 snapshot blocks, **0 values moved, 0 keys missing**, verified key-by-key against the committed file rather than positionally. A strong check here, because the adder defect had zeroed these very figures mid-slice and they returned identical.
+
+**Pre-existing, NOT touched: `payroll_items_commissionId_idx`.** The index exists in the database and `schema.prisma` does not declare it, so `migrate diff` proposes dropping it — exactly the hazard `SolarFinance`'s `@@index([lenderProductId])` comment was written to warn about ("which is how an index quietly leaves production"). It is not a rename, so it is not this slice's to fix. **For the owner's attention.**
+
+**Verified at slice close.** `tsc` 0 · unit 2495/2495 · lint clean on all 27 changed files · integration back to its baseline of 7 (`retention` ×6, `visit-crew` ×1) · `migrate diff` unchanged.
+
 ### 8.19 The signed-contract lock: the chokepoint, and the three paths that went round it (2026-09-16)
 
 Ordered AHEAD of Stage 2 by the owner, after a production deal was found with
@@ -1277,3 +1390,817 @@ when a caller forgets to ask (an adder written straight past the guarded action
 moves nothing); and under an unlock it goes through and says what moved.
 Unit 2,495; integration 791 passing with the 7 baseline failures; typecheck and
 the touched files' lint clean. **No golden figure moved.**
+
+### 8.20 Known defects, logged and NOT fixed (2026-09-16)
+
+Found during the Stage 2 collision audit. Both are live on `origin/main`; neither
+is caused by the rework, and neither is being fixed in it. Listed so that the
+next person to touch these files knows, and so the rename does not quietly
+inherit them.
+
+**1. A company target is displayed as the company default.**
+`src/components/portal/solar/system-price.tsx:446` renders
+`Company default ${(defaultPpwCents / 100).toFixed(2)}/W`. The value reaching it
+is built two components up as
+`settings?.targetNetPpwCents ?? settings?.defaultGrossPpwCents ?? null`
+(`src/app/portal/leads/[id]/solar-proposal/page.tsx`, `origin/main:534`), so on
+any company that has set a target, the rep is told the TARGET is the DEFAULT.
+They are different figures with different meanings: the default is a starting
+price, the target is the floor the company must keep per watt after the lender's
+cut. Live on main. Rep-facing only; no customer document reads it.
+
+**2. `grossPpwCents` means two different things.**
+- `src/lib/solar-money.ts` — gross per watt, **before** the dealer fee.
+- `src/lib/solar-compare.ts:186` — `CompareRow.grossPpwCents` is the **sticker,
+  fee included**, fed from `cap?.stickerPpwCents ?? uncappedPpwCents` (`:270`);
+  the pre-fee figure in that same type is confusingly called `netPpwCents`
+  (`:190-199`, "what the company keeps per installed watt").
+
+So in one module "gross" is pre-fee and in the other it is post-fee, and "net"
+in `CompareRow` means what "gross" means everywhere else. This is why §8.8's
+proposed `CompareRow.netPpwCents → grossPpwCents` was **disqualified**: it would
+rename a figure INTO a name that already means the opposite in the neighbouring
+file. `CompareRow.netPpwCents` becomes `keptPpwCents` instead (§8.21), and
+`grossPpwCents` is left overloaded on purpose — **a later pass**, not this one.
+
+---
+
+## 8.21 Stage 2, slice 3 — the revised map as APPLIED
+
+One meaning, one name. Every rename below is code-only: the column keeps its
+name on disk behind `@map`, so no migration was produced and none is needed.
+Proved, not asserted — `prisma migrate diff --from-migrations` against the
+schema returns *"This is an empty migration."*, with zero `RENAME COLUMN`,
+`DROP COLUMN`, `ALTER TYPE` or `DROP TYPE`.
+
+| was | is | stays on disk as |
+|---|---|---|
+| `SolarFinalPpwMode` (enum) | `SolarPriceRuleMode` | `@@map("SolarFinalPpwMode")` |
+| `SolarLender.maxFinalPpwCents` | `priceRulePpwCents` | `maxFinalPpwCents` |
+| `SolarLender.finalPpwMode` | `priceRuleMode` | `finalPpwMode` |
+| `SolarLender.maxFinalPricePerBatteryCents` | `priceRulePerBatteryCents` | `maxFinalPricePerBatteryCents` |
+| `SolarLender.finalBatteryPriceMode` | `priceRuleBatteryMode` | `finalBatteryPriceMode` |
+| `SolarSettings.defaultGrossPpwCents` | `companyDefaultBasePpwCents` | `defaultGrossPpwCents` |
+| `SolarSettings.targetNetPpwCents` | `targetBasePpwCents` | `targetNetPpwCents` |
+| `SolarFinance.monthlyPaymentCents` | `leasePaymentCents` | `monthlyPaymentCents` |
+| `SolarDealComp.basePriceCents` | `baseKeptCents` | `basePriceCents` |
+| `*.financedOnTop` (×3 models) | `outsidePriceRule` | `financedOnTop` |
+
+### The owner's rulings, and how each was honoured
+
+- **`finalPriceCents` ALLOWED; derived vs stored distinguishable in the TYPE.**
+  The stored column is `SolarFinance.finalPriceCents` (`@map("contractPriceCents")`).
+  The freshly-worked-out one on `CommissionDeal` is now branded
+  `DerivedPriceCents`, made only by `derivedPrice()`. Same name, because it is
+  the same quantity; different type, because one of them is as old as the last
+  save. The brand paid for itself immediately — five fixtures that handed a bare
+  `number` where a derived figure was required stopped compiling.
+- **The stale comment at `commission-pricing.ts:170` is fixed.** It cited
+  `SolarFinance.contractPriceCents`, which is not a field under that name.
+- **`leaseMonthlyCents → leasePaymentCents`**, `CompareRow.netPpwCents →
+  keptPpwCents`, settings column → `companyDefaultBasePpwCents` (the existing
+  prop left alone), enum → `SolarPriceRuleMode`.
+- **`programmeLabel`: the v1–v8 READER strips the dealer fee, not the renderer.**
+  `respellFinancing` takes it off `financing.programmeLabel`, and the options
+  loop takes it off each `options[].label` — a SIBLING of `financing`, which the
+  respelling never reaches and which is the string the payment menu actually
+  prints. The four render-time `withoutDealerFee` calls in `pay.tsx` and
+  `payment-menu.tsx` are deleted. Safe because every customer-facing door reads
+  through `readProposalSnapshot`: `proposal-public.ts:73`, `print-access.ts:46`
+  and the preview page — verified, not assumed.
+- **`grossPpwCents` stays overloaded. Nothing was renamed into it.**
+
+### Deliberately NOT renamed
+
+- **`solar-money.ts`'s own vocabulary.** `PurchaseInput.maxFinalPpwCents`,
+  `finalPpwMode`, `PurchaseBreakdown.contractPriceCents`, `CompareRow`/
+  `OfferProduct.maxFinalPpwCents` are inputs and outputs of the pricing library,
+  not rows. Where a row meets them there is now an explicit adapter — row names
+  in, library names out — never a spread. `deal-money.ts`'s "ONE VOCABULARY AT
+  THE EXIT" block is the model.
+- **Three FUNCTIONS that share a name with a field they do not mean:**
+  `leaseMonthlyCents` (`solar-money.ts:1132`), `lenderProductLabel`
+  (`solar-lender-product.ts:61`) and `financedOnTopFor` (`adders.ts:132`). A
+  blanket rename hit the first of these and broke its import in
+  `solar-panels.tsx:35`; every file was afterwards classified by whether it
+  imports the function or holds the field.
+- **Stored spellings.** `basePriceCents`, `monthlyPaymentCents`,
+  `lenderProductLabel` survive in `LEGACY_FINANCING_KEYS`, in pre-v9 document
+  fixtures, and in the `@map` arguments. A frozen document is the household's
+  copy of what they agreed to; it is translated on the way out, never rewritten.
+
+## 8.22 What slice 3 cost, and the three defects it surfaced
+
+**Results.** `tsc` 0. Unit 167 files / 2,506 passing, 0 failing. Integration
+791 passing with **exactly the 7 pre-existing failures** — six in
+`storage/retention.itest.ts`, one in `calendar/visit-crew.itest.ts` — and no
+others. Lint clean on the touched set (one pre-existing `_drop` warning in
+`solar-validation-storage.test.ts`, last touched by `06a3451`, not this work).
+
+**The goldens did not move.** The golden's own output key `basePriceCents`
+became `baseKeptCents`, so the `.snap` changed and a positional diff reports
+phantom movement — renamed keys re-sort. Proved key-aware instead: 725
+`key → value` pairs before, 725 after, and with the rename applied to the
+baseline, **no value lost and none introduced**. A spelling moved; no number did.
+
+**Three real defects, all of the same family — a renamed field reaching a
+payload the compiler had stopped checking.**
+
+1. `solar-dealer-fee-adders-in-gross.test.ts` — a $7,000 re-roof came out of
+   `adderTotals` at **zero**. `AdderLine.outsidePriceRule` is optional by design,
+   and the fixture was a *variable*, so excess-property checking never ran:
+   `financedOnTop` was accepted as a stranger key while the field that is read
+   stayed `undefined`. Fixed, and the array is now annotated `AdderLine[]` so the
+   next stale key fails to compile rather than priced at nothing.
+2. `pricing-golden.itest.ts` seeded lenders through `{ companyId, ...data } as
+   never`, spelling four retired **field** names. Spread past the property check,
+   then cast past everything else.
+3. The same file spread an adder bag carrying `financedOnTop` straight into
+   `solarDealAdder.create`.
+
+Prisma addresses FIELDS, not columns, so each of these is a runtime failure
+under a clean `tsc`. Together they took the first integration run to 26 failed
+files; with them fixed it meets the bar exactly.
+
+**The guard** (`solar-pricing-retired-names.test.ts`) is positional, not a word
+ban — most of these spellings are still correct in `solar-money.ts`. It checks
+(a) no retired **field** name appears as a key inside a Prisma call, with an
+annotated `prisma-retired-ok` escape for genuine stored-JSON literals, (b) the
+two fully dead spellings appear nowhere in `src/`, and (c) `DERIVED_KEYS`,
+`FROZEN_MEASURE_SELECT` and `LENDER_TERMS_SELECT` name only fields their models
+actually have — the string lists neither `tsc` nor the positional check can see,
+and the construction that has already been wrong here once.
+
+**Known limit, stated rather than papered over:** the guard matches retired
+names written as literal keys. It does **not** catch one arriving through a
+spread — which is how defects 2 and 3 got in. The rule that does catch them is
+the one `deal-money.ts` already states: MAP across a vocabulary boundary, never
+spread.
+
+**Flagged for a later pass, not fixed here:** `grossPpwCents` still means
+pre-fee in `solar-money.ts` and the fee-inclusive sticker on `CompareRow`; and
+`financedOnTopFor` keeps a retired word in a function name.
+
+## 8.23 Stage 3 — `priceDeal()`, both credit states, connected to nothing
+
+One function, two readings of the same deal (§8.1). `src/lib/solar-price-deal.ts`.
+
+**Connected to nothing, verified rather than asserted:** `git grep` finds no
+importer of the module anywhere in `src/`, tests included. Stage 4 points the
+25 price sites (§8.5) at it; that is a separate, approved step.
+
+**The ladder is credit-independent and lives above both states.** Base, adders,
+equipment charges, gross, dealer fee and final are computed once; only the
+credit amount, net final, net gross, lender amount and revenue differ between
+states. That is what makes **"credits never move commission"** structural: there
+is no per-state base for a commission to read by accident. Pinned by a test that
+prices one deal with every credit claimed and with none and compares the
+redline basis.
+
+**Verified against §8.1, to the cent**, for a 10 kW deal quoted at $4.00/W:
+
+| | credits applied | credits not applied |
+|---|---|---|
+| final | $40,000 | $40,000 |
+| credit amount (30+10+10%) | $20,000 | $0 |
+| net final (signed, funded, paid on) | $20,000 | $40,000 |
+| net gross, at a 25% fee | $15,000 | $30,000 |
+| revenue, at a 50% payout | $25,000 | $30,000 |
+
+**D9 is proved two ways, not asserted once.** `creditDollarMarginPct` is
+compared against the revenue difference between the two states divided by the
+credit amount, so the flag and the arithmetic check each other:
+
+- 25% fee at a 50% payout — **loses** 25¢ per credit dollar
+- 18% fee — **loses** 32¢ (the owner's own figure)
+- 65% fee — **gains** 15¢
+
+**The naming rule is enforced by a test.** No field on a priced deal, in either
+state, carries the word "contract". `PurchaseBreakdown.contractPriceCents` still
+does and is MAPPED — not spread — at the boundary. Stage 2 established what a
+spread across a vocabulary boundary costs; this module does not repeat it.
+
+**Two deliberate deviations from §8.8's vocabulary, both forced:**
+
+1. §8.8 lists `basePriceCents` for the fee-removed base. That name lost its
+   argument during Stage 2: the owner ruled it out because the proposal snapshot
+   already uses it for the STICKER. The later ruling wins — the field is
+   `baseKeptCents` (§8.21).
+2. D9 makes `monetizerPayoutRate` a column with per-programme and per-deal
+   overrides. That is schema work and belongs to the model flip in **Stage 5,
+   which is not started**. So it is an ordinary input here, and
+   `revenueCents`/`losesMoneyOnCreditDollars` return **null** when it is absent
+   — "we cannot tell" is not "it is fine".
+
+**Also handled:** the sign-today credit is not a federal credit, so it reduces
+the net final in BOTH states and sits inside the lender amount (D2); it is
+clamped to what is left, so a rep typing $999,999 never produces a negative
+bottom line. A storage-only deal climbs the same ladder over batteries and
+reports every per-watt rate as zero rather than a $/W derived from a battery
+count. A lease or PPA has no system price and therefore no credit to apply, but
+still carries its real installed watts so a per-watt rule can pay on it.
+
+**Results.** `tsc` 0. 21 new tests, all passing. Unit suite 168 files / 2,527
+passing, 0 failing. Lint clean.
+
+**STOPPED HERE.** Stage 4 (rewire the 25 sites) and Stage 5 (the model flip: D1,
+D2, D3, D6, D9) are NOT started — credit ownership is with counsel and Stage 5
+depends on that answer.
+
+## 8.24 The spread hole, guarded (before Stage 4)
+
+Stage 2's three defects were one family: a renamed field reaching a payload the
+compiler had stopped checking. The retired-name guard (§8.22) catches a retired
+spelling written as a literal KEY inside a Prisma call. It cannot see one that
+arrives through a **spread**, which is how two of the three got in.
+
+**Why the compiler cannot help.** TypeScript checks an object literal's OWN
+properties for excess keys. A spread member is exempt — always, and however the
+target is typed. So `prisma.solarDealAdder.create({ data: { leadId, ...line } })`
+type-checks perfectly while `line` carries a key the model does not have. Prisma
+addresses FIELDS, not columns, so that either throws `Unknown argument` or,
+where a cast widened it first, writes nothing and reports success.
+
+**`solar-prisma-payload-spread.test.ts`** is a RATCHET over the money-bearing
+models (`solarFinance`, `solarLender`, `solarLenderProduct`, `solarDealAdder`,
+`solarDesign`, `solarSettings`, `solarDealComp`, `solarEquipment`,
+`solarProposal`). All 37 spreads that exist today are listed; a new one fails
+until somebody adds it deliberately, which is the moment to ask whether the
+payload should be MAPPED instead. A stale entry fails too, so removing a spread
+means removing its line and the list cannot grow a fiction.
+
+A blanket ban was the alternative and was rejected: 93 sites repo-wide, which
+would have buried the three that matter in churn.
+
+**The three named production sites, closed by what actually type-checks there:**
+
+- `lender-product-actions.ts:149` spreads a FRESH OBJECT LITERAL. It is now
+  annotated `Omit<Prisma.SolarLenderProductUncheckedCreateInput, "companyId">`.
+  Excess-property checking applies to a literal's own keys, so all sixteen are
+  now checked; the two trailing `...(cond ? {} : {…})` guards stay exempt, which
+  is harmless — they carry `rank` and `isActive`.
+- `actions.ts:1017` and `:1505` spread **zod parses**. No annotation and no
+  assignment can restore the check there, because the parse is not a fresh
+  literal at the call site. So a second test proves each schema's keys against
+  the model's own field list, read out of `schema.prisma` — at the schema, which
+  is where the two halves are supposed to agree.
+
+**The guard's first run was wrong, and that is worth recording.** The key
+scanner reported `only`, `MW`, `URL` and `javascript` as schema fields — words
+harvested out of `// Loans only.`, `Capped at 1 MW` and a note about
+`javascript:` links, because it walked brace depth without blanking comments and
+string literals. A guard that invents findings gets muted, so it blanks them
+now. It also used a `/…/s` regex, which this repo's target rejects (`TS1501`).
+
+**Results.** `tsc` 0. Unit 169 files / 2,531 passing. Lint clean.
+
+## 8.25 Stage 4, slice 4a — one fee rule, resolved once
+
+The dealer fee reached a deal from three places and was resolved in three
+different ORDERS by three different files:
+
+- `financeRowForProduct` read the programme first — correct.
+- `proposal-generate.ts` fetched the programme row, selected `dealerFeePct` on
+  it at `:446`, and then read `finance.dealerFeePct` at six sites instead.
+- `readiness.ts` read the deal's cached copy too.
+
+So one deal could be PRICED on the programme's rate and JUDGED against its own.
+On production that is not hypothetical: **Amos 30 Year Solar publishes 0% while
+all five of its deals cache 65%**, and `pricing.below_lender_floor` has been
+refusing them on a number no other part of the system used.
+
+**`src/lib/solar-dealer-fee.ts`** now owns the precedence, unchanged from the
+one `solar-finance-row.ts` already had:
+
+1. the PROGRAMME's fee today — the partner's published rate
+2. the copy cached on the deal — what it was last generated at
+3. the company default
+
+`??` and never `||`. Amos's 0% is a real, deliberate rate; `||` reads it as
+"unset" and falls through to the stale 65%, quoting a fee the partner does not
+charge. That case is the FIRST test in the file, because every other fixture
+uses a non-zero programme fee and would pass either way.
+
+**Signed deals are not re-resolved, and this gate is load-bearing.**
+`commission-pricing.ts` does NOT read a frozen measure — it reads
+`finance.dealerFeePct` live off the row, and says why: the signed document never
+prints the fee, so the base a commission is measured on cannot be taken off the
+document. Only the redline TERMS are snapshotted at signing. Had generation
+refreshed the cached fee unconditionally, regenerating the one signed Amos deal
+would drop it 65% → 0%, moving `baseKeptCents` from 35% of final to 100% —
+**nearly tripling the commission measure on a sold deal.** So `dealSignedAt()`
+gates the refresh: a signed deal keeps its copy, full stop.
+
+**The new field hit the hole guarded in §8.24, immediately.** `FinanceRow` gained
+`dealerFeeSource`, which is PROVENANCE and not a column. `deal-money.ts`'s exit
+spreads `...rest` into a Prisma payload, so the new key would have type-checked
+perfectly and failed at runtime with `Unknown argument`. It is destructured out
+by name with a comment saying why. The guard written before Stage 4 caught the
+first change Stage 4 made.
+
+**What moves on production.** Nothing a customer sees. `ppwBasis` on Amos 30
+Year Solar is `final`, so the fee does not enter the final price — it only
+splits it. The four UNSIGNED Amos deals move from a cached 65% to the
+programme's 0%:
+
+| Figure | Before | After | Why |
+|---|---|---|---|
+| Fee on 4 unsigned Amos deals | 65% (cached) | 0% (programme) | D8: the programme is the authority on an unsigned quote |
+| Kept base on those deals | 193¢/W | 550¢/W | fee no longer taken out of a `final`-basis price |
+| `pricing.below_lender_floor` | blocking all 5 | clears on the 4 | 550¢ ≥ the 200¢ floor once the fee is 0 |
+| Fee on the 1 SIGNED Amos deal | 65% | **65%** | frozen; `dealSignedAt` gate |
+| Customer final price, all 5 | — | **unchanged** | basis is `final`; the fee splits it, it does not set it |
+
+**This unblocks those deals for the wrong reason, and the owner should know
+that.** The programme's 0% is almost certainly the misconfigured value, not the
+deals' 65%: `solar-validation.ts:568` records that Amos publishes 65% against a
+flat $5.50/W. Setting the programme to 65% in the UI makes this slice a no-op
+for Amos and keeps the floor block — which is the honest state until the cap or
+the floor is also corrected. See §8.26 for the three settings.
+
+**Results.** tsc 0. Unit 170 files / 2,541 passing. Goldens unmoved. Lint clean
+(0 errors, 0 warnings).
+
+**The schema change cannot migrate, proved on the DDL.** The first check written
+for this counted `///` lines in the diff and reported 14 non-comment lines, which
+REFUTED the claim it was meant to support — `npx prisma format` had realigned
+field padding across three models. Counting comment markers was the wrong test.
+The right one strips comments, normalises whitespace and compares what is left:
+**3,039 DDL-significant lines before, 3,039 after, 0 differences.** Whitespace
+cannot produce DDL, so no migration is possible from this commit.
+
+## 8.26 Amos 30 Year Solar — the three settings (read-only, 2026-09-16)
+
+Read from production inside `BEGIN READ ONLY … ROLLBACK`. **Nothing was
+changed.** The owner sets these in the UI.
+
+**They are not on one screen**, which is most of why the numbers looked like
+they contradicted each other: the fee is on the PROGRAMME, the cap and the floor
+are both on the LENDER.
+
+| Setting | Model / UI location | Value now |
+|---|---|---|
+| Dealer fee | `SolarLenderProduct.dealerFeePct` — Settings → Lenders → Amos Capital Fund → programme **Amos 30 Year Solar** | **0%** |
+| Price-rule $/W | `SolarLender.priceRulePpwCents` — Settings → Lenders → **Amos Capital Fund** (lender row) | **550¢/W, mode `cap`** |
+| Min base $/W floor | `SolarLender.minBasePpwCents` — same lender row | **200¢/W** |
+
+**The premise was inverted.** The programme stores **0%**; the **deals** store
+65%. `solar-validation.ts:568` records that Amos genuinely publishes 65%, so the
+PROGRAMME row is the one never filled in — the deals are right.
+
+**Why it refuses.** Base kept = `round(sticker × (1 − fee))`, and the cap holds
+sticker at 550. At 65%: `round(550 × 0.35)` = **193¢** < the 200¢ floor.
+
+**What each would need to be** — change any ONE of the three:
+
+| Fee | Cap must be | …or floor must be | …or fee must be |
+|---|---|---|---|
+| **65%** | **≥ 570¢** ($5.70/W) | **≤ 193¢** ($1.93/W) | ≤ **63.7%** |
+| **60%** | 550¢ works as-is | 200¢ works as-is | — |
+| **50%** | 550¢ works as-is | 200¢ works as-is | — |
+
+**The cap is only the ceiling — each deal clears the floor on its own sticker.**
+At 60% a deal needs sticker ≥ **499¢**; at 50%, ≥ **399¢**.
+
+| Deal sticker | at 65% | at 60% | at 50% |
+|---|---|---|---|
+| 550¢ ×3 (one **signed**) | ✗ 193¢ | ✓ 220¢ | ✓ 275¢ |
+| 474¢ | ✗ 166¢ | ✗ 190¢ | ✓ 237¢ |
+| 284¢ | ✗ 99¢ | ✗ 114¢ | ✗ 142¢ (needs fee ≤ 29.7%) |
+
+**Caveat:** only the pricing FLOOR rule was checked. Generation runs the whole
+readiness gate, so a deal clearing the floor can still be refused elsewhere.
+
+## 8.27 Stage 4, slice 4b — the company default is a base everywhere
+
+`solar-finance-row.ts` grossed up `targetBasePpwCents` via `grossPpwFromNet` and
+then, three lines later, consumed `companyDefaultBasePpwCents` as a raw STICKER.
+Two figures that both mean "what the company keeps per watt", one converted and
+one not.
+
+**The cost, quantified.** On the test company — default base 350¢, fee 18% — the
+fallback quoted **350¢/W** and kept `round(350 × 0.82)` = **287¢/W**. The company
+kept 63¢/W less than its own stated default and the lender's cut came out of its
+margin. It now stickers at `round(350 / 0.82)` = **427¢/W** and keeps exactly
+**350¢/W**.
+
+**Pinned figures that move:**
+
+| Figure | Before | After | Why |
+|---|---|---|---|
+| Fallback sticker, default 350¢ @ 18% | 350¢/W | **427¢/W** | the default is a base; it grosses up like the target beside it |
+| Kept base on that fallback | 287¢/W | **350¢/W** | the company keeps what it says it keeps |
+| `solar-finance-row.test.ts` assertion | `sticker === base` | `kept === base` | the old assertion pinned the conflation itself |
+| Team page worked example headline | printed the base as the quoted rate | prints the sticker | `solarExample.grossPpwCents` → `basePpwCents` |
+
+**No production figure moves.** Production has `defaultDealerFeePct` = 0, so the
+conversion is the identity; and `targetBasePpwCents` is set (250¢), so the
+company-default fallback is unreachable for purchases there at all.
+
+**Customer documents unmoved:** `pricing-golden.test.ts` 16/16, and the golden
+snapshot file is byte-identical in git.
+
+**Schema:** `companyDefaultBasePpwCents`'s comment no longer says "gross". DDL
+compared before and after: **3,039 significant lines each, 0 differences.**
+
+## 8.28 Stage 4, slice 4c — what "connect the 25 sites" actually requires
+
+§8.5's list is an inventory of places that work out a price. Reading all of them
+against `priceDeal()` shows they are **not one kind of site**, and the difference
+decides what can be connected and what would be vandalism.
+
+**Three of the twenty-five compute nothing.** `solar-deal-value.ts`,
+`payroll/solar-engine.ts` and `solar-system-of-record.ts` make ZERO calls to the
+money primitives — they read stored or frozen figures. Pointing them at
+`priceDeal()` would ADD computation where the design deliberately reads what was
+frozen, which is the defect the snapshot chain exists to prevent. They are
+listed as price sites; they are readers. **Not connected, on purpose.**
+
+**Five more are conversions, not ladders.** `solar-proposal-options.ts:219, 237,
+326, 368, 455` are `basePpwFromSticker`/`grossPpwFromNet` calls that take THIS
+deal's base and re-gross it by EACH alternative programme's fee, so the menu
+compares one system across partners. `priceDeal()` prices one deal at one fee
+and exposes no entry point for that conversion. Connecting them means one
+`priceDeal()` call per menu row — defensible, and a bigger change than a swap.
+
+**A blocker I reported, then disproved.** I recorded that the customer's
+document could not be connected because `solar-proposal.ts` passes the WHOLE
+`PurchaseBreakdown` into `savingsModel` (`purchase?: PurchaseBreakdown` at
+`:330`), and that `onTopAdderStickerCents` and `marginCents` were missing from
+`DealPrice`. The first half was reasoning from the boundary's SHAPE without
+asking what crosses it for. Checked:
+
+- **`savingsModel` reads exactly ONE field off `purchase`: `contractPriceCents`.**
+  And `:533` already reads `args.purchasePriceCents ?? args.purchase?.contractPriceCents`,
+  with `:1868` already passing `purchasePriceCents`. So site 5 needs no signature
+  change at all.
+- The whole file reads seven fields, and all seven map onto `DealPrice`:
+  `baseStickerCents → baseFinalCents`, `adderStickerCents → addersFinalCents`,
+  `batteryStickerCents → equipmentFinalCents`,
+  `batteryPriceCents → equipmentChargesCents`,
+  `contractPriceCents → finalPriceCents`, plus `finalPpwCents` and `systemWatts`
+  unchanged.
+
+Structural assignability was never available anyway: `DealPrice` renames
+`contractPriceCents → finalPriceCents`, so it cannot satisfy `PurchaseBreakdown`
+whatever fields are added to it. **Site 5 is connectable by mapping.**
+
+**`addersOutsideRuleFinalCents` added; `marginCents` deliberately not.**
+`ladderFrom` never copied `onTopAdderStickerCents` across, and it has a real
+reader — `system-price.tsx:782` uses it to name a financed roof separately. The
+goldens already spell it `addersOutsideRuleFinalCents`
+(`pricing-golden-deals.ts:532`), so the name matches the established vocabulary
+rather than inventing a synonym.
+
+`marginCents` was added and then REMOVED. It is
+`grossPriceCents - equipmentCostCents`; `PriceDealInput` carries no cost, and no
+caller anywhere in `src/` passes one. On `DealPrice` it could only ever have
+reported zero — a field that can only mislead a site reading it. The test that
+briefly "covered" it asserted `0 === 0`.
+
+A field-by-field test now pins the superset, with a $7,000 ON-TOP adder in the
+fixture: priced with none, the very assertion that matters passes while proving
+nothing, which is how the field came to be missing in the first place.
+
+**One mapping was tried and discarded, and the gap behind it is now closed.**
+`CompareRow.grossPpwCents` (the sticker, fee included — §8.20 defect 2) looks
+like `DealPrice.baseFinalPpwCents`. It is NOT safe to substitute:
+`baseFinalPpwCents` is `round(baseStickerCents / systemWatts)`, which is **0 on
+a zero-watt row**, and the shelf sets `grossPpwCents` on every row including
+ones where `priced` is null entirely. The substitution would print $0.00/W on a
+storage row.
+
+That was the third gap — `priceDeal()` exposed the `capped` FLAG but never the
+capped STICKER. **Closed in §8.30** by `DealPrice.stickerPerUnitCents`, which
+carries the rate per watt on an array and per BATTERY on a storage job. The
+zero-watt edge resolves correctly: `capStickerToFinalUnit` returns `uncapped`
+the moment `units <= 0`, so such a row reports the sticker it was handed rather
+than a zero.
+
+**Status, stated plainly.** 4a (one fee rule) and 4b (the company default as a
+base) are LANDED and green. **4c is NOT done: no site has been rewired to
+`priceDeal()` yet.** What this slice did is classify all twenty-five, disprove
+the blocker I had reported against site 5, and close the one real API gap
+(`addersOutsideRuleFinalCents`) so the remaining sites can be connected by
+mapping. Three sites should never be connected (they are readers, not price
+sites); five are conversions needing one call per menu row; one gap remains open
+(the capped sticker, for `solar-compare.ts`).
+
+## 8.29 Stage 4c, site 5 — the customer's document prices through `priceDeal()`
+
+The first of §8.5's twenty-five actually rewired, and deliberately the one with
+the most protection rather than the least: sixteen goldens and a byte-identical
+snapshot file sit under it, so a cent of drift is a red test.
+
+**What it did.** `solar-proposal.ts` called `pricePurchase` for an array and
+`purchaseFromUnits(priceStoragePurchase(…))` for batteries, then read eleven
+fields off the result across seventeen sites. It now calls `priceDeal()` once
+and reads `DealPrice`: `contractPriceCents → finalPriceCents`,
+`baseStickerCents → baseFinalCents`, `adderStickerCents → addersFinalCents`,
+`batteryStickerCents → equipmentFinalCents`,
+`batteryPriceCents → equipmentChargesCents`, with `systemWatts` and
+`finalPpwCents` unchanged.
+
+**No partner rule is passed, on purpose.** The ceiling was applied upstream in
+`proposal-generate.ts`, which caps and WRITES BACK, so the sticker arriving here
+has already had it. Passing the rule would solve the cap a second time against
+an already-capped figure.
+
+**That licence was earned first (§`solar-no-rule-equivalence.test.ts`).** The
+document called `pricePurchase`; `priceDeal()` routes through
+`priceStoredPurchase`, and storage through `priceStorageStored` rather than
+`priceStoragePurchase` — DIFFERENT FUNCTIONS whose split is deliberate. 50 cases
+now pin that with no rule they are identical. The specific doubt was `ppwBasis`,
+which defaults to `final` on the stored path even when the rule is null; it
+turns out `capStickerToFinalUnit` returns `uncapped` on `max == null` BEFORE the
+basis default is read.
+
+**`savingsModel`'s `purchase` argument is no longer passed.** `:533` reads
+`args.purchasePriceCents ?? args.purchase?.contractPriceCents`, and
+`purchasePriceCents` is already supplied on every purchase — so the fallback was
+already unreachable. Passing a `DealPrice` there is impossible in any case:
+it renames `contractPriceCents`, so it can never satisfy `PurchaseBreakdown`.
+The parameter is left on the signature; removing it is not this request's scope.
+
+**A claimed behaviour difference, RETRACTED.** This section first stated that
+`priceDeal` forces the fee to zero on cash while `pricePurchase` has only the
+generic `0 < pct < 100` guard, so a cash deal carrying a stray fee "prices
+differently now" — a real change the goldens could not catch.
+
+**That was false.** `priceUnits` zeroes the fee on cash at exactly the same
+point (`solar-money.ts:401`):
+
+```ts
+const rawPct = input.product === "cash" ? 0 : input.dealerFeePct;
+```
+
+The two paths agree on cash to the cent. The claim came from reading
+`pricePurchase`'s signature and inferring the mechanism instead of measuring it;
+the test written to pin the "difference" falsified it on its first run
+(`expected 4000000 not to be 4000000`). The test is kept, inverted, so the
+question has a measured answer.
+
+Recorded rather than quietly deleted because it is the third claim in this
+document to fail the same way — see §8.25's DDL proof and §8.28's savingsModel
+blocker. All three asserted a mechanism read off a fragment. **The rule this
+earns: a claim about how code behaves gets a test or a line reference before it
+gets written down.**
+
+**Results.** tsc 0. Unit 171 files / 2,593 passing. Goldens 16/16 and the
+snapshot file byte-identical in git. Lint clean.
+
+**Remaining in 4c:** 24 of 25 sites. Three should never be connected (readers,
+not price sites); five are per-programme conversions needing one call per menu
+row; `solar-compare.ts` still needs a capped-sticker accessor `priceDeal()` does
+not expose.
+
+
+## 8.30 `DealPrice.stickerPerUnitCents` — the rate a deal is actually priced at
+
+`priceDeal()` reported WHETHER a partner's ceiling bit (`priceRule.capped`) but
+never WHAT it left. Three sites need that figure as a value:
+
+| Site | Uses it for |
+|---|---|
+| `proposal-generate.ts:529, 595` | **writes it back** to `SolarFinance.baseFinalPpwCents` / `baseFinalPerBatteryCents` |
+| `solar-compare.ts:270` | each column's headline $/W |
+| `system-price.tsx:313` | showing the rep what the ceiling did |
+
+All three were verified by reading the call sites, not recalled — the standard
+`marginCents` failed in §8.28, where a field was added that nothing read and
+that could only ever report zero.
+
+**Why it is not `baseFinalPpwCents`.** That field is
+`baseStickerCents / systemWatts`. On an array the two agree exactly. On a
+STORAGE job `systemWatts` is zero, `purchaseFromUnits` zeroes every per-watt
+figure, and it reads **0** while the real per-battery rate is thousands of
+dollars. `proposal-generate.ts` writes this number to the database, so reusing
+it would have priced a battery deal at nothing. A test pins that case
+specifically.
+
+**One normalisation.** `FinalPpwCap` spells it `stickerPpwCents`; `UnitCap`
+spells it `stickerPerUnitCents`. `priceDeal` reached `priced.cap` only for
+`capped` and `adderOverrun` — fields both types share — so the divergence had
+never surfaced. It is normalised inside `priceDeal`, once, so no caller has to
+know which kind of deal it is holding.
+
+Five cases pin it: no rule, a cap that bites, storage where every per-watt
+figure is 0, a flat per-battery rule, and a lease (which sells electricity and
+has no unit to price).
+
+## 8.31 Stage 4c, site 3 — generation caps and prices in one call
+
+`proposal-generate.ts` solved the partner's ceiling in a `capStickerToFinalPpw`
+ABOVE the branch, picked the sticker by hand between the two, then priced with
+`pricePurchase` inside it — and did the same again per battery with
+`capStickerToFinalUnit` plus `priceStoragePurchase`. Both collapse to one
+`priceDeal()` call that caps and prices together.
+
+§8.30 made it possible: this site does not merely display the capped rate, it
+**writes it back** to `SolarFinance.baseFinalPpwCents` and
+`baseFinalPerBatteryCents`. Reusing `baseFinalPpwCents` would have written **0**
+on every storage deal. The standalone `capped` const goes too — it was computed
+above the branch and ran on storage deals that never read it.
+
+### The integration suite cannot be trusted on the shared schema
+
+Two consecutive runs of this change reported **22** then **20** failures across
+`automations`, `dashboard`, `projects`, `team`, `payroll`, `vertical/isolation`
+and `storage` — modules this file cannot reach — with errors like
+`vertical_test.companies does not exist` while `psql` showed that table present.
+
+**Another session shares this Postgres and migrates the same schema.**
+`vertical_test._prisma_migrations` holds **200** rows against this branch's
+**192** on disk, and all eight extras are a books/accounting workstream dated
+the same day:
+
+```
+20260916120000_books_double_entry_ledger   20260916150000_bank_feeds
+20260916130000_books_drop_fake_connection  20260916150000_bank_reconciliation
+20260916140000_journal_line_account_cascade 20260916160000_bank_rules
+20260916090000_payroll_items_commission_id_index
+20260916170000_accountant_readonly_role
+```
+
+Nothing on this branch is missing from it, so the schema is AHEAD, not behind.
+The tell that it was contention rather than a regression: **the failure set
+changed between two consecutive runs of identical code.** A regression is
+deterministic; a moving schema is not.
+
+**The recipe — use a private schema, which the config already supports:**
+
+```bash
+VERTICAL_TEST_DATABASE_URL="postgresql://anexa:anexa@127.0.0.1:5544/anexa?schema=vertical_stage4c" \
+  npx vitest run --config vitest.integration.config.ts
+```
+
+`globalSetup` migrates it from this branch's own 192 migrations. Result: **791
+passing, 7 failures — exactly the pre-Stage-4 baseline** (`retention` ×6,
+`visit-crew` ×1, both pre-existing).
+
+### A flaw in this session's own gate, fixed
+
+Three times a dead import survived because the occurrence count included the
+COMMENT that named it — `purchaseFromUnits` at site 5, then
+`capStickerToFinalPpw` and `pricePurchase` here. Worse, the commit gate tested
+`eslint` EXIT CODE only, and unused imports are **warnings**, which exit 0. So
+"lint clean" in earlier commit messages meant "no errors", not "no warnings".
+The gate now counts warnings, and occurrence counts blank comments first.
+
+## 8.32 Stage 4c, site 20 — the builder shelf prices through `priceDeal()`
+
+`purchaseRow` grossed the deal's base up by each offer's own fee, solved the
+partner's ceiling with `capStickerToFinalPpw`, then priced the result with
+`pricePurchase`. The cap and the price now come from one `priceDeal()` call,
+and the column's headline $/W is `stickerPerUnitCents` — the field §8.30 added.
+
+**The base→sticker conversion stays at the call site.** `CompareBasis` carries
+`basePpwCents`, a PRE-fee figure, and the whole point of the shelf is that one
+base grosses up differently under each partner's fee. `priceDeal` takes a
+sticker with the fee already inside, so `stickerCents()` remains — what
+collapsed is the cap solve and the pricing.
+
+**Three traps worked out before editing, each of which would have moved a
+rep-facing number:**
+
+1. **The zero-kW row.** `cap` was computed whenever a sticker existed, while
+   `priced` was additionally gated on `systemSizeKwDc > 0`. Dropping that guard
+   to let one call do both would have flipped `contractPriceCents` from `null`
+   to an adders-only figure on every column with no array. The guard is kept —
+   and losing the cap there costs nothing, because `capStickerToFinalUnit`
+   returns the sticker untouched as soon as `units <= 0`.
+2. **`priceRule` is `null` on cash** in `priceDeal`, where compare previously
+   computed a real but no-op cap. Both reach `false` through `?? false`.
+3. **The `if (!priced) return base;` guard** had to move with the rename or the
+   later reads lose their non-null narrowing.
+
+**Proof it moved nothing:** `pricing-golden.test.ts:186` snapshots
+`columnFigures` for every column of every golden deal — headline $/W, contract
+price, kept $/W, cap flags. The snapshot file is **byte-identical in git**.
+
+Integration re-run in the private schema (§8.31): 791 passing, 7 failures — the
+baseline.
+
+**Stage 4c now stands at 4 of 25 sites rewired:** the customer's document (§8.29),
+the commission measure, generation (§8.31), and the builder shelf.
+
+## 8.33 Stage 4c — COMPLETE. Every price site prices through `priceDeal()`
+
+**Measured, not asserted.** A comment-aware sweep of `src/` (code lines only —
+see the note on `sed` below):
+
+| | count |
+|---|---|
+| Files calling a raw price primitive outside the pricing library | **0** |
+| Files pricing through `priceDeal()` | **11** |
+| Files holding base↔sticker conversions only (these stay) | **9** |
+
+The eleven: `leads/[id]/page.tsx`, `member-pay-structure.tsx`,
+`solar-panels.tsx`, `solar/system-price.tsx`, `solar-compare.ts`,
+`solar-finance-row.ts`, `solar-proposal-options.ts`, `solar-proposal.ts`,
+`commission-pricing.ts`, `deal-money.ts`, `proposal-generate.ts`.
+
+### A correction to this document's own counting
+
+§8.28 and four commit messages in this stage say "of 25" and "of 22". **Both
+denominators were wrong.** They counted files and call sites that include
+base↔sticker conversions and pure readers — neither of which is a price site,
+and neither of which `priceDeal()` has a door for. On the measure that matters
+— *code that prices a deal outside the pricing library* — the true figure was
+**11 files**, and it is now **0**.
+
+`solar-validation.ts`, `proposal-reprice-actions.ts` and
+`solar-lender/detail.tsx` were on the "sites to connect" list and should never
+have been: they contain conversions and a floor judgement, and nothing else.
+
+### What each remaining conversion converted
+
+Six sites landed in this stretch. Each one hid a detail that would have moved a
+number, and none was caught by a test — all were found by reading the consumers
+before editing:
+
+1. **`solar-finance-row.ts`** — cap-then-price collapsed. Cash cannot diverge
+   because `lp` is already null on cash by the guard where it is resolved.
+   Proved with 210 differential cases against the transcribed old arithmetic.
+2. **`solar-proposal-options.ts`** — the per-battery ceiling. A cap-ONLY site:
+   a primitive became a ladder of which one number is kept. 96 cases.
+3. **`leads/[id]/page.tsx`** — the deal page's working price. Its adders rung
+   wants BOTH halves, which is `addersCents` — correct only because of the fix
+   below.
+4. **`member-pay-structure.tsx`** — a worked example with no lender, which is
+   why it carries a reviewed `ALLOWED` entry rather than a partner rule.
+5. **`solar/system-price.tsx`** — TWO pairs, array and battery. `product: "loan"`
+   pinned on the battery: the old code capped separately and ignored the
+   product, so passing `fee > 0 ? "loan" : "cash"` through would have stopped
+   capping a 0%-fee programme.
+6. **`solar-panels.tsx` + `deal-money.ts`** — the builder strip and the deal
+   save. Here `product` passes straight through, because those old calls were
+   `priceStoredPurchase`/`priceStorageStored`, which null the rule on cash
+   themselves. **Same-looking sites, opposite correct answers.**
+
+### Two defects found on the way, both fixed
+
+**`priceDeal` counted a financed-on-top adder twice** (`c38ba27`).
+`priceUnits` builds `adderTotalCents` as `inside + onTop`, and `ladderFrom` then
+added `onTop` again — so `addersCents` was `inside + 2 × onTop`, and
+`addersInsideRuleCents` held the total under a name saying otherwise. On the
+suite's own fixture, $16,500 against a true $9,500. It survived because the two
+input types describe the on-top adders in **opposite directions and both are
+correct**: disjoint on the INPUT, "of that" on the OUTPUT. Not live — nothing
+read `addersCents` — but the deal page conversion above would have put it on a
+screen.
+
+**Both CI guards had gone blind to Stage 4** (`d5a4e4f`). Guard 1 triggers on
+`pricePurchase(`; guard 3 on a list of five functions. `priceDeal` was in
+neither, so **every conversion silently removed a file from their view** — six
+of the first seven, one per commit. The old trigger saw 3 files under `src/`;
+the extended one sees 11. A guard a refactor can retire without anyone deciding
+to retire it is the same hole as a spread the guard cannot see.
+
+### The ratchet
+
+"Zero raw primitives outside the library" was a property of the tree, not a
+rule, and would have lasted until the next screen needed a price and found
+`pricePurchase` first — which is how eleven independent price sites came to
+exist. `solar-partner-price-rule.test.ts` now asserts it, with a negative
+control: a ratchet whose regex matched nothing would pass exactly as green.
+
+### Verification
+
+- `tsc` 0, unit **173 files / 2,945 tests**, lint 0 errors 0 warnings on every
+  changed file.
+- Integration in the private schema `vertical_stage4c`: **791 passing, 7
+  failing** — byte-identical to this branch's baseline (`storage/retention` ×6,
+  `calendar/visit-crew` ×1, both pre-existing and unreachable from these diffs).
+- Golden snapshots **byte-identical in git** throughout. **No customer price
+  moved.**
+
+### A flaw in this session's own measuring, recorded
+
+Several sweeps used `sed '/^\s*\*/d'` to strip block comments. **BSD/macOS `sed`
+does not support `\s`**, so that pattern deleted nothing and comment lines were
+counted as code. It produced a wrong reading of where the guards' evidence
+lived, which was then quoted as justification in a commit message. The claim
+happened to be true; the evidence for it was worthless. Everything above was
+re-measured with a comment-aware parser.
+
+The same habit caught a second time, one paragraph up: the test count in
+**Verification** was first written as "2,950" from arithmetic in my head, before
+the suite was run. The measured figure is 2,945. A verification section carrying
+a predicted number is not a verification section, and the prediction was wrong
+by five.
+
+### Not done, and deliberately
+
+- **Stage 5 — waits on counsel.** Not started.
+- **D4 wording — not shipped.** Credits stay out of the contract.
+- **The storage-only gap on the deal page** (§ in the site 7 commit):
+  `batteryChargeCents` returns 0 on a storage-only deal, so that page's working
+  price would be its adders with the batteries missing. Unreachable today —
+  production holds no storage-only design (6 `pv_storage`, 2 `pv`, read-only
+  check) — and fixing it changes what a screen shows, which is not what a
+  conversion is for.
+- **Lease/PPA commission has no test anywhere**, which is why
+  `commission-pricing.ts` stays product-gated rather than delegating wholesale.
+- **The e2e suite has never been run on this branch.** 17 specs are already red
+  on `main`, so that signal needs separating before it means anything.

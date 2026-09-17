@@ -7,7 +7,7 @@ import {
   resolveReportedSystem,
   type DesignSystem,
 } from "@/lib/solar-system-of-record";
-import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
+import { readProposalSnapshot } from "@/lib/solar-proposal";
 import { resolveDeal } from "../access";
 import { NOT_SET, formatDateTime, formatKw, formatMoney, formatPct } from "../format";
 import { defineTool, z } from "./define";
@@ -68,7 +68,7 @@ export const getDeal = defineTool({
       }),
       prisma.solarFinance.findUnique({
         where: { leadId },
-        select: { product: true, monthlyPaymentCents: true, rateMillsPerKwh: true },
+        select: { product: true, leasePaymentCents: true, rateMillsPerKwh: true },
       }),
       // The deal page's own question: the approved version, else the newest.
       prisma.solarProposal.findFirst({
@@ -105,7 +105,7 @@ export const getDeal = defineTool({
           // contract price, and Nova says so.
           contractPriceCents: null,
           netAfterCreditsCents: null,
-          monthlyPaymentCents: finance?.monthlyPaymentCents ?? null,
+          monthlyPaymentCents: finance?.leasePaymentCents ?? null,
           rateMillsPerKwh: finance?.rateMillsPerKwh ?? null,
         }
       : null;
@@ -117,7 +117,7 @@ export const getDeal = defineTool({
             status: proposal.status,
             at: (proposal.sentAt ?? proposal.createdAt).toISOString(),
             approved: proposal.approvedAt != null,
-            snapshot: proposal.snapshot as unknown as SolarProposalSnapshot,
+            snapshot: readProposalSnapshot(proposal.snapshot)!,
           }
         : null,
       design: designSystem,

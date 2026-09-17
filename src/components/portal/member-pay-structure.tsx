@@ -10,7 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { VERTICAL_ACCENT, type ActiveVertical } from "@/lib/vertical";
-import { pricePurchase } from "@/lib/solar-money";
+import { grossPpwFromNet } from "@/lib/solar-money";
+import { priceDeal } from "@/lib/solar-price-deal";
 import { solarRepPayCents, centsPerWattLabel, millsPerWattLabel } from "@/lib/solar-pay";
 import { updateMemberPayAction } from "@/server/modules/team/actions";
 
@@ -127,7 +128,7 @@ export function MemberPayStructure({
   current: MemberPay;
   canEdit: boolean;
   /** The company's own pricing defaults, so the example is this company's deal. */
-  solarExample: { grossPpwCents: number; dealerFeePct: number };
+  solarExample: { basePpwCents: number; dealerFeePct: number };
   /** Lenders currently on fixed pay, so "$0.40/W" is not an unexplained number. */
   perWattLenders: string[];
 }) {
@@ -196,20 +197,49 @@ export function MemberPayStructure({
   const battRedlineCents = battRedline.trim() === "" ? null : Math.round((Number(battRedline) || 0) * 100);
   const battFlatCents = battFlat.trim() === "" ? null : Math.round((Number(battFlat) || 0) * 100);
 
+  /**
+   * The company default is a BASE — what the company keeps per watt before the
+   * lender's cut — so the deal describing it stickers ABOVE it. Converted once,
+   * here, and used both to price the example and to headline it, so the
+   * sentence and the figures underneath it cannot disagree.
+   */
+  const exampleStickerPpwCents =
+    grossPpwFromNet(solarExample.basePpwCents, solarExample.dealerFeePct) ??
+    solarExample.basePpwCents;
+
   const example = React.useMemo(() => {
-    const priced = pricePurchase({
+    /*
+     * NO PARTNER RULE, DELIBERATELY. This is a worked example at the company's
+     * own default figures — no deal, no customer, no lender — so there is no
+     * ceiling to hold it to. That is why the file carries a reviewed entry in
+     * solar-partner-price-rule.test.ts's ALLOWED rather than passing a rule.
+     *
+     * With no rule to apply, `priceDeal` and the `pricePurchase` this replaced
+     * are the same arithmetic: `priceDeal` routes through `priceStoredPurchase`,
+     * which caps and then prices, and an absent ceiling makes the cap a no-op.
+     * Proved over the 50 no-rule cases in solar-no-rule-equivalence.test.ts.
+     *
+     * `systemType: "pv"` is named rather than left to a default, so the example
+     * is priced over watts by intent — the storage figures below it are a
+     * separate illustration with no watts at all.
+     */
+    const priced = priceDeal({
       product: "loan",
+      systemType: "pv",
       systemSizeKwDc: EXAMPLE_KW,
-      stickerPpwCents: solarExample.grossPpwCents,
+      baseFinalPpwCents: exampleStickerPpwCents,
       dealerFeePct: solarExample.dealerFeePct,
-      adderTotalCents: 0,
+      // The figure is the company default from Settings, and saying so is the
+      // whole point of the sentence this example sits under.
+      dealerFeeSource: "companyDefault",
+      addersInsideRuleCents: 0,
     });
-    const deal = { systemWatts: priced.systemWatts, basePriceCents: priced.basePriceCents };
+    const deal = { systemWatts: priced.systemWatts, baseKeptCents: priced.baseKeptCents };
     // The storage job the two per-battery bases are shown against. No watts, by
     // definition — which is the whole reason those bases exist.
     const storage = {
       systemWatts: 0,
-      basePriceCents: EXAMPLE_BATTERY_BASE_CENTS,
+      baseKeptCents: EXAMPLE_BATTERY_BASE_CENTS,
       batteryQty: EXAMPLE_BATTERIES,
     };
     return {
@@ -244,7 +274,7 @@ export function MemberPayStructure({
               storage
             ),
     };
-  }, [redlineCents, perWattMills, battRedlineCents, battFlatCents, solarExample.grossPpwCents, solarExample.dealerFeePct]);
+  }, [redlineCents, perWattMills, battRedlineCents, battFlatCents, exampleStickerPpwCents, solarExample.dealerFeePct]);
 
   const who = isRep ? "rep" : "manager";
 
@@ -579,7 +609,7 @@ export function MemberPayStructure({
             <div className="rounded-lg bg-muted/50 p-3">
               <p className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
                 <Info className="size-3.5" /> On a {EXAMPLE_KW} kW deal at{" "}
-                {centsPerWattLabel(solarExample.grossPpwCents)} through a {solarExample.dealerFeePct}% lender
+                {centsPerWattLabel(exampleStickerPpwCents)} through a {solarExample.dealerFeePct}% lender
               </p>
               <dl className="mt-2 space-y-1.5 text-xs">
                 <div className="flex items-baseline justify-between gap-2">

@@ -178,12 +178,12 @@ export default async function SolarProposalBuilderPage({
           portalUrl: true,
           creditInstructions: true,
           logoUpdatedAt: true,
-          maxFinalPpwCents: true,
+          priceRulePpwCents: true,
           minBasePpwCents: true,
-          maxFinalPricePerBatteryCents: true,
+          priceRulePerBatteryCents: true,
           minBasePricePerBatteryCents: true,
-          finalBatteryPriceMode: true,
-          finalPpwMode: true,
+          priceRuleBatteryMode: true,
+          priceRuleMode: true,
           // How this partner's closing credit is arrived at — see
           // `solar-sign-today`. Every column of the shelf resolves its own.
           signTodayMode: true,
@@ -287,7 +287,7 @@ export default async function SolarProposalBuilderPage({
         priceMillsPerWatt: true,
         isVeryCommon: true,
         consumptionAdjustable: true,
-        financedOnTop: true,
+        outsidePriceRule: true,
       },
     }),
     listDealAdders(user.companyId, lead.id),
@@ -527,12 +527,12 @@ export default async function SolarProposalBuilderPage({
           portalUrl: l.portalUrl,
           creditInstructions: l.creditInstructions,
           logoUrl: lenderLogoUrl(l.id, l.logoUpdatedAt),
-          maxFinalPpwCents: l.maxFinalPpwCents,
-          finalPpwMode: l.finalPpwMode,
+          priceRulePpwCents: l.priceRulePpwCents,
+          priceRuleMode: l.priceRuleMode,
           minBasePpwCents: l.minBasePpwCents,
-          maxFinalPricePerBatteryCents: l.maxFinalPricePerBatteryCents,
+          priceRulePerBatteryCents: l.priceRulePerBatteryCents,
           minBasePricePerBatteryCents: l.minBasePricePerBatteryCents,
-          finalBatteryPriceMode: l.finalBatteryPriceMode,
+          priceRuleBatteryMode: l.priceRuleBatteryMode,
           signTodayMode: l.signTodayMode,
           signTodayFixedCents: l.signTodayFixedCents,
           signTodayCapPpwCents: l.signTodayCapPpwCents,
@@ -565,7 +565,7 @@ export default async function SolarProposalBuilderPage({
         // and otherwise the plain default sticker, which on a company with no
         // target is the same figure by another name.
         defaultBasePpwCents={
-          settings?.targetNetPpwCents ?? settings?.defaultGrossPpwCents ?? null
+          settings?.targetBasePpwCents ?? settings?.companyDefaultBasePpwCents ?? null
         }
         creditRates={settings.creditRates}
         // Which credits this job earns. A deal with no financing row yet has
@@ -591,10 +591,10 @@ export default async function SolarProposalBuilderPage({
           priceMillsPerWatt: a.priceMillsPerWatt,
           isVeryCommon: a.isVeryCommon,
           consumptionAdjustable: a.consumptionAdjustable,
-          financedOnTop: financedOnTopFor(
+          outsidePriceRule: financedOnTopFor(
             lenderAdderRuleMap,
             a.id,
-            a.financedOnTop,
+            a.outsidePriceRule,
           ),
         }))}
         adderLines={adderLines}

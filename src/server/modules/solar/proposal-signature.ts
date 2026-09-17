@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { prisma } from "@/server/db/client";
 import { runUnscoped } from "@/server/vertical/context";
-import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
+import { readProposalSnapshot } from "@/lib/solar-proposal";
 import {
   publicAuditDetail,
   type ProposalAuditEvent,
@@ -143,7 +143,7 @@ export async function certificateFor(proposalId: string): Promise<ProposalCertif
   );
   if (!signature) return null;
 
-  const snapshot = proposal.snapshot as unknown as SolarProposalSnapshot;
+  const snapshot = readProposalSnapshot(proposal.snapshot)!;
   /**
    * REDACTED HERE, at the one place a certificate is built.
    *

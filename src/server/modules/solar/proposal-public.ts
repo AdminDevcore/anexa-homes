@@ -1,6 +1,6 @@
 import { prisma } from "@/server/db/client";
 import { runUnscoped, runInVertical, asActiveVertical } from "@/server/vertical/context";
-import { withCustomerContact, type SolarProposalSnapshot } from "@/lib/solar-proposal";
+import { withCustomerContact, readProposalSnapshot } from "@/lib/solar-proposal";
 import type { ActiveVertical } from "@/lib/vertical";
 import type { ProposalCertificate } from "@/lib/proposal-signature";
 import { isSignatureImage } from "@/lib/signature-image";
@@ -70,7 +70,7 @@ export async function getPublicSolarProposal(token: string) {
     // See `withCustomerContact` for why this one field is allowed to and the
     // rest of the snapshot is not.
     snapshot: withCustomerContact(
-      proposal.snapshot as unknown as SolarProposalSnapshot,
+      readProposalSnapshot(proposal.snapshot)!,
       proposal.lead,
     ),
   };

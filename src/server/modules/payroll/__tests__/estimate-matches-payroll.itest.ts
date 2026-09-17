@@ -143,8 +143,8 @@ beforeEach(async () => {
   await raw.solarFinance.create({
     data: {
       companyId, leadId, vertical: "solar", product: "loan",
-      grossPpwCents: PPW, dealerFeePct: FEE,
-      contractPriceCents: SYSTEM_KW * 1000 * PPW,
+      baseFinalPpwCents: PPW, dealerFeePct: FEE,
+      finalPriceCents: SYSTEM_KW * 1000 * PPW,
     },
   });
   await raw.solarProposal.create({
@@ -398,7 +398,7 @@ describe("BATTERIES, priced beside the array", () => {
     });
     await raw.solarFinance.update({
       where: { leadId },
-      data: { stickerPricePerBatteryCents: 1_200_000 },
+      data: { baseFinalPerBatteryCents: 1_200_000 },
     });
     await inSolar(() => recomputeDealMoney(companyId, leadId));
   });
@@ -419,7 +419,7 @@ describe("BATTERIES, priced beside the array", () => {
      *
      * This is the documented rule, not an oversight — `solar-pay.ts` sends `pv`
      * and `pv_storage` down one path, and a redline is measured on
-     * `basePriceCents`, which the battery is deliberately priced outside of.
+     * `baseKeptCents`, which the battery is deliberately priced outside of.
      * The battery reaches the CONTRACT (recomputeDealMoney above puts it there)
      * without reaching the array's commission.
      *

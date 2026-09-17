@@ -168,7 +168,7 @@ describe("a solar deal from proposal to ledger", () => {
         } as Parameters<typeof saveSolarFinanceAction>[0])
       )).ok
     ).toBe(true);
-    expect((await raw.solarFinance.findUniqueOrThrow({ where: { leadId } })).contractPriceCents)
+    expect((await raw.solarFinance.findUniqueOrThrow({ where: { leadId } })).finalPriceCents)
       .toBe(CONTRACT);
 
     // ── 2 · PROPOSED ──────────────────────────────────────────────────────
@@ -209,7 +209,7 @@ describe("a solar deal from proposal to ledger", () => {
       } as Parameters<typeof saveSolarFinanceAction>[0])
     );
     expect(repRaise.ok).toBe(false);
-    expect((await raw.solarFinance.findUniqueOrThrow({ where: { leadId } })).contractPriceCents)
+    expect((await raw.solarFinance.findUniqueOrThrow({ where: { leadId } })).finalPriceCents)
       .toBe(CONTRACT);
 
     // Even a super admin must reopen it and say why.
@@ -340,13 +340,13 @@ describe("a solar deal from proposal to ledger", () => {
     const reason = "Lender correction — re-issued at a different rate";
     expect((await inSolar(() => unlockSignedContractAction({ leadId, reason }))).ok).toBe(true);
 
-    const before = (await raw.solarFinance.findUniqueOrThrow({ where: { leadId } })).contractPriceCents;
+    const before = (await raw.solarFinance.findUniqueOrThrow({ where: { leadId } })).finalPriceCents;
     expect((await inSolar(() =>
       saveSolarFinanceAction({
         leadId, product: "cash", grossPpwCents: 375, dealerFeePct: 0,
       } as Parameters<typeof saveSolarFinanceAction>[0])
     )).ok).toBe(true);
-    const after = (await raw.solarFinance.findUniqueOrThrow({ where: { leadId } })).contractPriceCents;
+    const after = (await raw.solarFinance.findUniqueOrThrow({ where: { leadId } })).finalPriceCents;
     expect(after).toBe(SYSTEM_KW * 1000 * 375);
 
     const logs = await raw.activityLog.findMany({ where: { leadId }, orderBy: { createdAt: "asc" } });

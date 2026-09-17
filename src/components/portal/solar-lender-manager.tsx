@@ -53,7 +53,7 @@ export function SolarLenderManager({
   lenders,
   sellableEquipment,
   canEdit,
-  targetNetPpwCents,
+  targetBasePpwCents,
   creditRates,
   adderCatalogue,
   initialLenderId,
@@ -63,7 +63,7 @@ export function SolarLenderManager({
   sellableEquipment: number;
   canEdit: boolean;
   /** From Solar Settings. Null = the sticker is not derived from a dealer fee. */
-  targetNetPpwCents: number | null;
+  targetBasePpwCents: number | null;
   creditRates: CreditRates;
   /** The sellable adders every lender is asked to rule on. */
   adderCatalogue: AdderRuleOption[];
@@ -195,7 +195,7 @@ export function SolarLenderManager({
           lender={selected}
           canEdit={canEdit}
           sellableEquipment={sellableEquipment}
-          targetNetPpwCents={targetNetPpwCents}
+          targetBasePpwCents={targetBasePpwCents}
           creditRates={creditRates}
           adderCatalogue={adderCatalogue}
           tab={tab}
@@ -227,8 +227,8 @@ function LenderRailRow({
   const needsWork = lender.isActive && (products === 0 || lender.approvedCount === 0);
 
   const price =
-    lender.maxFinalPpwCents != null
-      ? `${lender.finalPpwMode === "flat" ? "Flat" : "Max"} $${ppwToDollars(lender.maxFinalPpwCents)}/W`
+    lender.priceRulePpwCents != null
+      ? `${lender.priceRuleMode === "flat" ? "Flat" : "Max"} $${ppwToDollars(lender.priceRulePpwCents)}/W`
       : `${products} ${products === 1 ? "programme" : "programmes"}`;
 
   return (

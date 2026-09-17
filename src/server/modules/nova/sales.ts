@@ -3,7 +3,7 @@ import { prisma } from "@/server/db/client";
 import type { AccessUser } from "@/server/rbac/guards";
 import { listScope } from "@/server/rbac/policies";
 import { REPORTED_PROPOSAL_ORDER } from "@/lib/solar-system-of-record";
-import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
+import { readProposalSnapshot } from "@/lib/solar-proposal";
 import { getSaleLine } from "@/server/modules/pipeline/sale-line";
 
 /**
@@ -26,7 +26,7 @@ import { getSaleLine } from "@/server/modules/pipeline/sale-line";
  *   which also excludes lost stages), dated by when it FIRST entered that line
  *   (LeadStageEvent.enteredAt), within the caller's own row scope.
  *
- *   ITS VALUE is `snapshot.financing.contractPriceCents` on the proposal the
+ *   ITS VALUE is `snapshot.financing.finalPriceCents` on the proposal the
  *   deal reports — the approved version, else the newest — using the same
  *   REPORTED_PROPOSAL_ORDER the deal page uses. A deal with no priced proposal
  *   is counted and named, never added as $0.
@@ -63,8 +63,8 @@ export async function reportedPrices(
         select: { version: true, approvedAt: true, snapshot: true },
       });
       if (!p) return;
-      const financing = (p.snapshot as unknown as SolarProposalSnapshot | null)?.financing;
-      const cents = financing?.contractPriceCents ?? null;
+      const financing = readProposalSnapshot(p.snapshot)?.financing;
+      const cents = financing?.finalPriceCents ?? null;
       out.set(leadId, {
         // Zero means unpriced here, never a price — the solar-deal-value rule.
         contractPriceCents: cents != null && cents > 0 ? cents : null,

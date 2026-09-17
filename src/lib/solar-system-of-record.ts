@@ -180,14 +180,14 @@ export function resolveReportedSystem({
       // honest reading of "there is a battery on this deal".
       batteryQty: system.battery?.qty ?? (system.batteryLabel ? 1 : 0),
       product: financing.product,
-      contractPriceCents: financing.contractPriceCents,
+      contractPriceCents: financing.finalPriceCents,
       // THE LADDER THE DOCUMENT WAS SIGNED AGAINST, not today's rates and not
       // today's tick-boxes. Statute moves and a rep can untick a bonus after
       // the signature; neither changes what the household was handed. Absent on
       // every snapshot before v7, which reports no net at all rather than one
       // worked out from figures that were not in force.
       netAfterCreditsCents: financing.creditLadder?.netCostCents ?? null,
-      monthlyPaymentCents: financing.monthlyPaymentCents,
+      monthlyPaymentCents: financing.leasePaymentCents,
       rateMillsPerKwh: financing.rateMillsPerKwh,
     };
   }
@@ -342,7 +342,7 @@ const rung = (totalCents: number, watts: number): PriceRung => ({
  * Null on a document that quotes no price — a lease and a PPA are sold as a
  * monthly and a rate per kWh, and there is no ladder under either.
  *
- * `basePriceCents` is absent on documents generated before the base was frozen;
+ * `baseFinalCents` is absent on documents generated before the base was frozen;
  * those fall back to the total less everything priced separately, which is the
  * same reading the customer's own cost chapter takes of them.
  */
@@ -350,16 +350,16 @@ export function frozenPriceLadder(
   financing: SnapshotFinancing,
   sizeKwDc: number
 ): ReportedPriceLadder | null {
-  const contractPriceCents = financing.contractPriceCents;
+  const contractPriceCents = financing.finalPriceCents;
   if (contractPriceCents == null) return null;
   const watts = Math.max(0, Math.round(sizeKwDc * 1000));
-  const batteryPriceCents = Math.max(0, financing.batteryPriceCents ?? 0);
-  const adderTotalCents = Math.max(0, financing.adderTotalCents ?? 0);
-  const basePriceCents =
-    financing.basePriceCents ?? contractPriceCents - adderTotalCents - batteryPriceCents;
+  const batteryPriceCents = Math.max(0, financing.equipmentFinalCents ?? 0);
+  const adderTotalCents = Math.max(0, financing.addersFinalCents ?? 0);
+  const baseStickerCents =
+    financing.baseFinalCents ?? contractPriceCents - adderTotalCents - batteryPriceCents;
   return {
     source: "proposal",
-    base: rung(basePriceCents, watts),
+    base: rung(baseStickerCents, watts),
     adders: rung(adderTotalCents, watts),
     batteryPriceCents,
     batteryQty: financing.batteryQty ?? (financing.batteryLabel ? 1 : 0),

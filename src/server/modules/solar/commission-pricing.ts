@@ -1,6 +1,8 @@
 import type { FinanceProduct } from "@prisma/client";
 import type { Db } from "@/server/db/types";
-import { priceStoredPurchase, priceStorageStored, batteryChargeCents } from "@/lib/solar-money";
+import { batteryChargeCents } from "@/lib/solar-money";
+import { priceDeal } from "@/lib/solar-price-deal";
+import { readProposalSnapshot } from "@/lib/solar-proposal";
 
 /**
  * WHAT A SOLAR COMMISSION IS MEASURED ON — the deal's size and the base price it
@@ -34,9 +36,9 @@ export async function loadCommissionDeal(db: Db, companyId: string, leadId: stri
     db.solarFinance.findUnique({
       where: { leadId },
       select: {
-        product: true, grossPpwCents: true, dealerFeePct: true,
-        adderTotalCents: true, onTopAdderTotalCents: true, contractPriceCents: true,
-        stickerPricePerBatteryCents: true,
+        product: true, baseFinalPpwCents: true, dealerFeePct: true,
+        addersInsideRuleCents: true, addersOutsideRuleCents: true, finalPriceCents: true,
+        baseFinalPerBatteryCents: true,
         // Which price the partner's figure fixes is the quoted programme's to
         // say. No programme quoted reads as `final`, the rule as it always was.
         lenderProduct: {
@@ -63,10 +65,10 @@ export async function loadCommissionDeal(db: Db, companyId: string, leadId: stri
           select: {
             repPayMode: true,
             batteryPayMode: true,
-            maxFinalPpwCents: true,
-            finalPpwMode: true,
-            maxFinalPricePerBatteryCents: true,
-            finalBatteryPriceMode: true,
+            priceRulePpwCents: true,
+            priceRuleMode: true,
+            priceRulePerBatteryCents: true,
+            priceRuleBatteryMode: true,
           },
         },
       },
@@ -102,47 +104,59 @@ export async function loadCommissionDeal(db: Db, companyId: string, leadId: stri
   // sticker is only as capped as the lender was on the day it was saved, and
   // paying a redline overage on an uncapped figure pays out of money nobody is
   // ever sent.
-  const storagePurchase =
-    isStorage && (finance.product === "cash" || finance.product === "loan")
-      ? priceStorageStored({
+  /**
+   * THE DEAL, PRICED ONCE — through `priceDeal()` (Stage 4c).
+   *
+   * One function for the array and for the batteries, so a storage deal and a
+   * PV one climb the same ladder and cannot round differently from each other.
+   * The partner's ceiling is passed for exactly the reason the two calls this
+   * replaces passed it: a stored sticker is only as capped as the lender was on
+   * the day it was saved, and paying a redline overage on an uncapped figure
+   * pays out of money nobody is ever sent.
+   *
+   * GATED ON THE PRODUCT, and deliberately NOT delegated to `priceDeal`'s own
+   * lease/PPA branch. `priceDeal` answers for every product; the two calls this
+   * replaces answered only for cash and loan and left `null` behind for the
+   * rest — and `finalPriceCents` below FALLS BACK to the stored column on that
+   * null. Hand lease and PPA to `priceDeal` and the fallback stops firing, so a
+   * lease's final price reads 0 and the signed-document comparison reports a
+   * mismatch that is not there.
+   *
+   * Nothing would catch that: no test anywhere — unit or integration —
+   * exercises a lease or PPA commission deal. The gate is the protection, so
+   * it is explained rather than merely present.
+   */
+  const deal =
+    finance.product === "cash" || finance.product === "loan"
+      ? priceDeal({
           product: finance.product,
-          batteryQty: design.batteryQty,
-          stickerPricePerBatteryCents: finance.stickerPricePerBatteryCents,
-          dealerFeePct: finance.dealerFeePct,
-          adderTotalCents: finance.adderTotalCents,
-          onTopAdderTotalCents: finance.onTopAdderTotalCents,
-          maxFinalPricePerBatteryCents: design.lender?.maxFinalPricePerBatteryCents ?? null,
-          finalBatteryPriceMode: design.lender?.finalBatteryPriceMode,
-          batteryPriceBasis: finance.lenderProduct?.batteryPriceBasis,
-        }).breakdown
-      : null;
-
-  const purchase =
-    !isStorage && (finance.product === "cash" || finance.product === "loan")
-      ? priceStoredPurchase({
-          product: finance.product,
+          systemType: design.systemType,
           systemSizeKwDc: design.systemSizeKwDc,
-          stickerPpwCents: finance.grossPpwCents,
+          baseFinalPpwCents: finance.baseFinalPpwCents,
+          baseFinalPerBatteryCents: finance.baseFinalPerBatteryCents,
+          batteryQty: design.batteryQty,
           dealerFeePct: finance.dealerFeePct,
-          adderTotalCents: finance.adderTotalCents,
-          onTopAdderTotalCents: finance.onTopAdderTotalCents,
+          addersInsideRuleCents: finance.addersInsideRuleCents,
+          addersOutsideRuleCents: finance.addersOutsideRuleCents,
           // ON THE FINAL PRICE, OUT OF THE BASE. The household signs for the
-          // battery; a rep's redline is measured on `basePriceCents`, which the
+          // battery; a rep's redline is measured on `baseKeptCents`, which the
           // battery deliberately stays out of — it is priced from the catalogue
-          // to cover its own cost, exactly like an adder.
-          batteryPriceCents: batteryChargeCents({
+          // to cover its own cost, exactly like an adder. Ignored on a
+          // storage-only deal, where the battery IS the system.
+          equipmentChargesCents: batteryChargeCents({
             systemType: design.systemType,
             batteryQty: design.batteryQty,
-            dealPerBatteryCents: finance.stickerPricePerBatteryCents,
+            dealPerBatteryCents: finance.baseFinalPerBatteryCents,
             cataloguePerBatteryCents: design.battery?.priceCents ?? null,
           }),
-          maxFinalPpwCents: design.lender?.maxFinalPpwCents ?? null,
-          finalPpwMode: design.lender?.finalPpwMode,
+          priceRulePpwCents: design.lender?.priceRulePpwCents ?? null,
+          priceRuleMode: design.lender?.priceRuleMode,
           ppwBasis: finance.lenderProduct?.ppwBasis,
-        }).breakdown
+          priceRulePerBatteryCents: design.lender?.priceRulePerBatteryCents ?? null,
+          priceRuleBatteryMode: design.lender?.priceRuleBatteryMode,
+          batteryPriceBasis: finance.lenderProduct?.batteryPriceBasis,
+        })
       : null;
-
-  const priced = purchase ?? storagePurchase;
 
   return {
     product: finance.product,
@@ -158,28 +172,53 @@ export async function loadCommissionDeal(db: Db, companyId: string, leadId: stri
 
     // Zero on a storage deal, and zero is the truth there rather than a
     // conversion that did not happen.
-    systemWatts: isStorage ? 0 : (purchase?.systemWatts ?? Math.round(design.systemSizeKwDc * 1000)),
+    systemWatts: isStorage ? 0 : (deal?.systemWatts ?? Math.round(design.systemSizeKwDc * 1000)),
     batteryQty: design.batteryQty,
-    basePriceCents: priced?.basePriceCents ?? 0,
+    baseKeptCents: deal?.baseKeptCents ?? 0,
     /**
      * The final price, before any credit — what the signed document is checked
      * against when the measure is frozen. No pay is a share of it: an override
      * is a share of the rep's net.
      *
-     * DERIVED, not the stored column: `SolarFinance.contractPriceCents` is only
-     * as fresh as the last save, and a deal priced before adders were pulled
-     * inside the dealer fee carries a figure several thousand dollars light.
+     * DERIVED, not the stored column. `SolarFinance.finalPriceCents` — the row,
+     * which is still the column `contractPriceCents` on disk — is only as fresh
+     * as the last save, and a deal priced before adders were pulled inside the
+     * dealer fee carries a figure several thousand dollars light.
+     *
+     * The two are the same NAME on purpose (the figure is the same thing), so
+     * the difference that matters is carried by the TYPE: this one is branded
+     * `DerivedPriceCents` and the stored one is a plain `number`. A comment
+     * saying "derived" is advice; a brand is something the compiler holds.
      */
-    finalPriceCents: priced?.contractPriceCents ?? finance.contractPriceCents,
+    finalPriceCents: derivedPrice(deal?.finalPriceCents ?? finance.finalPriceCents),
   };
 }
 
 export type CommissionDeal = NonNullable<Awaited<ReturnType<typeof loadCommissionDeal>>>;
 
+declare const DERIVED_PRICE: unique symbol;
+
+/**
+ * A CONTRACT PRICE WORKED OUT NOW, rather than the one sitting on the row.
+ *
+ * `finalPriceCents` is the right name for both — they are the same quantity —
+ * but they are not interchangeable: the stored one is as old as the last save.
+ * Branding the derived one makes the difference something the compiler can see,
+ * so a figure that was freshly priced cannot be quietly swapped for a stale
+ * column, or the reverse, by a refactor that only reads the names.
+ *
+ * Assignable to `number` in both directions of USE — every consumer keeps
+ * working — but only `derivedPrice()` produces one.
+ */
+export type DerivedPriceCents = number & { readonly [DERIVED_PRICE]: true };
+
+/** The only way to make one: say out loud that this figure was just derived. */
+export const derivedPrice = (cents: number): DerivedPriceCents => cents as DerivedPriceCents;
+
 /** The three figures a commission multiplies. See `solarRepPayCents`. */
 export type CommissionMeasure = {
   systemWatts: number;
-  basePriceCents: number;
+  baseKeptCents: number;
   batteryQty: number;
   /** True when these came from the copy frozen at signing. */
   frozen: boolean;
@@ -188,14 +227,14 @@ export type CommissionMeasure = {
 /** The columns on `SolarDealComp` that hold the frozen measure. */
 export const FROZEN_MEASURE_SELECT = {
   systemWatts: true,
-  basePriceCents: true,
+  baseKeptCents: true,
   batteryQty: true,
   pricedAt: true,
 } as const;
 
 type FrozenMeasureColumns = {
   systemWatts: number | null;
-  basePriceCents: number | null;
+  baseKeptCents: number | null;
   batteryQty: number | null;
   pricedAt: Date | null;
 };
@@ -207,18 +246,18 @@ type FrozenMeasureColumns = {
  * Null only when neither exists — an unsigned deal that is not priced yet.
  */
 export function commissionMeasure(
-  live: Pick<CommissionDeal, "systemWatts" | "basePriceCents" | "batteryQty"> | null,
+  live: Pick<CommissionDeal, "systemWatts" | "baseKeptCents" | "batteryQty"> | null,
   comp: FrozenMeasureColumns | null
 ): CommissionMeasure | null {
   if (
     comp?.pricedAt != null &&
     comp.systemWatts != null &&
-    comp.basePriceCents != null &&
+    comp.baseKeptCents != null &&
     comp.batteryQty != null
   ) {
     return {
       systemWatts: comp.systemWatts,
-      basePriceCents: comp.basePriceCents,
+      baseKeptCents: comp.baseKeptCents,
       batteryQty: comp.batteryQty,
       frozen: true,
     };
@@ -226,7 +265,7 @@ export function commissionMeasure(
   return live
     ? {
         systemWatts: live.systemWatts,
-        basePriceCents: live.basePriceCents,
+        baseKeptCents: live.baseKeptCents,
         batteryQty: live.batteryQty,
         frozen: false,
       }
@@ -250,13 +289,17 @@ export function compareWithSignedDocument(
   live: Pick<CommissionDeal, "systemType" | "systemWatts" | "batteryQty" | "finalPriceCents">,
   snapshot: unknown
 ): { matches: boolean | null; differences: string[] } {
-  const s = (snapshot ?? {}) as {
-    financing?: { contractPriceCents?: unknown; batteryQty?: unknown };
+  // THROUGH THE READER, never straight at the stored JSON. Every document
+  // signed before v9 spells this `contractPriceCents`, and reading today's name
+  // off one of those rows yields undefined — which this function would report,
+  // perfectly quietly, as a document that matches the deal in every particular.
+  const s = (readProposalSnapshot(snapshot) ?? {}) as {
+    financing?: { finalPriceCents?: unknown; batteryQty?: unknown };
     system?: { sizeKwDc?: unknown };
     storage?: { batteryQty?: unknown };
   };
   const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
-  const documentFinal = num(s.financing?.contractPriceCents);
+  const documentFinal = num(s.financing?.finalPriceCents);
   // A storage job has no watts; its design can still carry a stale size.
   const documentWatts = live.systemType === "storage" ? null : num(s.system?.sizeKwDc);
   // The charged battery count where the price carries one, else the storage block's.
@@ -313,12 +356,15 @@ export function measureFromSignedDocument(
     systemType: "pv" | "pv_storage" | "storage";
   }
 ): Omit<CommissionMeasure, "frozen"> | null {
-  const s = (snapshot ?? {}) as {
-    financing?: { basePriceCents?: unknown; batteryQty?: unknown };
+  // Through the reader, for the reason given on `compareWithSignedDocument`:
+  // every proposal signed to date predates v9, and freezing the measure from
+  // the document is the whole point of this function.
+  const s = (readProposalSnapshot(snapshot) ?? {}) as {
+    financing?: { baseFinalCents?: unknown; batteryQty?: unknown };
     system?: { sizeKwDc?: unknown };
     storage?: { batteryQty?: unknown };
   };
-  const baseStickerCents = snapshotNumber(s.financing?.basePriceCents);
+  const baseStickerCents = snapshotNumber(s.financing?.baseFinalCents);
   if (baseStickerCents == null) return null;
 
   // The guard `priceUnits` applies, applied identically: cash carries no fee,
@@ -331,7 +377,7 @@ export function measureFromSignedDocument(
       deal.systemType === "storage"
         ? 0
         : Math.round((snapshotNumber(s.system?.sizeKwDc) ?? 0) * 1000),
-    basePriceCents: baseStickerCents - Math.round(baseStickerCents * f),
+    baseKeptCents: baseStickerCents - Math.round(baseStickerCents * f),
     batteryQty: snapshotNumber(s.financing?.batteryQty) ?? snapshotNumber(s.storage?.batteryQty) ?? 0,
   };
 }
@@ -405,7 +451,7 @@ export async function freezeCommissionMeasure(
 
   const liveMeasure = {
     systemWatts: live.systemWatts,
-    basePriceCents: live.basePriceCents,
+    baseKeptCents: live.baseKeptCents,
     batteryQty: live.batteryQty,
   };
   const fromDocument = document ? measureFromSignedDocument(document.snapshot, live) : null;
@@ -417,9 +463,9 @@ export async function freezeCommissionMeasure(
     : { matches: null, differences: [] };
   const differences = [...check.differences];
   // The figure the money actually turns on, reported beside the rest.
-  if (fromDocument && fromDocument.basePriceCents !== live.basePriceCents) {
+  if (fromDocument && fromDocument.baseKeptCents !== live.baseKeptCents) {
     differences.push(
-      `base price ${usd(live.basePriceCents)} on the deal, ${usd(fromDocument.basePriceCents)} on the signed document`
+      `base price ${usd(live.baseKeptCents)} on the deal, ${usd(fromDocument.baseKeptCents)} on the signed document`
     );
   }
   const matches = check.matches == null && fromDocument == null ? null : differences.length === 0;
@@ -456,7 +502,7 @@ export async function freezeCommissionMeasure(
 function sameMeasure(a: Omit<CommissionMeasure, "frozen">, b: Omit<CommissionMeasure, "frozen">) {
   return (
     a.systemWatts === b.systemWatts &&
-    a.basePriceCents === b.basePriceCents &&
+    a.baseKeptCents === b.baseKeptCents &&
     a.batteryQty === b.batteryQty
   );
 }

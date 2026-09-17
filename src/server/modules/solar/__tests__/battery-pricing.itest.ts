@@ -156,8 +156,8 @@ beforeAll(async () => {
     data: {
       companyId,
       name: "Flat Rate Partner",
-      maxFinalPpwCents: 550,
-      finalPpwMode: "flat",
+      priceRulePpwCents: 550,
+      priceRuleMode: "flat",
     },
   });
   lenderId = lender.id;
@@ -201,9 +201,9 @@ beforeAll(async () => {
       leadId,
       product: "loan",
       lenderProductId: product.id,
-      grossPpwCents: 550,
+      baseFinalPpwCents: 550,
       dealerFeePct: 65,
-      contractPriceCents: ARRAY_CENTS,
+      finalPriceCents: ARRAY_CENTS,
       aprPct: 0,
       loanTermMonths: 360,
       // Cash ticked, so the menu has a column without a fee to compare against.
@@ -224,7 +224,7 @@ beforeEach(async () => {
   });
   await db.solarFinance.update({
     where: { leadId },
-    data: { stickerPricePerBatteryCents: 0 },
+    data: { baseFinalPerBatteryCents: 0 },
   });
 });
 
@@ -240,12 +240,12 @@ describe("the battery reaches the contract", () => {
     if (!res.ok) return;
 
     const f = res.snapshot.financing;
-    expect(f.batteryPriceCents).toBe(sticker(POWERWALL_CENTS));
-    expect(f.contractPriceCents).toBe(ARRAY_CENTS + sticker(POWERWALL_CENTS));
+    expect(f.equipmentFinalCents).toBe(sticker(POWERWALL_CENTS));
+    expect(f.finalPriceCents).toBe(ARRAY_CENTS + sticker(POWERWALL_CENTS));
     // The array is still sold at exactly the partner's published rate: the
     // battery rides above the ceiling rather than eating into what the company
     // keeps on the system.
-    expect(f.basePriceCents).toBe(ARRAY_CENTS);
+    expect(f.baseFinalCents).toBe(ARRAY_CENTS);
   });
 
   it("names it, so a household reading $40,000 is told what it is for", async () => {
@@ -262,10 +262,10 @@ describe("the battery reaches the contract", () => {
     if (!res.ok) throw new Error(res.error);
     const f = res.snapshot.financing;
     expect(
-      (f.basePriceCents ?? 0) +
-        (f.adderTotalCents ?? 0) +
-        (f.batteryPriceCents ?? 0),
-    ).toBe(f.contractPriceCents);
+      (f.baseFinalCents ?? 0) +
+        (f.addersFinalCents ?? 0) +
+        (f.equipmentFinalCents ?? 0),
+    ).toBe(f.finalPriceCents);
   });
 
   it("moves the DEAL's value, which is the number that started this", async () => {
@@ -280,8 +280,8 @@ describe("the battery reaches the contract", () => {
     // ladder — which is priced on a contract with the fee-grossed battery in it.
     // The array alone is worth less than $55,000 net; this deal is worth more.
     const f = res.snapshot.financing;
-    expect(f.contractPriceCents).toBe(ARRAY_CENTS + sticker(POWERWALL_CENTS));
-    expect(lead.value).toBe(f.creditLadder?.netCostCents ?? f.contractPriceCents);
+    expect(f.finalPriceCents).toBe(ARRAY_CENTS + sticker(POWERWALL_CENTS));
+    expect(lead.value).toBe(f.creditLadder?.netCostCents ?? f.finalPriceCents);
     expect(lead.value).toBeGreaterThan(ARRAY_CENTS);
   });
 
@@ -289,17 +289,17 @@ describe("the battery reaches the contract", () => {
     await generate();
     const row = await db.solarFinance.findUniqueOrThrow({
       where: { leadId },
-      select: { contractPriceCents: true },
+      select: { finalPriceCents: true },
     });
-    expect(row.contractPriceCents).toBe(ARRAY_CENTS + sticker(POWERWALL_CENTS));
+    expect(row.finalPriceCents).toBe(ARRAY_CENTS + sticker(POWERWALL_CENTS));
   });
 
   it("charges for every battery on the roof", async () => {
     await db.solarDesign.update({ where: { leadId }, data: { batteryQty: 2 } });
     const res = await generate();
     if (!res.ok) throw new Error(res.error);
-    expect(res.snapshot.financing.batteryPriceCents).toBe(sticker(POWERWALL_CENTS * 2));
-    expect(res.snapshot.financing.contractPriceCents).toBe(
+    expect(res.snapshot.financing.equipmentFinalCents).toBe(sticker(POWERWALL_CENTS * 2));
+    expect(res.snapshot.financing.finalPriceCents).toBe(
       ARRAY_CENTS + sticker(POWERWALL_CENTS * 2),
     );
   });
@@ -315,7 +315,7 @@ describe("the battery reaches the contract", () => {
     );
     expect(purchases.length).toBeGreaterThan(1);
     for (const o of purchases) {
-      expect(o.financing.batteryPriceCents).toBe(
+      expect(o.financing.equipmentFinalCents).toBe(
         o.financing.product === "cash" ? POWERWALL_CENTS : sticker(POWERWALL_CENTS),
       );
     }
@@ -333,8 +333,8 @@ describe("what a catalogue edit may and may not move", () => {
     });
 
     const frozen = await snapshotOf(first.id);
-    expect(frozen.financing.batteryPriceCents).toBe(sticker(POWERWALL_CENTS));
-    expect(frozen.financing.contractPriceCents).toBe(
+    expect(frozen.financing.equipmentFinalCents).toBe(sticker(POWERWALL_CENTS));
+    expect(frozen.financing.finalPriceCents).toBe(
       ARRAY_CENTS + sticker(POWERWALL_CENTS),
     );
   });
@@ -346,7 +346,7 @@ describe("what a catalogue edit may and may not move", () => {
     });
     const res = await generate();
     if (!res.ok) throw new Error(res.error);
-    expect(res.snapshot.financing.batteryPriceCents).toBe(sticker(60_000_00));
+    expect(res.snapshot.financing.equipmentFinalCents).toBe(sticker(60_000_00));
   });
 
   it("yields to a price typed on the deal itself", async () => {
@@ -354,12 +354,12 @@ describe("what a catalogue edit may and may not move", () => {
     // Settings says this week.
     await db.solarFinance.update({
       where: { leadId },
-      data: { stickerPricePerBatteryCents: 32_000_00 },
+      data: { baseFinalPerBatteryCents: 32_000_00 },
     });
     const res = await generate();
     if (!res.ok) throw new Error(res.error);
-    expect(res.snapshot.financing.batteryPriceCents).toBe(sticker(32_000_00));
-    expect(res.snapshot.financing.contractPriceCents).toBe(
+    expect(res.snapshot.financing.equipmentFinalCents).toBe(sticker(32_000_00));
+    expect(res.snapshot.financing.finalPriceCents).toBe(
       ARRAY_CENTS + sticker(32_000_00),
     );
   });
@@ -391,8 +391,8 @@ describe("a storage-only deal is not billed twice", () => {
     await db.solarFinance.update({
       where: { leadId },
       data: {
-        stickerPricePerBatteryCents: POWERWALL_CENTS,
-        grossPpwCents: 0,
+        baseFinalPerBatteryCents: POWERWALL_CENTS,
+        baseFinalPpwCents: 0,
         lenderProductId: storageProduct.id,
       },
     });
@@ -400,8 +400,8 @@ describe("a storage-only deal is not billed twice", () => {
     const res = await generate();
     if (!res.ok) throw new Error(JSON.stringify(res));
     const f = res.snapshot.financing;
-    expect(f.batteryPriceCents).toBeUndefined();
-    expect(f.contractPriceCents).toBe(POWERWALL_CENTS);
+    expect(f.equipmentFinalCents).toBeUndefined();
+    expect(f.finalPriceCents).toBe(POWERWALL_CENTS);
   });
 });
 
@@ -435,8 +435,8 @@ describe("the runtime a storage proposal freezes", () => {
     await db.solarFinance.update({
       where: { leadId },
       data: {
-        stickerPricePerBatteryCents: POWERWALL_CENTS,
-        grossPpwCents: 0,
+        baseFinalPerBatteryCents: POWERWALL_CENTS,
+        baseFinalPpwCents: 0,
         lenderProductId: product.id,
       },
     });

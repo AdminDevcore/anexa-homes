@@ -42,7 +42,7 @@ export type AdderItem = {
    * This work is added to the loan ON TOP of a partner's fixed or maximum $/W,
    * instead of coming out of the system price, the dealer fee still applied. The re-roof.
    */
-  financedOnTop: boolean;
+  outsidePriceRule: boolean;
   rank: number;
   isActive: boolean;
 };

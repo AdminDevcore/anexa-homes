@@ -49,12 +49,12 @@ function seedFrom(settings: SolarSettingsView) {
     utilityEscalationPct: String(settings.utilityEscalationPct),
     kwhPerKwYear: String(settings.kwhPerKwYear),
     utilityMeterFee: (settings.utilityMeterFeeCents / 100).toFixed(2),
-    defaultGrossPpw: (settings.defaultGrossPpwCents / 100).toFixed(2),
+    defaultGrossPpw: (settings.companyDefaultBasePpwCents / 100).toFixed(2),
     defaultDealerFeePct: String(settings.defaultDealerFeePct),
     targetNetPpw:
-      settings.targetNetPpwCents == null
+      settings.targetBasePpwCents == null
         ? ""
-        : (settings.targetNetPpwCents / 100).toFixed(2),
+        : (settings.targetBasePpwCents / 100).toFixed(2),
     homeValueUpliftPct: String(settings.homeValueUpliftPct),
     defaultBatteryQty: String(settings.defaultBatteryQty),
     backupOutageDrawFactor: String(settings.backupOutageDrawFactor),
@@ -151,11 +151,11 @@ export function SolarSettingsForm({
           f.utilityMeterFee.trim() === ""
             ? 0
             : Math.round(Number(f.utilityMeterFee) * 100),
-        defaultGrossPpwCents: Math.round(Number(f.defaultGrossPpw) * 100),
+        companyDefaultBasePpwCents: Math.round(Number(f.defaultGrossPpw) * 100),
         defaultDealerFeePct: Number(f.defaultDealerFeePct),
         // Blank means "derive nothing" — the sticker stays exactly as a rep types
         // it, which is how every company behaves until somebody sets a target.
-        targetNetPpwCents:
+        targetBasePpwCents:
           f.targetNetPpw.trim() === ""
             ? null
             : Math.round(Number(f.targetNetPpw) * 100),

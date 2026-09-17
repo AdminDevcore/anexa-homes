@@ -3,25 +3,25 @@
 exports[`golden server sites: cappedPartner > derives the cached money columns (recomputeDealMoney, dealMoneyColumns) 1`] = `
 {
   "columns": {
-    "adderTotalCents": 0,
-    "contractPriceCents": 29589429,
+    "addersInsideRuleCents": 0,
+    "addersOutsideRuleCents": 700000,
+    "baseFinalPerBatteryCents": 0,
+    "baseFinalPpwCents": 550,
     "dealerFeePct": 65,
-    "grossPpwCents": 550,
+    "finalPriceCents": 29589429,
     "itcEstimateCents": 0,
-    "onTopAdderTotalCents": 700000,
-    "stickerPricePerBatteryCents": 0,
   },
   "recompute": {
     "changed": true,
   },
   "rowAfterRecompute": {
-    "adderTotalCents": 0,
-    "contractPriceCents": 29589429,
+    "addersInsideRuleCents": 0,
+    "addersOutsideRuleCents": 700000,
+    "baseFinalPerBatteryCents": 0,
+    "baseFinalPpwCents": 550,
     "dealerFeePct": 65,
-    "grossPpwCents": 550,
+    "finalPriceCents": 29589429,
     "itcEstimateCents": 0,
-    "onTopAdderTotalCents": 700000,
-    "stickerPricePerBatteryCents": 0,
   },
 }
 `;
@@ -199,13 +199,13 @@ exports[`golden server sites: cappedPartner > generates the document and stamps 
   "projectContractValueCents": 29589429,
   "revenueReportCents": 29589429,
   "rowAfterGeneration": {
-    "adderTotalCents": 0,
-    "contractPriceCents": 29589429,
+    "addersInsideRuleCents": 0,
+    "addersOutsideRuleCents": 700000,
+    "baseFinalPerBatteryCents": 0,
+    "baseFinalPpwCents": 550,
     "dealerFeePct": 65,
-    "grossPpwCents": 550,
+    "finalPriceCents": 29589429,
     "itcEstimateCents": 0,
-    "onTopAdderTotalCents": 700000,
-    "stickerPricePerBatteryCents": 0,
   },
   "topLevel": {
     "finalCents": 29589429,
@@ -218,25 +218,25 @@ exports[`golden server sites: cappedPartner > generates the document and stamps 
 exports[`golden server sites: cash > derives the cached money columns (recomputeDealMoney, dealMoneyColumns) 1`] = `
 {
   "columns": {
-    "adderTotalCents": 150000,
-    "contractPriceCents": 2630000,
+    "addersInsideRuleCents": 150000,
+    "addersOutsideRuleCents": 0,
+    "baseFinalPerBatteryCents": 0,
+    "baseFinalPpwCents": 310,
     "dealerFeePct": 0,
-    "grossPpwCents": 310,
+    "finalPriceCents": 2630000,
     "itcEstimateCents": 0,
-    "onTopAdderTotalCents": 0,
-    "stickerPricePerBatteryCents": 0,
   },
   "recompute": {
     "changed": true,
   },
   "rowAfterRecompute": {
-    "adderTotalCents": 150000,
-    "contractPriceCents": 2630000,
+    "addersInsideRuleCents": 150000,
+    "addersOutsideRuleCents": 0,
+    "baseFinalPerBatteryCents": 0,
+    "baseFinalPpwCents": 310,
     "dealerFeePct": 0,
-    "grossPpwCents": 310,
+    "finalPriceCents": 2630000,
     "itcEstimateCents": 0,
-    "onTopAdderTotalCents": 0,
-    "stickerPricePerBatteryCents": 0,
   },
 }
 `;
@@ -414,13 +414,13 @@ exports[`golden server sites: cash > generates the document and stamps what read
   "projectContractValueCents": 2630000,
   "revenueReportCents": 2630000,
   "rowAfterGeneration": {
-    "adderTotalCents": 150000,
-    "contractPriceCents": 2630000,
+    "addersInsideRuleCents": 150000,
+    "addersOutsideRuleCents": 0,
+    "baseFinalPerBatteryCents": 0,
+    "baseFinalPpwCents": 310,
     "dealerFeePct": 0,
-    "grossPpwCents": 310,
+    "finalPriceCents": 2630000,
     "itcEstimateCents": 0,
-    "onTopAdderTotalCents": 0,
-    "stickerPricePerBatteryCents": 0,
   },
   "topLevel": {
     "finalCents": 2630000,
@@ -433,25 +433,25 @@ exports[`golden server sites: cash > generates the document and stamps what read
 exports[`golden server sites: storageOnly > derives the cached money columns (recomputeDealMoney, dealMoneyColumns) 1`] = `
 {
   "columns": {
-    "adderTotalCents": 0,
-    "contractPriceCents": 4800000,
+    "addersInsideRuleCents": 0,
+    "addersOutsideRuleCents": 0,
+    "baseFinalPerBatteryCents": 2000000,
+    "baseFinalPpwCents": 0,
     "dealerFeePct": 50,
-    "grossPpwCents": 0,
+    "finalPriceCents": 4800000,
     "itcEstimateCents": 0,
-    "onTopAdderTotalCents": 0,
-    "stickerPricePerBatteryCents": 2000000,
   },
   "recompute": {
     "changed": true,
   },
   "rowAfterRecompute": {
-    "adderTotalCents": 0,
-    "contractPriceCents": 4800000,
+    "addersInsideRuleCents": 0,
+    "addersOutsideRuleCents": 0,
+    "baseFinalPerBatteryCents": 2000000,
+    "baseFinalPpwCents": 0,
     "dealerFeePct": 50,
-    "grossPpwCents": 0,
+    "finalPriceCents": 4800000,
     "itcEstimateCents": 0,
-    "onTopAdderTotalCents": 0,
-    "stickerPricePerBatteryCents": 2000000,
   },
 }
 `;
@@ -571,13 +571,13 @@ exports[`golden server sites: storageOnly > generates the document and stamps wh
   "projectContractValueCents": 4800000,
   "revenueReportCents": 4800000,
   "rowAfterGeneration": {
-    "adderTotalCents": 0,
-    "contractPriceCents": 4800000,
+    "addersInsideRuleCents": 0,
+    "addersOutsideRuleCents": 0,
+    "baseFinalPerBatteryCents": 2400000,
+    "baseFinalPpwCents": 0,
     "dealerFeePct": 50,
-    "grossPpwCents": 0,
+    "finalPriceCents": 4800000,
     "itcEstimateCents": 0,
-    "onTopAdderTotalCents": 0,
-    "stickerPricePerBatteryCents": 2400000,
   },
   "topLevel": {
     "finalCents": 4800000,
@@ -601,25 +601,25 @@ exports[`golden server sites: the production floor on the capped partner > recor
 exports[`golden server sites: workedExample > derives the cached money columns (recomputeDealMoney, dealMoneyColumns) 1`] = `
 {
   "columns": {
-    "adderTotalCents": 370000,
-    "contractPriceCents": 6493333,
+    "addersInsideRuleCents": 370000,
+    "addersOutsideRuleCents": 0,
+    "baseFinalPerBatteryCents": 0,
+    "baseFinalPpwCents": 400,
     "dealerFeePct": 25,
-    "grossPpwCents": 400,
+    "finalPriceCents": 6493333,
     "itcEstimateCents": 0,
-    "onTopAdderTotalCents": 0,
-    "stickerPricePerBatteryCents": 0,
   },
   "recompute": {
     "changed": true,
   },
   "rowAfterRecompute": {
-    "adderTotalCents": 370000,
-    "contractPriceCents": 6493333,
+    "addersInsideRuleCents": 370000,
+    "addersOutsideRuleCents": 0,
+    "baseFinalPerBatteryCents": 0,
+    "baseFinalPpwCents": 400,
     "dealerFeePct": 25,
-    "grossPpwCents": 400,
+    "finalPriceCents": 6493333,
     "itcEstimateCents": 0,
-    "onTopAdderTotalCents": 0,
-    "stickerPricePerBatteryCents": 0,
   },
 }
 `;
@@ -809,13 +809,13 @@ exports[`golden server sites: workedExample > generates the document and stamps 
   "projectContractValueCents": 6493333,
   "revenueReportCents": 6493333,
   "rowAfterGeneration": {
-    "adderTotalCents": 370000,
-    "contractPriceCents": 6493333,
+    "addersInsideRuleCents": 370000,
+    "addersOutsideRuleCents": 0,
+    "baseFinalPerBatteryCents": 0,
+    "baseFinalPpwCents": 400,
     "dealerFeePct": 25,
-    "grossPpwCents": 400,
+    "finalPriceCents": 6493333,
     "itcEstimateCents": 0,
-    "onTopAdderTotalCents": 0,
-    "stickerPricePerBatteryCents": 0,
   },
   "topLevel": {
     "finalCents": 6493333,

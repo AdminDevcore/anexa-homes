@@ -20,7 +20,7 @@ const A: SolarAssumptions = {
   utilityEscalationPct: 3.5,
   kwhPerKwYear: 1450,
   utilityMeterFeeCents: 1000,
-  defaultGrossPpwCents: 350,
+  companyDefaultBasePpwCents: 350,
   defaultDealerFeePct: 18,
   minOffsetPct: 0,
   maxOffsetPct: 150,
@@ -114,7 +114,7 @@ describe("savings distinguish the bill avoided from what the customer is actuall
     expect(loan.contractPriceCents).toBe(8_000 * 350);
     expect(loan.dealerFeeCents).toBe(Math.round(8_000 * 350 * 0.18));
     expect(loan.grossPriceCents).toBe(loan.contractPriceCents - loan.dealerFeeCents);
-    expect(loan.basePriceCents).toBe(loan.grossPriceCents);
+    expect(loan.baseKeptCents).toBe(loan.grossPriceCents);
     // Cash carries no fee at all.
     const cash = pricePurchase({
       product: "cash", systemSizeKwDc: 8, stickerPpwCents: 350,
@@ -136,7 +136,7 @@ describe("savings distinguish the bill avoided from what the customer is actuall
 
   it("LEASE: payments run for the term and stop, and escalate", () => {
     const m = savingsModel({
-      ...base, product: "lease", leaseMonthlyCents: 17_500,
+      ...base, product: "lease", leasePaymentCents: 17_500,
       escalatorPct: 2.9, termYears: 20,
     });
     expect(m.years[0].solarPaymentCents).toBe(17_500 * 12);
@@ -162,7 +162,7 @@ describe("savings distinguish the bill avoided from what the customer is actuall
 
   it("a 0% escalator is honoured rather than treated as missing", () => {
     const m = savingsModel({
-      ...base, product: "lease", leaseMonthlyCents: 17_500,
+      ...base, product: "lease", leasePaymentCents: 17_500,
       escalatorPct: 0, termYears: 25,
     });
     const flat = m.years.slice(0, 25).map((y) => y.solarPaymentCents);
@@ -205,7 +205,7 @@ describe("the snapshot never renders a number the customer cannot act on", () =>
 
   it("omits the adders row entirely when there are none", () => {
     // null, not 0 — the renderer drops the row rather than printing "Adders $0".
-    expect(build().financing.adderTotalCents).toBeNull();
+    expect(build().financing.addersFinalCents).toBeNull();
   });
 
   it("never quotes an incentive — no credit is offered at all", () => {
@@ -226,8 +226,8 @@ describe("the snapshot never renders a number the customer cannot act on", () =>
     });
     expect(s.financing.aprPct).toBeNull();
     expect(s.financing.lender).toBeNull();
-    expect(s.financing.contractPriceCents).toBeNull();
-    expect(s.financing.monthlyPaymentCents).toBe(17_500);
+    expect(s.financing.finalPriceCents).toBeNull();
+    expect(s.financing.leasePaymentCents).toBe(17_500);
   });
 
   it("records the layout only when one was actually attached", () => {

@@ -39,7 +39,7 @@ import {
   type SystemSpecs,
   type SpecSource,
 } from "@/components/portal/solar-operations";
-import { hasCreditSwitch, type SolarProposalSnapshot } from "@/lib/solar-proposal";
+import { hasCreditSwitch, readProposalSnapshot, type SolarProposalSnapshot } from "@/lib/solar-proposal";
 import {
   blockPanelCount,
   panelCorners,
@@ -67,7 +67,8 @@ import {
   SolarActivityFeed,
 } from "@/components/portal/solar-cockpit";
 import { DealProgressBar, DealStageActions } from "@/components/portal/deal-stage-bar";
-import { priceStoredPurchase, batteryChargeCents } from "@/lib/solar-money";
+import { batteryChargeCents } from "@/lib/solar-money";
+import { priceDeal } from "@/lib/solar-price-deal";
 import { buildCreditLadder, type CreditLadder } from "@/lib/solar-credit-ladder";
 import { resolveSignToday } from "@/lib/solar-sign-today";
 import { getSolarSettings } from "@/server/modules/solar/settings";
@@ -453,12 +454,12 @@ export default async function LeadDetailPage({
         prisma.solarLender.findMany({
           where: { companyId: user.companyId },
           orderBy: [{ isActive: "desc" }, { rank: "asc" }, { name: "asc" }],
-          // `maxFinalPpwCents` is the partner's ceiling on the customer's price
+          // `priceRulePpwCents` is the partner's ceiling on the customer's price
           // per watt. Read here so this page prices the deal the way the
           // proposal builder does — see priceStoredPurchase.
           select: {
             id: true, name: true, isActive: true, logoUpdatedAt: true,
-            maxFinalPpwCents: true, finalPpwMode: true,
+            priceRulePpwCents: true, priceRuleMode: true,
             // Which price that figure fixes, per programme — the deal is
             // priced on the basis of the programme it was quoted on.
             products: { select: { id: true, ppwBasis: true } },
@@ -584,7 +585,7 @@ export default async function LeadDetailPage({
    * part of the quote. Both are labelled in the UI rather than passed off as
    * part of the frozen document.
    */
-  const reportedSnapshot = (reportedProposal?.snapshot ?? null) as SolarProposalSnapshot | null;
+  const reportedSnapshot = readProposalSnapshot(reportedProposal?.snapshot ?? null);
 
   /**
    * WHICH SYSTEM THIS DEAL IS — resolved ONCE, for every card that reports it.
@@ -626,24 +627,46 @@ export default async function LeadDetailPage({
    */
   const workingPrice =
     solarDesign && solarFinance && (solarFinance.product === "cash" || solarFinance.product === "loan")
-      ? priceStoredPurchase({
+      ? priceDeal({
           product: solarFinance.product,
+          /*
+           * PINNED TO THE ARRAY LADDER, which is what this page has always used:
+           * `priceStoredPurchase` prices per watt unconditionally and took no
+           * system type at all. Passing `solarDesign.systemType` through would
+           * send a storage deal down `priceDeal`'s per-BATTERY branch — a
+           * different price, not a translated one.
+           *
+           * There is a real gap underneath that, and it is deliberately left
+           * alone here: `batteryChargeCents` returns 0 on a storage-ONLY deal
+           * (the battery is the system there, not a charge on top), and such a
+           * deal also carries a zero rate over zero watts — so this working
+           * price would be its adders alone with the batteries missing. It
+           * cannot be reached today: production holds no storage-only design (6
+           * pv_storage, 2 pv, checked read-only), and any deal with an approved
+           * proposal reads `frozenPriceLadder` instead. Fixing it is a change to
+           * what a screen shows, which is not what a conversion is for.
+           */
+          systemType: "pv",
           systemSizeKwDc: solarDesign.systemSizeKwDc,
-          stickerPpwCents: solarFinance.grossPpwCents,
+          baseFinalPpwCents: solarFinance.baseFinalPpwCents,
           dealerFeePct: solarFinance.dealerFeePct,
-          adderTotalCents: solarFinance.adderTotalCents,
-          onTopAdderTotalCents: solarFinance.onTopAdderTotalCents,
+          // Read off the deal's own row, so that is the provenance. This page
+          // reports what the deal is priced at, not what the programme charges
+          // today — the refresh against the programme happens at generation.
+          dealerFeeSource: "deal",
+          addersInsideRuleCents: solarFinance.addersInsideRuleCents,
+          addersOutsideRuleCents: solarFinance.addersOutsideRuleCents,
           // The storage rides on top of the rate, so it is on this ladder too.
           // Left out, this card would quote a deal $40,000 under the proposal
           // the household is holding.
-          batteryPriceCents: batteryChargeCents({
+          equipmentChargesCents: batteryChargeCents({
             systemType: solarDesign.systemType,
             batteryQty: solarDesign.batteryQty,
-            dealPerBatteryCents: solarFinance.stickerPricePerBatteryCents,
+            dealPerBatteryCents: solarFinance.baseFinalPerBatteryCents,
             cataloguePerBatteryCents: solarDesign.battery?.priceCents ?? null,
           }),
-          maxFinalPpwCents: designLenderRow?.maxFinalPpwCents ?? null,
-          finalPpwMode: designLenderRow?.finalPpwMode,
+          priceRulePpwCents: designLenderRow?.priceRulePpwCents ?? null,
+          priceRuleMode: designLenderRow?.priceRuleMode,
           ppwBasis: designLenderRow?.products.find((p) => p.id === solarFinance.lenderProductId)
             ?.ppwBasis,
         })
@@ -684,8 +707,8 @@ export default async function LeadDetailPage({
           // The same figure on both sides, exactly as the builder passes it:
           // the deal page prices what the customer signs, so there is no
           // programme adjustment above it for an incentive rung to hand back.
-          contractValueCents: workingPrice.breakdown.contractPriceCents,
-          quotedPriceCents: workingPrice.breakdown.contractPriceCents,
+          contractValueCents: workingPrice.finalPriceCents,
+          quotedPriceCents: workingPrice.finalPriceCents,
           rates: solarSettings.creditRates,
           claims: solarCreditClaims,
           incentiveLabel: solarSettings.creditIncentiveLabel,
@@ -702,9 +725,9 @@ export default async function LeadDetailPage({
             // job claims. A partner's cap is measured on what the household is
             // left holding, so a deal page that passed only the array would
             // print a closing credit the builder next door disagrees with.
-            systemPriceCents: workingPrice.breakdown.baseStickerCents,
-            batteryPriceCents: workingPrice.breakdown.batteryStickerCents,
-            systemWatts: workingPrice.breakdown.systemWatts,
+            systemPriceCents: workingPrice.baseFinalCents,
+            batteryPriceCents: workingPrice.equipmentFinalCents,
+            systemWatts: workingPrice.systemWatts,
             creditRates: solarSettings.creditRates,
             creditClaims: solarCreditClaims,
             typedCents: solarFinance.signTodayCreditCents,
@@ -729,9 +752,9 @@ export default async function LeadDetailPage({
         batteryQty: solarDesign.batteryQty,
         product: solarFinance?.product ?? null,
         contractPriceCents:
-          workingPrice?.breakdown.contractPriceCents ?? solarFinance?.contractPriceCents ?? null,
+          workingPrice?.finalPriceCents ?? solarFinance?.finalPriceCents ?? null,
         netAfterCreditsCents: workingLadder?.netCostCents ?? null,
-        monthlyPaymentCents: solarFinance?.monthlyPaymentCents ?? null,
+        monthlyPaymentCents: solarFinance?.leasePaymentCents ?? null,
         rateMillsPerKwh: solarFinance?.rateMillsPerKwh ?? null,
       }
     : null;
@@ -1001,7 +1024,7 @@ export default async function LeadDetailPage({
    * defect `resolveReportedSystem` exists to stop, on the same card.
    *
    * What the snapshot froze is the CUSTOMER's ladder, not the internal one:
-   * `basePriceCents` and `adderTotalCents` are at STICKER, the dealer fee
+   * `baseKeptCents` and `adderTotalCents` are at STICKER, the dealer fee
    * already inside them. That is the right ladder for this screen — the fee
    * itself is deliberately not shown here any more, and at sticker the rungs
    * add up to the contract above them to the cent, which the internal ones
@@ -1040,7 +1063,7 @@ export default async function LeadDetailPage({
       if (reportedSystem.source.kind === "proposal" && reportedSnapshot) {
         return frozenPriceLadder(reportedSnapshot.financing, reportedSystem.sizeKwDc);
       }
-      const b = priced?.breakdown;
+      const b = priced;
       if (!b) return null;
       const watts = b.systemWatts;
       const ppw = (cents: number) => (watts > 0 ? Math.round(cents / watts) : null);
@@ -1050,19 +1073,20 @@ export default async function LeadDetailPage({
         // what the rep typed. `fin.grossPpwCents` is the sticker and does not
         // belong here — reading it on this rung was showing a rep a base of
         // $3.50 under a "final" of $2.87, which is a ladder pointing down.
-        base: { totalCents: b.basePriceCents, ppwCents: Math.round(b.basePpwCents) },
+        base: { totalCents: b.baseKeptCents, ppwCents: Math.round(b.basePpwCents) },
         // BOTH halves: the rung says what the extra work on this job costs, and
         // a roof financed on top of the partner's price is extra work like any
-        // other — it is only the pricing rule that differs. `breakdown` sums
-        // them for exactly this reason.
-        adders: { totalCents: b.adderTotalCents, ppwCents: ppw(b.adderTotalCents) },
+        // other — it is only the pricing rule that differs. `addersCents` is
+        // that sum, and is the field to read for it: `addersInsideRuleCents`
+        // would drop the roof off this rung and stop the ladder adding up.
+        adders: { totalCents: b.addersCents, ppwCents: ppw(b.addersCents) },
         // THE STORAGE, ON ITS OWN RUNG, because gross is base + adders +
         // BATTERY. Left off, a deal with $120,000 of Powerwalls on it shows
         // $1.93/W of base under an $11.33/W final and nothing in between to
         // explain the other $9.40.
-        batteryPriceCents: b.batteryPriceCents,
+        batteryPriceCents: b.equipmentChargesCents,
         batteryQty: solarDesign?.batteryQty ?? 0,
-        final: { totalCents: b.contractPriceCents, ppwCents: Math.round(b.finalPpwCents) },
+        final: { totalCents: b.finalPriceCents, ppwCents: Math.round(b.finalPpwCents) },
         systemWatts: watts,
         credits: workingLadder,
       };
@@ -1186,11 +1210,11 @@ export default async function LeadDetailPage({
        * the screen names the reason. A frozen ladder needs no such notice — its
        * rungs are at sticker and add up to the contract on their own.
        */
-      maxFinalPpwCents: dealLender?.maxFinalPpwCents ?? null,
-      finalPpwMode: dealLender?.finalPpwMode ?? "cap",
+      priceRulePpwCents: dealLender?.priceRulePpwCents ?? null,
+      priceRuleMode: dealLender?.priceRuleMode ?? "cap",
       ppwBasis:
         dealLender?.products.find((p) => p.id === fin?.lenderProductId)?.ppwBasis ?? "final",
-      cappedByLender: priced?.cap.capped ?? false,
+      cappedByLender: priced?.priceRule?.capped ?? false,
       lenderName: dealLender?.name ?? null,
     };
   })();
@@ -1234,7 +1258,7 @@ export default async function LeadDetailPage({
           // the working one by construction — see `solarMoney.ladder`.
           contractPriceCents: solarMoney?.ladder?.final.totalCents ?? null,
           netAfterCreditsCents: workingLadder?.netCostCents ?? null,
-          monthlyPaymentCents: solarFinance?.monthlyPaymentCents ?? null,
+          monthlyPaymentCents: solarFinance?.leasePaymentCents ?? null,
           rateMillsPerKwh: solarFinance?.rateMillsPerKwh ?? null,
         });
         return working.kind !== "none"
@@ -1280,8 +1304,8 @@ export default async function LeadDetailPage({
           ? (creditApp.stipulations as unknown[]).filter((s): s is string => typeof s === "string")
           : [],
         downPaymentCents: solarFinance?.downPaymentCents ?? null,
-        loanMonthlyPaymentCents: solarFinance?.loanMonthlyPaymentCents ?? null,
-        monthlyPaymentCents: solarFinance?.monthlyPaymentCents ?? null,
+        loanMonthlyPaymentCents: solarFinance?.lenderMonthlyPaymentCents ?? null,
+        monthlyPaymentCents: solarFinance?.leasePaymentCents ?? null,
         escalatorPct: solarFinance?.escalatorPct ?? null,
         rateMillsPerKwh: solarFinance?.rateMillsPerKwh ?? null,
       }
@@ -2027,11 +2051,11 @@ export default async function LeadDetailPage({
                     // away from the design on the same panel is worse than
                     // either figure alone.
                     contractPriceCents={
-                      workingPrice?.breakdown.contractPriceCents ??
-                      solarFinance?.contractPriceCents ??
+                      workingPrice?.finalPriceCents ??
+                      solarFinance?.finalPriceCents ??
                       null
                     }
-                    monthlyPaymentCents={solarFinance?.monthlyPaymentCents ?? null}
+                    monthlyPaymentCents={solarFinance?.leasePaymentCents ?? null}
                     rateMillsPerKwh={solarFinance?.rateMillsPerKwh ?? null}
                     canBuild={can(user, "create", "Proposal") || can(user, "update", "Proposal")}
                     canEdit={can(user, "create", "Proposal")}

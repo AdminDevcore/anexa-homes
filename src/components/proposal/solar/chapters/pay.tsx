@@ -14,7 +14,6 @@ import {
 } from "@/lib/solar-proposal";
 import type { Doc } from "./doc";
 import type { QualifyOffer } from "@/lib/proposal-qualify";
-import { withoutDealerFee } from "@/lib/solar-lender-product";
 
 const PRODUCT_LABEL: Record<string, string> = {
   cash: "Cash purchase",
@@ -58,8 +57,7 @@ export function ChapterPay({
   repQualify: { proposalId: string } | null;
 }) {
   const { s, f, option, options, vpp, credits } = doc;
-  // A document frozen before the fee came off the label still carries it.
-  const productLabel = withoutDealerFee(f.lenderProductLabel);
+  const productLabel = f.programmeLabel;
   const utility = s.energy.utilityProvider ?? "your utility";
   const offerMenu = showPaymentOptions && options.length > 1;
 
@@ -210,7 +208,7 @@ export function ChapterPay({
             [
               "Amount financed",
               doc.financedAmountCents != null &&
-              doc.financedAmountCents !== f.contractPriceCents
+              doc.financedAmountCents !== f.finalPriceCents
                 ? usd(doc.financedAmountCents)
                 : null,
             ],
@@ -347,7 +345,7 @@ function AlternativesStrip({
               className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 py-2.5"
             >
               <dt className="text-[0.8rem] text-neutral-600">
-                {withoutDealerFee(o.label)}
+                {o.label}
                 {o.key === selectedKey && (
                   <span className="ml-2 rounded-full bg-[var(--proposal-accent)]/12 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--proposal-accent)]">
                     quoted

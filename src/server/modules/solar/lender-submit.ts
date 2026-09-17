@@ -768,9 +768,9 @@ async function loadMoney(
 
   const finance = await prisma.solarFinance.findFirst({
     where: { leadId, companyId },
-    select: { contractPriceCents: true, downPaymentCents: true, loanTermMonths: true },
+    select: { finalPriceCents: true, downPaymentCents: true, loanTermMonths: true },
   });
-  const amountCents = (finance?.contractPriceCents ?? 0) - (finance?.downPaymentCents ?? 0);
+  const amountCents = (finance?.finalPriceCents ?? 0) - (finance?.downPaymentCents ?? 0);
   if (amountCents <= 0) {
     return { problem: "This deal has no financed amount yet. Price it first." as const };
   }

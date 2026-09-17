@@ -61,12 +61,12 @@ let partnerLenderId: string;
 const deals = {} as Record<Key, { leadId: string; projectId: string }>;
 
 const MONEY_SELECT = {
-  grossPpwCents: true,
-  stickerPricePerBatteryCents: true,
+  baseFinalPpwCents: true,
+  baseFinalPerBatteryCents: true,
   dealerFeePct: true,
-  adderTotalCents: true,
-  onTopAdderTotalCents: true,
-  contractPriceCents: true,
+  addersInsideRuleCents: true,
+  addersOutsideRuleCents: true,
+  finalPriceCents: true,
   itcEstimateCents: true,
 } as const;
 
@@ -173,8 +173,8 @@ beforeAll(async () => {
   partnerLenderId = await lender({
     name: cp.lenderName,
     repPayMode: "per_watt",
-    maxFinalPpwCents: cp.rule.maxFinalPpwCents,
-    finalPpwMode: cp.rule.finalPpwMode,
+    priceRulePpwCents: cp.rule.maxFinalPpwCents,
+    priceRuleMode: cp.rule.finalPpwMode,
     minBasePpwCents: null,
     signTodayMode: "above_cap",
     signTodayCapPpwCents: cp.signToday.capPpwCents,
@@ -190,8 +190,8 @@ beforeAll(async () => {
 
   const storageLender = await lender({
     name: st.lenderName,
-    maxFinalPricePerBatteryCents: st.maxFinalPricePerBatteryCents,
-    finalBatteryPriceMode: st.finalBatteryPriceMode,
+    priceRulePerBatteryCents: st.maxFinalPricePerBatteryCents,
+    priceRuleBatteryMode: st.finalBatteryPriceMode,
     signTodayMode: "above_cap",
     signTodayCapPpwCents: st.signToday.capPpwCents,
   });
@@ -208,7 +208,7 @@ beforeAll(async () => {
     key: Key,
     design: Record<string, unknown>,
     finance: Record<string, unknown>,
-    adders: { label: string; basis: "flat" | "perWatt"; flatCents?: number; millsPerWatt?: number; financedOnTop?: boolean }[],
+    adders: { label: string; basis: "flat" | "perWatt"; flatCents?: number; millsPerWatt?: number; outsidePriceRule?: boolean }[],
     usageKwh: number,
     billCents: number
   ) {
@@ -259,7 +259,7 @@ beforeAll(async () => {
         companyId,
         leadId: lead.id,
         vertical: "solar",
-        contractPriceCents: 0,
+        finalPriceCents: 0,
         // Every card ticked, so each menu is the one these snapshots pinned
         // before the menu followed the ticks: cash plus one programme from each
         // lender, every lender here publishing exactly one.
@@ -288,7 +288,7 @@ beforeAll(async () => {
     {
       product: "loan",
       lenderProductId: workedProgramme,
-      grossPpwCents: 400,
+      baseFinalPpwCents: 400,
       dealerFeePct: we.feePct,
       aprPct: we.aprPct,
       loanTermMonths: we.termMonths,
@@ -317,12 +317,12 @@ beforeAll(async () => {
     {
       product: "loan",
       lenderProductId: partnerProgramme,
-      grossPpwCents: 551, // grossPpwFromNet(193, 65)
+      baseFinalPpwCents: 551, // grossPpwFromNet(193, 65)
       dealerFeePct: cp.feePct,
       aprPct: cp.aprPct,
       loanTermMonths: cp.termMonths,
     },
-    [{ label: "Re-roof", basis: "flat", flatCents: 700_000, financedOnTop: true }],
+    [{ label: "Re-roof", basis: "flat", flatCents: 700_000, outsidePriceRule: true }],
     cp.usageKwh,
     cp.billCents
   );
@@ -338,7 +338,7 @@ beforeAll(async () => {
       offsetPct: Math.round((production(cash.kw) / cash.usageKwh) * 100),
       lenderId: null,
     },
-    { product: "cash", grossPpwCents: cash.basePpwCents, dealerFeePct: 0, signTodayCreditCents: cash.signTodayTypedCents },
+    { product: "cash", baseFinalPpwCents: cash.basePpwCents, dealerFeePct: 0, signTodayCreditCents: cash.signTodayTypedCents },
     [{ label: "Critter guard", basis: "flat", flatCents: 150_000 }],
     cash.usageKwh,
     cash.billCents
@@ -359,8 +359,8 @@ beforeAll(async () => {
     {
       product: "loan",
       lenderProductId: storageProgramme,
-      grossPpwCents: 0,
-      stickerPricePerBatteryCents: 2_000_000, // grossPpwFromNet(1,000,000, 50)
+      baseFinalPpwCents: 0,
+      baseFinalPerBatteryCents: 2_000_000, // grossPpwFromNet(1,000,000, 50)
       dealerFeePct: st.feePct,
       aprPct: st.aprPct,
       loanTermMonths: st.termMonths,
@@ -387,14 +387,14 @@ describe.each(KEYS)("golden server sites: %s", (key) => {
     const columns = await inSolar(() =>
       dealMoneyColumns(companyId, leadId, {
         product: f.product,
-        grossPpwCents: f.grossPpwCents,
+        grossPpwCents: f.baseFinalPpwCents,
         dealerFeePct: f.dealerFeePct,
-        adderTotalCents: f.adderTotalCents,
-        onTopAdderTotalCents: f.onTopAdderTotalCents,
+        adderTotalCents: f.addersInsideRuleCents,
+        onTopAdderTotalCents: f.addersOutsideRuleCents,
         aprPct: f.aprPct,
         loanTermMonths: f.loanTermMonths,
         lenderProductId: f.lenderProductId,
-        stickerPricePerBatteryCents: f.stickerPricePerBatteryCents,
+        stickerPricePerBatteryCents: f.baseFinalPerBatteryCents,
       })
     );
     expect({ recompute, rowAfterRecompute: row, columns: pickMoney(columns) }).toMatchSnapshot();
@@ -418,7 +418,7 @@ describe.each(KEYS)("golden server sites: %s", (key) => {
     expect({
       options: (snapshot.options ?? []).map(optionFigures),
       topLevel: {
-        finalCents: snapshot.financing.contractPriceCents ?? null,
+        finalCents: snapshot.financing.finalPriceCents ?? null,
         netFinalCreditsAppliedCents: snapshot.financing.creditLadder?.netCostCents ?? null,
         financedCents: snapshot.financing.financedAmountCents ?? null,
       },

@@ -57,7 +57,7 @@ Customer **Tessa Resendez**, signed **2026-09-06 22:19 UTC**, signer "TESSA RESE
 | Monthly payment on the full contract value | $464.22 |
 | **Monthly payment she was quoted** (credits applied) | **$232.11** |
 
-For reference, the price the system was sold at in the software is **$87,120.00**; the credits took the contract $3,560 below it.
+For reference, the price the system was quoted at is **$87,120.00** — the `quotedPriceCents` figure inside the credit ladder frozen into her signed document, which is also the price stored on the deal itself (`solar_finance.contractPriceCents`). The credits took the contract $3,560 below it.
 
 ### 1.4 What the company receives, and what the software records
 
@@ -214,7 +214,36 @@ Six signed documents carry a stored "ownership note" field containing placeholde
 
 ---
 
-## 6. Where these facts come from
+## 6. Federal law status — a question for counsel, not a conclusion
+
+Nothing in this section is a legal position. It records what the company has been told, and asks counsel to confirm or correct it, because the answer may change the pricing model itself rather than only the paperwork.
+
+**The premise to confirm.** Internal Revenue Code **Section 25D** — the residential credit the software applies — is understood to have been **repealed for expenditures made after 31 December 2025** (P.L. 119-21), and for these purposes an expenditure is understood to be **treated as made when the installation is completed**, not when the contract is signed, financed or paid.
+
+**The facts that meet that premise.** Every deal the software has priced is a **loan**, under which **the customer owns the system** (§5). The software applies the credits to the customer's own price and tells them, in writing, that they claim the credits on their own return (§2) — while the company's revenue model treats the credits as **sold to a monetizer** (§1.4).
+
+**What counsel is asked to determine.**
+
+1. Whether **any federal credit exists at all** on these deals, given the installation dates below.
+2. If one exists, **who is entitled to claim it**, and whether it can be **transferred or sold** — and by whom.
+3. Whether the **monetizer arrangement requires third-party ownership** of the system (i.e. whether it is a **Section 48E** structure rather than a 25D one), and if so, whether a loan under which the customer takes title can support it at all.
+4. If no federal credit exists on a 2026 installation, what follows for the **eight signed documents** that applied one to the customer's price and, in seven cases, to the monthly payment they were quoted (§5).
+
+**No installation has been completed.** Every deal below is scheduled or unscheduled; the `completedAt` field is empty on every project in production.
+
+| Deal | Customer | Project | Install completed | Install scheduled | Signed docs applying credits | Credits on the live signed version |
+|---|---|---|---|---|---|---|
+| `2307d609` | mustafa joulani (the owner's own internal lead) | `not_started` | **none** | **2026-08-27** | 7 | $21,036.00 (v36) |
+| `5886e6ac` | Tessa Resendez | no project record | **none** | not scheduled | 1 | $83,560.00 (v1) |
+| `0eeaab8a` | San Juanita Escamilla | no project record | **none** | not scheduled | 0 (2 unsigned proposals carry credits) | — |
+
+**Read against the premise:** exactly one deal has an installation date of any kind, and it falls in **2026**. The other two credit-bearing deals have no installation scheduled, so the date on which their expenditure would be treated as made is not yet fixed by anything in the system.
+
+Counsel should note that the deal with the 2026 installation date is the owner's own internal lead, and that this brief does not assert whether it is a sale.
+
+---
+
+## 7. Where these facts come from
 
 | Fact | Source |
 |---|---|

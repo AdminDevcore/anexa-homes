@@ -75,8 +75,8 @@ async function storageDeal(overrides: Record<string, unknown> = {}) {
       companyId, leadId,
       product: "cash",
       dealerFeePct: 0,
-      stickerPricePerBatteryCents: 13_000_00,
-      contractPriceCents: 26_000_00,
+      baseFinalPerBatteryCents: 13_000_00,
+      finalPriceCents: 26_000_00,
     },
   });
 }
@@ -134,7 +134,7 @@ describe("readiness on a storage deal", () => {
       },
     });
     await db.solarFinance.create({
-      data: { companyId, leadId, product: "cash", dealerFeePct: 0, grossPpwCents: 350 },
+      data: { companyId, leadId, product: "cash", dealerFeePct: 0, baseFinalPpwCents: 350 },
     });
     expect(await codes()).toContain("design.size_zero");
   });

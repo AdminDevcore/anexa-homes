@@ -69,7 +69,7 @@ async function main() {
       console.log(
         `${lead}  ${r.basis.padEnd(15)}  HELD — WOULD MOVE PAY  ` +
           `${o.live.systemWatts} W → ${o.measure.systemWatts} W, ` +
-          `base ${usd(o.live.basePriceCents)} → ${usd(o.measure.basePriceCents)}, ` +
+          `base ${usd(o.live.baseKeptCents)} → ${usd(o.measure.baseKeptCents)}, ` +
           `${o.live.batteryQty} → ${o.measure.batteryQty} batt  (signed v${o.proposalVersion})`
       );
       continue;
@@ -83,7 +83,7 @@ async function main() {
           ? `matches signed v${o.proposalVersion}`
           : `DOES NOT MATCH signed v${o.proposalVersion}: ${o.differences.join("; ")}`;
     console.log(
-      `${lead}  ${r.basis.padEnd(15)}  ${o.measure.systemWatts} W  base ${usd(o.measure.basePriceCents)}  ` +
+      `${lead}  ${r.basis.padEnd(15)}  ${o.measure.systemWatts} W  base ${usd(o.measure.baseKeptCents)}  ` +
         `${o.measure.batteryQty} batt  final ${usd(o.finalPriceCents)}  ${check}`
     );
   }

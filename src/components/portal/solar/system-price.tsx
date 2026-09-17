@@ -7,13 +7,10 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   basePpwFromSticker,
-  capStickerToFinalPpw,
-  capStickerToFinalUnit,
   grossPpwFromNet,
-  pricePurchase,
-  priceStoragePurchase,
   type PriceBasis,
 } from "@/lib/solar-money";
+import { priceDeal } from "@/lib/solar-price-deal";
 
 /**
  * What a partner's figure covers, in words, on a programme's basis. Shared by
@@ -350,33 +347,42 @@ export function SystemPriceCard({
     quotedFinalPpwMode === "flat" && quotedMaxFinalPpwCents != null
       ? (uncappedCustomerPpw ?? quotedMaxFinalPpwCents)
       : uncappedCustomerPpw;
-  const customerCap =
-    flatSeedPpw == null
-      ? null
-      : capStickerToFinalPpw({
-          stickerPpwCents: flatSeedPpw,
-          maxFinalPpwCents: quotedMaxFinalPpwCents,
-          mode: quotedFinalPpwMode,
-          basis: quotedPpwBasis,
-          systemSizeKwDc,
-          dealerFeePct: quotedFeePct ?? 0,
-          // Only the work the partner's figure is a price FOR.
-          adderTotalCents,
-        });
-  const customerPpw = customerCap?.stickerPpwCents ?? flatSeedPpw;
+  /*
+   * ONE CALL, where this was a `capStickerToFinalPpw` and then a `pricePurchase`
+   * on whatever sticker came back. `priceDeal` is those two in that order — its
+   * non-storage branch IS `priceStoredPurchase` — so the figures are unchanged.
+   *
+   * The gate tightened from "a seed exists" to "a seed exists AND there are
+   * watts", which the old pair reached by different routes: the cap was built
+   * whenever a seed existed, and the price only when there were watts. That
+   * costs nothing, because `capStickerToFinalUnit` returns the sticker untouched
+   * the moment `units <= 0` — so on a zero-watt job the old cap was a no-op
+   * reporting `capped: false`, which is exactly what a null result reads as
+   * below.
+   */
   const customerPriced =
-    customerPpw != null && watts > 0
-      ? pricePurchase({
+    flatSeedPpw != null && watts > 0
+      ? priceDeal({
           product: "loan",
+          systemType: "pv",
           systemSizeKwDc,
-          stickerPpwCents: customerPpw,
+          baseFinalPpwCents: flatSeedPpw,
           dealerFeePct: quotedFeePct ?? 0,
-          adderTotalCents,
-          onTopAdderTotalCents,
-          batteryPriceCents,
+          // The rate sheet of the programme this deal quotes, which is what the
+          // card is showing the rep.
+          dealerFeeSource: "programme",
+          // Only the work the partner's figure is a price FOR. The on-top half
+          // rides above the ceiling and is added back inside the ladder.
+          addersInsideRuleCents: adderTotalCents,
+          addersOutsideRuleCents: onTopAdderTotalCents,
+          equipmentChargesCents: batteryPriceCents,
+          priceRulePpwCents: quotedMaxFinalPpwCents,
+          priceRuleMode: quotedFinalPpwMode,
+          ppwBasis: quotedPpwBasis,
         })
       : null;
-  const customerContract = customerPriced?.contractPriceCents ?? null;
+  const customerPpw = customerPriced?.stickerPerUnitCents ?? flatSeedPpw;
+  const customerContract = customerPriced?.finalPriceCents ?? null;
   /**
    * The rate the FOOTER quotes, which is the contract divided by the watts —
    * not `customerPpw`.
@@ -400,8 +406,7 @@ export function SystemPriceCard({
    * the fee is the gross the fee is really taken from. The box a rep types in
    * still holds what they typed; the rung says what the rule made of it.
    */
-  const heldBaseCents =
-    customerCap?.capped && customerPriced ? customerPriced.basePriceCents : null;
+  const heldBaseCents = customerPriced?.priceRule?.capped ? customerPriced.baseKeptCents : null;
   const ladderBaseCents = heldBaseCents ?? baseTotalCents;
   const ladderBasePpw =
     heldBaseCents != null ? (watts > 0 ? heldBaseCents / watts : null) : basePpwCents;
@@ -448,7 +453,7 @@ export function SystemPriceCard({
    * the base on the ladder is not the base in the box.
    */
   const finalNote =
-    customerCap?.capped && quotedMaxFinalPpwCents != null
+    customerPriced?.priceRule?.capped && quotedMaxFinalPpwCents != null
       ? `${quotedFinalPpwMode === "flat" ? "flat" : "held at"} $${(
           quotedMaxFinalPpwCents / 100
         ).toFixed(2)}/W${quotedPpwBasis === "final" ? "" : ` ${quotedPpwBasis}`}`
@@ -788,7 +793,7 @@ export function SystemPriceCard({
             This leaves ${((keptBasePpwCents ?? 0) / 100).toFixed(2)}/W before the lender&rsquo;s
             cut, under {quotedLabel ? "this lender" : "the lender"}&rsquo;s $
             {((quotedMinBasePpwCents ?? 0) / 100).toFixed(2)}/W minimum.
-            {customerCap?.capped
+            {customerPriced?.priceRule?.capped
               ? " Its cap is holding the customer price down, so the extra work is coming out of your side."
               : " The proposal will not generate until the price comes up."}
           </p>
@@ -805,7 +810,7 @@ export function SystemPriceCard({
                   "adders"
                 )}${onTopNote} — the base above only changes what you keep, so the customer’s final price is `}
               </>
-            ) : customerCap?.capped && quotedMaxFinalPpwCents != null ? (
+            ) : customerPriced?.priceRule?.capped && quotedMaxFinalPpwCents != null ? (
               <>
                 never charges more than ${(quotedMaxFinalPpwCents / 100).toFixed(2)}/W,{" "}
                 {ruleClause(quotedPpwBasis, quotedFeePct, "adders")}
@@ -832,7 +837,7 @@ export function SystemPriceCard({
             {onTopAdderTotalCents > 0 && (
               <>
                 {`That includes $${Math.round(
-                  (customerPriced?.onTopAdderStickerCents ?? onTopAdderTotalCents) / 100
+                  (customerPriced?.addersOutsideRuleFinalCents ?? onTopAdderTotalCents) / 100
                 ).toLocaleString()} of work financed on top of the rate, dealer fee included. `}
               </>
             )}
@@ -843,7 +848,7 @@ export function SystemPriceCard({
             {batteryPriceCents > 0 && (
               <>
                 {`It also includes $${Math.round(
-                  (customerPriced?.batteryStickerCents ?? batteryPriceCents) / 100
+                  (customerPriced?.equipmentFinalCents ?? batteryPriceCents) / 100
                 ).toLocaleString()} for the ${batteryLabel ?? "battery"}${
                   batteryQty > 1 ? ` × ${batteryQty}` : ""
                 }${
@@ -1122,35 +1127,50 @@ export function StoragePriceCard({
   const fee = quotedFeePct ?? 0;
   const sticker = basePerBatteryCents == null ? null : grossPpwFromNet(basePerBatteryCents, fee);
 
-  const cap =
-    sticker == null
-      ? null
-      : capStickerToFinalUnit({
-          stickerPerUnitCents: sticker,
-          maxFinalPerUnitCents: quotedMaxFinalPerBatteryCents,
-          mode: quotedFinalBatteryPriceMode,
-          basis: quotedBatteryPriceBasis,
-          units: batteryQty,
-          dealerFeePct: fee,
-          adderTotalCents,
-        });
-
-  const breakdown =
+  /*
+   * ONE CALL, where this was a `capStickerToFinalUnit` and then a
+   * `priceStoragePurchase` on the capped figure. Those two ARE
+   * `priceStorageStored`, which is exactly what `priceDeal`'s storage branch
+   * runs, on the same arguments.
+   *
+   * `product: "loan"` unconditionally, where the old call said
+   * `fee > 0 ? "loan" : "cash"`. That ternary was safe only because the ceiling
+   * was applied SEPARATELY above it and did not care about the product;
+   * `priceDeal` refuses a partner rule on cash, so passing it through would
+   * stop capping a 0%-fee programme that publishes a price per battery. The
+   * arithmetic is identical either way at a zero fee — `priceUnits` stands the
+   * fee down below 1% regardless — so this preserves the price AND the ceiling.
+   */
+  const priced =
     sticker == null || !(batteryQty > 0)
       ? null
-      : priceStoragePurchase({
-          product: fee > 0 ? "loan" : "cash",
+      : priceDeal({
+          product: "loan",
+          systemType: "storage",
+          // A battery job has no array; the battery is the unit being counted.
+          systemSizeKwDc: 0,
+          baseFinalPpwCents: 0,
+          baseFinalPerBatteryCents: sticker,
           batteryQty,
-          stickerPricePerBatteryCents: cap?.stickerPerUnitCents ?? sticker,
           dealerFeePct: fee,
-          adderTotalCents,
-          onTopAdderTotalCents,
+          dealerFeeSource: "programme",
+          addersInsideRuleCents: adderTotalCents,
+          addersOutsideRuleCents: onTopAdderTotalCents,
+          priceRulePerBatteryCents: quotedMaxFinalPerBatteryCents,
+          priceRuleBatteryMode: quotedFinalBatteryPriceMode,
+          batteryPriceBasis: quotedBatteryPriceBasis,
         });
 
   // Measured on what SURVIVES the partner's rule, not on what was typed. Under
   // a flat partner the base a rep entered is not the base anybody is getting.
+  //
+  // Falls back to the raw sticker rather than going null when nothing is
+  // priced, because the old cap existed whenever a sticker did — batteries or
+  // no batteries — and the floor warning below fires off this figure. Gating it
+  // on `batteryQty > 0` would silence that warning on a job where a rep has
+  // typed a per-battery base but not yet added a battery.
   const keptPerBattery =
-    cap == null ? null : basePpwFromSticker(cap.stickerPerUnitCents, fee);
+    sticker == null ? null : basePpwFromSticker(priced?.stickerPerUnitCents ?? sticker, fee);
   const underFloor =
     keptPerBattery != null &&
     quotedMinBasePerBatteryCents != null &&
@@ -1189,30 +1209,30 @@ export function StoragePriceCard({
         </label>
       </div>
 
-      {breakdown && (
+      {priced && (
         <dl className="space-y-1 border-t border-border pt-3 text-sm">
           <Row
             label={`Batteries — ${batteryQty} × ${money(
-              Math.round(breakdown.baseStickerCents / Math.max(1, batteryQty))
+              Math.round(priced.baseFinalCents / Math.max(1, batteryQty))
             )}`}
-            value={money(breakdown.baseStickerCents)}
+            value={money(priced.baseFinalCents)}
           />
-          {breakdown.adderStickerCents !== 0 && (
-            <Row label="Additional work" value={money(breakdown.adderStickerCents)} />
+          {priced.addersFinalCents !== 0 && (
+            <Row label="Additional work" value={money(priced.addersFinalCents)} />
           )}
-          <Row label="What we keep" value={money(breakdown.grossPriceCents)} muted />
-          {breakdown.dealerFeeCents !== 0 && (
+          <Row label="What we keep" value={money(priced.grossPriceCents)} muted />
+          {priced.dealerFeeCents !== 0 && (
             <Row
               label={`Lender fee${quotedLabel ? ` — ${quotedLabel}` : ""}`}
-              value={money(breakdown.dealerFeeCents)}
+              value={money(priced.dealerFeeCents)}
               muted
             />
           )}
-          <Row label="Customer signs" value={money(breakdown.contractPriceCents)} strong />
+          <Row label="Customer signs" value={money(priced.finalPriceCents)} strong />
         </dl>
       )}
 
-      {cap?.capped && (
+      {priced?.priceRule?.capped && (
         <p className="rounded-lg border border-blue-500/40 bg-blue-500/5 p-2.5 text-xs">
           {quotedFinalBatteryPriceMode === "flat"
             ? `This partner sells at a flat ${money(quotedMaxFinalPerBatteryCents ?? 0)} a battery, ${ruleClause(quotedBatteryPriceBasis, quotedFeePct, "work")} — so the price above is theirs, not the one typed.`
@@ -1220,7 +1240,7 @@ export function StoragePriceCard({
         </p>
       )}
 
-      {cap?.adderOverrun && (
+      {priced?.priceRule?.adderOverrun && (
         <p className="rounded-lg border border-red-500/40 bg-red-500/5 p-2.5 text-xs">
           The extra work alone is above this partner&rsquo;s ceiling. No battery price gets this
           contract under it.

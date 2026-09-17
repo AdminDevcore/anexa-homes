@@ -12,7 +12,7 @@ import {
 /**
  * Which extra work rides ON TOP of a partner's price, lender by lender.
  *
- * `SolarEquipment.financedOnTop` answered this once for everybody, which was
+ * `SolarEquipment.outsidePriceRule` answered this once for everybody, which was
  * right while exactly one partner priced this way: Amos Capital Fund funds a
  * flat $5.50/W and a roof above it at what the roof costs, so the roof got the
  * tick. It stops being right the moment a second capped partner rolls the same
@@ -60,19 +60,19 @@ beforeEach(async () => {
 
   amosId = (
     await db.solarLender.create({
-      data: { companyId, name: "Amos Capital Fund", maxFinalPpwCents: 550, finalPpwMode: "flat" },
+      data: { companyId, name: "Amos Capital Fund", priceRulePpwCents: 550, priceRuleMode: "flat" },
     })
   ).id;
   otherId = (
     await db.solarLender.create({
-      data: { companyId, name: "Climate First", maxFinalPpwCents: 600, finalPpwMode: "cap" },
+      data: { companyId, name: "Climate First", priceRulePpwCents: 600, priceRuleMode: "cap" },
     })
   ).id;
   roofId = (
     await db.solarEquipment.create({
       data: {
         companyId, kind: "adder", model: "Re-roof", adderBasis: "flat",
-        priceCents: 7_000_00, financedOnTop: true,
+        priceCents: 7_000_00, outsidePriceRule: true,
       },
     })
   ).id;
@@ -80,7 +80,7 @@ beforeEach(async () => {
     await db.solarEquipment.create({
       data: {
         companyId, kind: "adder", model: "Main panel upgrade", adderBasis: "flat",
-        priceCents: 2_700_00, financedOnTop: false,
+        priceCents: 2_700_00, outsidePriceRule: false,
       },
     })
   ).id;
@@ -91,8 +91,8 @@ afterAll(async () => {
   await db.$disconnect();
 });
 
-const rule = (lenderId: string, equipmentId: string, financedOnTop: boolean) =>
-  db.solarLenderAdderRule.create({ data: { lenderId, equipmentId, financedOnTop } });
+const rule = (lenderId: string, equipmentId: string, outsidePriceRule: boolean) =>
+  db.solarLenderAdderRule.create({ data: { lenderId, equipmentId, outsidePriceRule } });
 
 /**
  * `SolarEquipment` is a vertical-scoped model, so the resolver reads the
@@ -144,17 +144,17 @@ describe("a line picked onto a deal is stamped with the lender's answer", () => 
   it("lineFromCatalogue takes the rule over the catalogue", async () => {
     await rule(otherId, roofId, false);
     const item = await db.solarEquipment.findUniqueOrThrow({ where: { id: roofId } });
-    expect(lineFromCatalogue(item).financedOnTop).toBe(true);
-    expect(lineFromCatalogue(item, await lenderAdderRules(otherId)).financedOnTop).toBe(false);
+    expect(lineFromCatalogue(item).outsidePriceRule).toBe(true);
+    expect(lineFromCatalogue(item, await lenderAdderRules(otherId)).outsidePriceRule).toBe(false);
   });
 });
 
 describe("moving a deal to another partner re-reads that partner's rules", () => {
-  const putRoofOnDeal = (financedOnTop: boolean) =>
+  const putRoofOnDeal = (outsidePriceRule: boolean) =>
     db.solarDealAdder.create({
       data: {
         companyId, leadId, equipmentId: roofId, label: "Re-roof",
-        basis: "flat", flatCents: 7_000_00, qty: 1, financedOnTop,
+        basis: "flat", flatCents: 7_000_00, qty: 1, outsidePriceRule,
       },
     });
 
@@ -164,7 +164,7 @@ describe("moving a deal to another partner re-reads that partner's rules", () =>
 
     expect(await restamp(otherId)).toBe(1);
     const line = await db.solarDealAdder.findFirstOrThrow({ where: { leadId, equipmentId: roofId } });
-    expect(line.financedOnTop).toBe(false);
+    expect(line.outsidePriceRule).toBe(false);
   });
 
   it("and back on top again when the deal moves to the partner that funds it that way", async () => {
@@ -174,7 +174,7 @@ describe("moving a deal to another partner re-reads that partner's rules", () =>
     // Amos has no rule, so the catalogue answers -- and the catalogue says on top.
     expect(await restamp(amosId)).toBe(1);
     const line = await db.solarDealAdder.findFirstOrThrow({ where: { leadId, equipmentId: roofId } });
-    expect(line.financedOnTop).toBe(true);
+    expect(line.outsidePriceRule).toBe(true);
   });
 
   it("reports nothing moved when the new partner agrees with the old one", async () => {
@@ -191,12 +191,12 @@ describe("moving a deal to another partner re-reads that partner's rules", () =>
     await db.solarDealAdder.create({
       data: {
         companyId, leadId, equipmentId: null, label: "Tree removal",
-        basis: "custom", flatCents: 900_00, qty: 1, financedOnTop: true,
+        basis: "custom", flatCents: 900_00, qty: 1, outsidePriceRule: true,
       },
     });
     expect(await restamp(otherId)).toBe(0);
     const line = await db.solarDealAdder.findFirstOrThrow({ where: { leadId, equipmentId: null } });
-    expect(line.financedOnTop).toBe(true);
+    expect(line.outsidePriceRule).toBe(true);
   });
 
   /**
@@ -211,14 +211,14 @@ describe("moving a deal to another partner re-reads that partner's rules", () =>
 
     expect(await restamp(otherId)).toBe(0);
     const line = await db.solarDealAdder.findFirstOrThrow({ where: { leadId } });
-    expect(line.financedOnTop).toBe(true);
+    expect(line.outsidePriceRule).toBe(true);
   });
 
   it("clearing the lender puts every line back on the catalogue's answer", async () => {
     await putRoofOnDeal(false);
     expect(await restamp(null)).toBe(1);
     const line = await db.solarDealAdder.findFirstOrThrow({ where: { leadId } });
-    expect(line.financedOnTop).toBe(true);
+    expect(line.outsidePriceRule).toBe(true);
   });
 });
 

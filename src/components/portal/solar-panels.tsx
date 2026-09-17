@@ -34,13 +34,12 @@ import {
   loanPaymentCents,
   grossPpwFromNet,
   leaseMonthlyCents,
-  priceStoredPurchase,
-  priceStorageStored,
   batteryChargeCents,
   type YieldAssumptions,
   type FinalPpwMode,
   type PriceBasis,
 } from "@/lib/solar-money";
+import { priceDeal } from "@/lib/solar-price-deal";
 import { SystemPriceCard, StoragePriceCard } from "@/components/portal/solar/system-price";
 import { CreditClaimsCard } from "@/components/portal/solar/credit-claims";
 import { resolveSignToday, type SignTodayMode } from "@/lib/solar-sign-today";
@@ -281,22 +280,22 @@ export type SolarDesignView = {
 
 export type SolarFinanceView = {
   product: FinanceProduct;
-  grossPpwCents: number;
+  baseFinalPpwCents: number;
   /** The storage sticker, per battery. Zero on every PV deal. */
-  stickerPricePerBatteryCents: number;
+  baseFinalPerBatteryCents: number;
   dealerFeePct: number;
-  adderTotalCents: number;
-  onTopAdderTotalCents: number;
-  contractPriceCents: number;
+  addersInsideRuleCents: number;
+  addersOutsideRuleCents: number;
+  finalPriceCents: number;
   itcEstimateCents: number;
   rateMillsPerKwh: number | null;
-  monthlyPaymentCents: number | null;
+  leasePaymentCents: number | null;
   escalatorPct: number | null;
   termYears: number | null;
   aprPct: number | null;
   loanTermMonths: number | null;
   downPaymentCents: number | null;
-  loanMonthlyPaymentCents: number | null;
+  lenderMonthlyPaymentCents: number | null;
   /// Which rate-sheet row this was quoted from. Provenance: the terms above are
   /// copies taken when the rep chose it.
   lenderProductId: string | null;
@@ -723,7 +722,7 @@ export type LenderOption = {
    * included, cents. Null — nearly every lender — means the ordinary
    * base-times-fee pricing, unchanged.
    */
-  maxFinalPpwCents: number | null;
+  priceRulePpwCents: number | null;
   /**
    * How this partner's SIGN TODAY CREDIT is arrived at, and its figure. `none`
    * — every lender until somebody sets a rule — leaves the credit to the rep,
@@ -736,14 +735,14 @@ export type LenderOption = {
    * The same two rules over BATTERIES, for a deal with no watts. Null means no
    * rule, which is every lender until somebody sets one.
    */
-  maxFinalPricePerBatteryCents: number | null;
+  priceRulePerBatteryCents: number | null;
   minBasePricePerBatteryCents: number | null;
-  finalBatteryPriceMode: "cap" | "flat";
+  priceRuleBatteryMode: "cap" | "flat";
   /**
    * Whether that figure is a CEILING or the PRICE. A flat partner sells at one
-   * number whatever the base and whatever the adders; see SolarFinalPpwMode.
+   * number whatever the base and whatever the adders; see SolarPriceRuleMode.
    */
-  finalPpwMode: FinalPpwMode;
+  priceRuleMode: FinalPpwMode;
   /**
    * The least this partner's deals may leave the company per watt, before its
    * cut, cents. Null — nearly every lender — means no floor.
@@ -869,7 +868,7 @@ export function SolarFinancePanel({
   const seed = (f: SolarFinanceView) => ({
     dealerFeePct: num(f?.dealerFeePct),
     rate: num(f?.rateMillsPerKwh, 1000, 3),
-    monthly: num(f?.monthlyPaymentCents, 100),
+    monthly: num(f?.leasePaymentCents, 100),
     escalatorPct: num(f?.escalatorPct),
     termYears: num(f?.termYears),
     aprPct: num(f?.aprPct),
@@ -915,7 +914,7 @@ export function SolarFinancePanel({
    * Null on a partner that prices the ordinary way.
    */
   const quotedFlatPpwCents =
-    quotedLender?.finalPpwMode === "flat" ? quotedLender.maxFinalPpwCents : null;
+    quotedLender?.priceRuleMode === "flat" ? quotedLender.priceRulePpwCents : null;
 
   /**
    * The deal's base price per watt — what Anexa charges before a lender's cut.
@@ -936,8 +935,8 @@ export function SolarFinancePanel({
     // been asked for one — so an unpriced storage deal opens EMPTY rather than
     // on a $/W figure that would read as $3.50 a Powerwall.
     const stored = systemType === "storage"
-      ? (finance?.stickerPricePerBatteryCents ?? 0)
-      : (finance?.grossPpwCents ?? 0);
+      ? (finance?.baseFinalPerBatteryCents ?? 0)
+      : (finance?.baseFinalPpwCents ?? 0);
     if (stored > 0) return Math.round(stored * (1 - (finance?.dealerFeePct ?? 0) / 100));
     return systemType === "storage" ? null : defaultBasePpwCents;
   });
@@ -953,7 +952,7 @@ export function SolarFinancePanel({
   const batteryPriceCents = batteryChargeCents({
     systemType,
     batteryQty,
-    dealPerBatteryCents: finance?.stickerPricePerBatteryCents,
+    dealPerBatteryCents: finance?.baseFinalPerBatteryCents,
     cataloguePerBatteryCents: batteryUnitPriceCents,
   });
 
@@ -969,14 +968,14 @@ export function SolarFinancePanel({
   const adderSplit = React.useMemo(() => {
     if (adderLines.length === 0) {
       return {
-        adderTotalCents: finance?.adderTotalCents ?? 0,
-        onTopAdderTotalCents: finance?.onTopAdderTotalCents ?? 0,
+        adderTotalCents: finance?.addersInsideRuleCents ?? 0,
+        onTopAdderTotalCents: finance?.addersOutsideRuleCents ?? 0,
       };
     }
     const t = adderTotals(adderLines, Math.round(systemSizeKwDc * 1000));
     return { adderTotalCents: t.financedInCents, onTopAdderTotalCents: t.onTopCents };
   }, [
-    adderLines, finance?.adderTotalCents, finance?.onTopAdderTotalCents, systemSizeKwDc,
+    adderLines, finance?.addersInsideRuleCents, finance?.addersOutsideRuleCents, systemSizeKwDc,
   ]);
   const { adderTotalCents, onTopAdderTotalCents } = adderSplit;
 
@@ -1045,8 +1044,8 @@ export function SolarFinancePanel({
                 ...p,
                 lenderName: l.name,
                 label: lenderProductLabel(p),
-                maxFinalPpwCents: l.maxFinalPpwCents,
-                finalPpwMode: l.finalPpwMode,
+                maxFinalPpwCents: l.priceRulePpwCents,
+                finalPpwMode: l.priceRuleMode,
                 // Same reason as the ceiling above: the shelf prices a
                 // programme, and each column's closing credit is its own
                 // partner's to decide.
@@ -1216,37 +1215,44 @@ export function SolarFinancePanel({
     // are, and one price box beats two that can disagree.
     if (isStorage) {
       if (!(batteryQty > 0)) return null;
-      return priceStorageStored({
+      return priceDeal({
         product,
+        systemType: "storage",
+        // No array on a battery job: the battery is the unit being counted.
+        systemSizeKwDc: 0,
+        baseFinalPpwCents: 0,
+        baseFinalPerBatteryCents: stickerPpwCents,
         batteryQty,
-        stickerPricePerBatteryCents: stickerPpwCents,
         dealerFeePct: Number.isFinite(feePct) ? feePct : 0,
-        adderTotalCents,
-        onTopAdderTotalCents,
-        maxFinalPricePerBatteryCents: quotedLender?.maxFinalPricePerBatteryCents ?? null,
-        finalBatteryPriceMode: quotedLender?.finalBatteryPriceMode ?? "cap",
+        dealerFeeSource: "programme",
+        addersInsideRuleCents: adderTotalCents,
+        addersOutsideRuleCents: onTopAdderTotalCents,
+        priceRulePerBatteryCents: quotedLender?.priceRulePerBatteryCents ?? null,
+        priceRuleBatteryMode: quotedLender?.priceRuleBatteryMode ?? "cap",
         batteryPriceBasis: chosen?.batteryPriceBasis,
       });
     }
 
     if (!(systemSizeKwDc > 0)) return null;
-    return priceStoredPurchase({
+    return priceDeal({
       product,
+      systemType: "pv",
       systemSizeKwDc,
-      stickerPpwCents,
+      baseFinalPpwCents: stickerPpwCents,
       dealerFeePct: Number.isFinite(feePct) ? feePct : 0,
-      adderTotalCents,
-      onTopAdderTotalCents,
-      batteryPriceCents,
-      maxFinalPpwCents: quotedLender?.maxFinalPpwCents ?? null,
-      finalPpwMode: quotedLender?.finalPpwMode ?? "cap",
+      dealerFeeSource: "programme",
+      addersInsideRuleCents: adderTotalCents,
+      addersOutsideRuleCents: onTopAdderTotalCents,
+      equipmentChargesCents: batteryPriceCents,
+      priceRulePpwCents: quotedLender?.priceRulePpwCents ?? null,
+      priceRuleMode: quotedLender?.priceRuleMode ?? "cap",
       ppwBasis: chosen?.ppwBasis,
     });
   }, [
     isPurchase, isStorage, batteryQty, product, systemSizeKwDc, stickerPpwCents, feePct,
     adderTotalCents, onTopAdderTotalCents, batteryPriceCents,
-    quotedLender?.maxFinalPpwCents, quotedLender?.finalPpwMode,
-    quotedLender?.maxFinalPricePerBatteryCents, quotedLender?.finalBatteryPriceMode,
+    quotedLender?.priceRulePpwCents, quotedLender?.priceRuleMode,
+    quotedLender?.priceRulePerBatteryCents, quotedLender?.priceRuleBatteryMode,
     chosen?.ppwBasis, chosen?.batteryPriceBasis,
   ]);
 
@@ -1266,7 +1272,7 @@ export function SolarFinancePanel({
    * the server's it quoted $67,896 under a shelf of cards saying $60,500 — see
    * `livePrice` above, which exists because of exactly that.
    */
-  const documentPriceCents = livePrice?.breakdown.contractPriceCents ?? null;
+  const documentPriceCents = livePrice?.finalPriceCents ?? null;
 
   /**
    * THE CREDITS THIS DEAL EARNS, as the card below and the document both draw
@@ -1286,8 +1292,18 @@ export function SolarFinancePanel({
    * cap derives it from the system price as it stands this second — which is
    * why this sits with the live price rather than on the server.
    */
-  const arrayPrice =
-    livePrice && "systemWatts" in livePrice.breakdown ? livePrice.breakdown : null;
+  /*
+   * NULL ON A STORAGE DEAL, which is what this line has always meant.
+   *
+   * It used to say so by discriminating the union: the storage branch returned
+   * a `UnitPriceBreakdown`, which counts `units` and has no `systemWatts`, so
+   * the `in` test was false on every battery job. Both branches now return a
+   * `DealPrice`, where `systemWatts` is always present and simply reads 0 on
+   * storage — so the old test would be permanently TRUE and this would start
+   * handing `resolveSignToday` a battery total as though it were a system
+   * price. The condition is stated directly instead.
+   */
+  const arrayPrice = !isStorage && livePrice ? livePrice : null;
 
   const signToday = resolveSignToday({
     rule: quotedLender
@@ -1301,10 +1317,10 @@ export function SolarFinancePanel({
     // all, so there is no system price for a per-watt cap to be measured over.
     // The resolver answers "nothing" to that, which is the right answer: a
     // Powerwall order is hardware at catalogue price, not margin.
-    systemPriceCents: arrayPrice?.baseStickerCents ?? 0,
+    systemPriceCents: arrayPrice?.baseFinalCents ?? 0,
     // Storage counts: the household signs for it, and a per-watt promise that
     // steps around it is not a promise about the figure they land on.
-    batteryPriceCents: arrayPrice?.batteryStickerCents ?? 0,
+    batteryPriceCents: arrayPrice?.equipmentFinalCents ?? 0,
     systemWatts: arrayPrice?.systemWatts ?? 0,
     // The live tick-boxes, so the figure moves the moment a rep unticks a
     // bonus this job does not earn.
@@ -1316,8 +1332,8 @@ export function SolarFinancePanel({
   const liveLadder =
     isPurchase && livePrice
       ? buildCreditLadder({
-          contractValueCents: livePrice.breakdown.contractPriceCents,
-          quotedPriceCents: livePrice.breakdown.contractPriceCents,
+          contractValueCents: livePrice.finalPriceCents,
+          quotedPriceCents: livePrice.finalPriceCents,
           rates: creditRates,
           claims: creditClaims,
           signTodayCreditCents: signToday.cents,
@@ -1447,7 +1463,7 @@ export function SolarFinancePanel({
    * the screen through every save, and the one signal a rep has that the price
    * has moved became a permanent fixture.
    */
-  const liveContractCents = livePrice?.breakdown.contractPriceCents ?? null;
+  const liveContractCents = livePrice?.finalPriceCents ?? null;
 
   // A blank box means "not set" (null); a typed "0" is a real zero and is sent
   // as one. `form.x ? … : null` is safe here ONLY because these are STRINGS —
@@ -1514,8 +1530,8 @@ export function SolarFinancePanel({
       setProduct(res.finance.product);
       setLenderProductId(res.finance.lenderProductId ?? "");
       const storedSticker = isStorage
-        ? res.finance.stickerPricePerBatteryCents
-        : res.finance.grossPpwCents;
+        ? res.finance.baseFinalPerBatteryCents
+        : res.finance.baseFinalPpwCents;
       if (storedSticker > 0) {
         setBasePpwCents(
           Math.round(storedSticker * (1 - (res.finance.dealerFeePct ?? 0) / 100))
@@ -1526,7 +1542,7 @@ export function SolarFinancePanel({
     router.refresh();
   }
 
-  const dirty = finance != null && liveContractCents != null && finance.contractPriceCents !== liveContractCents;
+  const dirty = finance != null && liveContractCents != null && finance.finalPriceCents !== liveContractCents;
 
   return (
     <div className="space-y-6">
@@ -1546,8 +1562,8 @@ export function SolarFinancePanel({
           batteryQty={batteryQty}
           basePerBatteryCents={basePpwCents}
           quotedFeePct={chosen && !isCash ? chosen.dealerFeePct : null}
-          quotedMaxFinalPerBatteryCents={quotedLender?.maxFinalPricePerBatteryCents ?? null}
-          quotedFinalBatteryPriceMode={quotedLender?.finalBatteryPriceMode ?? "cap"}
+          quotedMaxFinalPerBatteryCents={quotedLender?.priceRulePerBatteryCents ?? null}
+          quotedFinalBatteryPriceMode={quotedLender?.priceRuleBatteryMode ?? "cap"}
           quotedBatteryPriceBasis={chosen?.batteryPriceBasis ?? "final"}
           quotedMinBasePerBatteryCents={isCash ? null : (quotedLender?.minBasePricePerBatteryCents ?? null)}
           quotedLabel={quotedLender?.name ?? null}
@@ -1571,11 +1587,11 @@ export function SolarFinancePanel({
         // chosen programme was published by — never off the programme row — and
         // off the one `quotedLender` already resolved, so this card and the
         // payment below it cannot be holding two different partners' rules.
-        quotedMaxFinalPpwCents={quotedLender?.maxFinalPpwCents ?? null}
+        quotedMaxFinalPpwCents={quotedLender?.priceRulePpwCents ?? null}
         // Read the same way and from the same row: a mode without its figure
         // is not a pricing rule, and the two arriving from different places is
         // how one of them goes stale.
-        quotedFinalPpwMode={quotedLender?.finalPpwMode ?? "cap"}
+        quotedFinalPpwMode={quotedLender?.priceRuleMode ?? "cap"}
         // Which price that figure fixes is the chosen PROGRAMME's to say.
         quotedPpwBasis={chosen?.ppwBasis ?? "final"}
         // The floor is the partner's too, and read the same way. Cash has no
@@ -1599,7 +1615,7 @@ export function SolarFinancePanel({
       {isPurchase && livePrice && (
         <CreditClaimsCard
           leadId={leadId}
-          customerContractCents={livePrice.breakdown.contractPriceCents}
+          customerContractCents={livePrice.finalPriceCents}
           creditRates={creditRates}
           claims={creditClaims}
           signTodayCreditCents={signTodayCreditCents}
@@ -1619,7 +1635,7 @@ export function SolarFinancePanel({
         catalogue={adderCatalogue}
         lines={adderLines}
         systemWatts={Math.round(systemSizeKwDc * 1000)}
-        storedTotalCents={(finance?.adderTotalCents ?? 0) + (finance?.onTopAdderTotalCents ?? 0)}
+        storedTotalCents={(finance?.addersInsideRuleCents ?? 0) + (finance?.addersOutsideRuleCents ?? 0)}
       />
 
       {/* The rate sheets ARE the interface. Four abstract product types used to
@@ -1868,7 +1884,7 @@ export function SolarFinancePanel({
           </Button>
           {dirty && (
             <p className="text-[11px] text-muted-foreground">
-              Saved at {money(finance!.contractPriceCents)} — this quote comes to{" "}
+              Saved at {money(finance!.finalPriceCents)} — this quote comes to{" "}
               <span className="font-medium tabular-nums text-foreground">
                 {money(liveContractCents!)}
               </span>

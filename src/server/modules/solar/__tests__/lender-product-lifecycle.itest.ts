@@ -67,7 +67,7 @@ const quote = (lenderProductId: string) =>
   db.solarFinance.create({
     data: {
       companyId, leadId, product: "loan", lenderProductId,
-      grossPpwCents: 350, dealerFeePct: 18, aprPct: 4.99, loanTermMonths: 300,
+      baseFinalPpwCents: 350, dealerFeePct: 18, aprPct: 4.99, loanTermMonths: 300,
     },
   });
 
@@ -114,7 +114,7 @@ describe("a lender's rate sheet over time", () => {
     expect(await db.solarLenderProduct.findUnique({ where: { id: p.id } })).toBeNull();
     const f = await db.solarFinance.findUnique({ where: { leadId } });
     expect(f).not.toBeNull();
-    expect(f?.contractPriceCents).toBeDefined();
+    expect(f?.finalPriceCents).toBeDefined();
   });
 
   it("keeps several products on one lender, each priced separately", async () => {

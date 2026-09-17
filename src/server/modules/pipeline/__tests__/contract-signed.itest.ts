@@ -74,7 +74,7 @@ const SNAPSHOT = {
   financing: { product: "cash", contractPriceCents: 2800000, grossPpwCents: 350, basePriceCents: 2800000, adderTotalCents: null, finalPpwCents: 350, monthlyPaymentCents: null, rateMillsPerKwh: null, escalatorPct: null, termYears: null, aprPct: null, lender: null, itcEstimateCents: null, itcPct: null, stateIncentiveNote: null },
   savings: { years: [], utilityCostAvoidedCents: 0, solarPaidCents: 0, netSavingsCents: 0, totalSavingsCents: 0, paybackYear: null },
   environmental: { tonsCo2Avoided: 0, treesEquivalent: 0, poundsCoalAvoided: 0, milesNotDriven: 0 },
-  assumptions: { derateFactor: 0.84, annualDegradationPct: 0.5, utilityEscalationPct: 3.5, kwhPerKwYear: 1450, utilityMeterFeeCents: 1000, defaultGrossPpwCents: 350, defaultDealerFeePct: 18, minOffsetPct: 0, maxOffsetPct: 150, currentRateMillsPerKwh: 154 },
+  assumptions: { derateFactor: 0.84, annualDegradationPct: 0.5, utilityEscalationPct: 3.5, kwhPerKwYear: 1450, utilityMeterFeeCents: 1000, companyDefaultBasePpwCents: 350, defaultDealerFeePct: 18, minOffsetPct: 0, maxOffsetPct: 150, currentRateMillsPerKwh: 154 },
   disclaimers: { estimate: "y" },
 };
 

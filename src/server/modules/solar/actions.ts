@@ -31,11 +31,11 @@ const settingsSchema = z.object({
   // company is quoting a utility that genuinely bills none; the $100/mo ceiling
   // is a typo rail, not a policy.
   utilityMeterFeeCents: z.number().int().min(0).max(10000),
-  defaultGrossPpwCents: z.number().int().min(50).max(2000),
+  companyDefaultBasePpwCents: z.number().int().min(50).max(2000),
   defaultDealerFeePct: z.number().min(0).max(50),
   // Null is meaningful and is the default: derive nothing, leave the sticker as
   // the rep typed it. Set, and gross is computed from the product's dealer fee.
-  targetNetPpwCents: z.number().int().min(50).max(2000).nullable().optional(),
+  targetBasePpwCents: z.number().int().min(50).max(2000).nullable().optional(),
   // What an owned system is claimed to add to a home's value, %. Zero — the
   // default — means the claim is not made and the proposal omits the card.
   // Capped at 20 because the published studies cluster around four, and a
@@ -825,9 +825,9 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
     ? (
         await prisma.solarFinance.findUnique({
           where: { leadId: f.leadId },
-          select: { contractPriceCents: true },
+          select: { finalPriceCents: true },
         })
-      )?.contractPriceCents ?? null
+      )?.finalPriceCents ?? null
     : null;
 
   /**
@@ -861,12 +861,12 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
     },
     update: data,
     select: {
-      product: true, grossPpwCents: true, stickerPricePerBatteryCents: true,
-      dealerFeePct: true, adderTotalCents: true,
-      onTopAdderTotalCents: true,
-      contractPriceCents: true, itcEstimateCents: true, rateMillsPerKwh: true,
-      monthlyPaymentCents: true, escalatorPct: true, termYears: true, aprPct: true,
-      loanTermMonths: true, downPaymentCents: true, loanMonthlyPaymentCents: true,
+      product: true, baseFinalPpwCents: true, baseFinalPerBatteryCents: true,
+      dealerFeePct: true, addersInsideRuleCents: true,
+      addersOutsideRuleCents: true,
+      finalPriceCents: true, itcEstimateCents: true, rateMillsPerKwh: true,
+      leasePaymentCents: true, escalatorPct: true, termYears: true, aprPct: true,
+      loanTermMonths: true, downPaymentCents: true, lenderMonthlyPaymentCents: true,
       lenderProductId: true, shortlistIds: true,
     },
   });
@@ -876,7 +876,7 @@ export async function saveSolarFinanceAction(input: z.infer<typeof financeSchema
     await auditSignedEdit(user, lead.id, {
       what: "the contract price",
       before: priceBefore,
-      after: saved.contractPriceCents,
+      after: saved.finalPriceCents,
       reason: lock_saveSolarFinanceAction.override.reason,
     });
   }
@@ -940,7 +940,7 @@ const equipmentSchema = z.object({
   autoApplyMaxKw: z.number().min(0).max(1000).nullable().optional(),
   // Adders only: this work is added to the loan ON TOP of a partner's fixed or
   // maximum $/W, rather than coming out of the system price (the dealer fee still applies).
-  financedOnTop: z.boolean().optional(),
+  outsidePriceRule: z.boolean().optional(),
   rank: z.number().int().min(0).max(999).optional(),
   isActive: z.boolean().optional(),
   isDefault: z.boolean().optional(),
@@ -1009,11 +1009,11 @@ export async function upsertSolarEquipmentAction(
     if (d.autoApplyMinKw != null || d.autoApplyMaxKw != null) {
       return fail("Only an adder can be applied automatically by system size.");
     }
-    if (d.financedOnTop) return fail("Only an adder can be financed on top of a fixed price.");
+    if (d.outsidePriceRule) return fail("Only an adder can be financed on top of a fixed price.");
   }
   // A credit that rides ON TOP of a partner's price is money coming off a
   // number the partner did not fund — a rule with no arithmetic behind it.
-  if (d.financedOnTop && d.adderBasis === "discount") {
+  if (d.outsidePriceRule && d.adderBasis === "discount") {
     return fail("A discount cannot be financed on top of a fixed price.");
   }
   // A band that ends before it starts fires on nothing, which is a rule that
@@ -1421,7 +1421,7 @@ const lenderSchema = z.object({
    * of 55 (someone meaning $5.50 and typing cents) would quote every deal on
    * that partner at 55 cents a watt.
    */
-  maxFinalPpwCents: z.number().int().min(50).max(2000).nullable().optional(),
+  priceRulePpwCents: z.number().int().min(50).max(2000).nullable().optional(),
   /**
    * Whether the figure above is a ceiling or this partner's flat price.
    *
@@ -1430,7 +1430,7 @@ const lenderSchema = z.object({
    * one here would only make a lender impossible to pre-configure before its
    * rate is known.
    */
-  finalPpwMode: z.enum(["cap", "flat"]).optional(),
+  priceRuleMode: z.enum(["cap", "flat"]).optional(),
   /**
    * The least this partner's deals may leave the company per watt, cents,
    * BEFORE its cut. Null clears the floor.
@@ -1447,9 +1447,9 @@ const lenderSchema = z.object({
    * A separate range, not a shared one: $500-$100,000 a battery against
    * $0.50-$20.00 a watt. One rule covering both would validate nothing.
    */
-  maxFinalPricePerBatteryCents: z.number().int().min(500_00).max(100_000_00).nullable().optional(),
+  priceRulePerBatteryCents: z.number().int().min(500_00).max(100_000_00).nullable().optional(),
   minBasePricePerBatteryCents: z.number().int().min(500_00).max(100_000_00).nullable().optional(),
-  finalBatteryPriceMode: z.enum(["cap", "flat"]).optional(),
+  priceRuleBatteryMode: z.enum(["cap", "flat"]).optional(),
   /**
    * Whether this partner funds an array with no storage — see
    * SolarLenderBatteryRule. `required` BLOCKS generation on a batteryless
@@ -1465,7 +1465,7 @@ const lenderSchema = z.object({
    * whatever the system was priced above the cap.
    *
    * The two figures are accepted and stored whatever the mode says, exactly as
-   * `finalPpwMode` is: a figure with no mode applying to it is inert, and
+   * `priceRuleMode` is: a figure with no mode applying to it is inert, and
    * clearing it on every mode change would make an admin retype a partner's
    * credit to turn it back on. Bounded so a fat finger cannot write a
    * seven-figure giveaway, and the cap shares the $0.50–$20.00/W band every
@@ -1712,14 +1712,14 @@ export async function setEquipmentLendersAction(equipmentId: string, lenderIds: 
  * second is the exact case a second flat-rate partner creates, and a table of
  * only the ticked ones cannot say it.
  *
- * Deals already quoted are NOT re-priced. `SolarDealAdder.financedOnTop` is
+ * Deals already quoted are NOT re-priced. `SolarDealAdder.outsidePriceRule` is
  * copied at pick time so that a Settings change can never move a number a
  * homeowner has already been shown; the new rules apply to lines added from
  * here on, and to every line on a deal whose lender is set again.
  */
 export async function setLenderAdderRulesAction(
   lenderId: string,
-  rules: { equipmentId: string; financedOnTop: boolean }[]
+  rules: { equipmentId: string; outsidePriceRule: boolean }[]
 ) {
   const user = await requireUser();
   if (!can(user, "update", "Settings")) return fail("Not allowed.");
@@ -1745,7 +1745,7 @@ export async function setLenderAdderRulesAction(
 
   const data = rules
     .filter((r) => valid.has(r.equipmentId))
-    .map((r) => ({ lenderId, equipmentId: r.equipmentId, financedOnTop: r.financedOnTop }));
+    .map((r) => ({ lenderId, equipmentId: r.equipmentId, outsidePriceRule: r.outsidePriceRule }));
 
   await prisma.$transaction([
     prisma.solarLenderAdderRule.deleteMany({ where: { lenderId } }),
@@ -1754,7 +1754,7 @@ export async function setLenderAdderRulesAction(
       : []),
   ]);
   revalidatePath("/portal/settings/solar-lenders");
-  return { ok: true as const, count: data.filter((d) => d.financedOnTop).length };
+  return { ok: true as const, count: data.filter((d) => d.outsidePriceRule).length };
 }
 
 /**

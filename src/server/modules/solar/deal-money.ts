@@ -1,5 +1,6 @@
 import { prisma } from "@/server/db/client";
-import { batteryChargeCents, priceStorageStored } from "@/lib/solar-money";
+import { batteryChargeCents } from "@/lib/solar-money";
+import { priceDeal } from "@/lib/solar-price-deal";
 import { financeRowForProduct, type FinanceInput } from "@/lib/solar-finance-row";
 import { toLenderProductTerms, LENDER_TERMS_SELECT } from "./lender-terms";
 import { resolveAdderTotal } from "./adders";
@@ -57,7 +58,7 @@ const DESIGN_SELECT = {
   battery: { select: { priceCents: true } },
   // The partner's per-battery rule, read off the LENDER rather than the
   // programme row — the same place the $/W ceiling is read from.
-  lender: { select: { maxFinalPricePerBatteryCents: true, finalBatteryPriceMode: true } },
+  lender: { select: { priceRulePerBatteryCents: true, priceRuleBatteryMode: true } },
 } as const;
 
 /**
@@ -117,12 +118,32 @@ export async function dealMoneyColumns(
 
   // Every product-specific column is gated on the product — see
   // financeRowForProduct for why "most of them" was a customer-facing defect.
-  const rowData = financeRowForProduct({ ...f, ...adders, batteryPriceCents }, {
-    systemSizeKwDc: design?.systemSizeKwDc ?? 0,
-    assumptions,
-    lenderProduct: toLenderProductTerms(lenderProduct),
-    targetNetPpwCents: assumptions.targetNetPpwCents,
-  });
+  /**
+   * MAPPED, NEVER SPREAD.
+   *
+   * `resolveAdderTotal` answers in the COLUMN vocabulary
+   * (`addersInsideRuleCents`); `FinanceInput` asks in the form's
+   * (`adderTotalCents`) — and both of its adder fields are OPTIONAL. Spreading
+   * the split therefore type-checks perfectly, contributes two keys nothing
+   * reads, and leaves the two that ARE read undefined, so `?? 0` prices every
+   * adder on the deal at nothing. `tsc` cannot see it: a spread is exempt from
+   * excess-property checking and a missing optional is not an error. The only
+   * symptom is the contract price quietly ceasing to follow the adders.
+   */
+  const rowData = financeRowForProduct(
+    {
+      ...f,
+      adderTotalCents: adders.addersInsideRuleCents,
+      onTopAdderTotalCents: adders.addersOutsideRuleCents,
+      batteryPriceCents,
+    },
+    {
+      systemSizeKwDc: design?.systemSizeKwDc ?? 0,
+      assumptions,
+      lenderProduct: toLenderProductTerms(lenderProduct),
+      targetNetPpwCents: assumptions.targetBasePpwCents,
+    }
+  );
 
   /**
    * The storage sticker, and the contract that follows from it.
@@ -136,36 +157,87 @@ export async function dealMoneyColumns(
   const storageSticker = isStorage ? (f.stickerPricePerBatteryCents ?? 0) : 0;
   const storagePrice =
     isStorage && (f.product === "cash" || f.product === "loan") && storageSticker > 0
-      ? priceStorageStored({
+      ? priceDeal({
+          // Passed straight through, unlike the builder's price card, which has
+          // to pin "loan". The old call here was `priceStorageStored`, which
+          // nulls the partner rule on cash ITSELF — and that is precisely the
+          // function `priceDeal`'s storage branch delegates to, so cash behaves
+          // identically either way.
           product: f.product,
+          systemType: "storage",
+          systemSizeKwDc: 0,
+          baseFinalPpwCents: 0,
+          baseFinalPerBatteryCents: storageSticker,
           batteryQty: design?.batteryQty ?? 0,
-          stickerPricePerBatteryCents: storageSticker,
           dealerFeePct: f.product === "cash" ? 0 : (rowData.dealerFeePct ?? 0),
-          adderTotalCents: adders.adderTotalCents,
-          onTopAdderTotalCents: adders.onTopAdderTotalCents,
-          maxFinalPricePerBatteryCents: lenderBand?.maxFinalPricePerBatteryCents ?? null,
-          finalBatteryPriceMode: lenderBand?.finalBatteryPriceMode ?? "cap",
+          // The provenance `financeRowForProduct` resolved. Read here, above the
+          // destructure that keeps it out of the Prisma payload — this reads the
+          // value, it does not carry it into `rest`.
+          dealerFeeSource: rowData.dealerFeeSource,
+          addersInsideRuleCents: adders.addersInsideRuleCents,
+          addersOutsideRuleCents: adders.addersOutsideRuleCents,
+          priceRulePerBatteryCents: lenderBand?.priceRulePerBatteryCents ?? null,
+          priceRuleBatteryMode: lenderBand?.priceRuleBatteryMode ?? "cap",
           // Which price that figure fixes is the quoted programme's to say.
           batteryPriceBasis: lenderProduct?.batteryPriceBasis,
         })
       : null;
 
+  /**
+   * ONE VOCABULARY AT THE EXIT.
+   *
+   * `financeRowForProduct` speaks `FinanceRow` — the shape of the FORM — and it
+   * keeps its own names. Everything this function RETURNS is written to
+   * columns, so it is spelled the way the columns are spelled, and the
+   * translation happens here, once, rather than at each of the three callers
+   * that write it.
+   *
+   * IT HAS TO BE EXPLICIT, because nothing in the type system checks it: one
+   * caller widens to `Record<string, unknown>` and two spread this object
+   * straight into a Prisma `create`/`update`. A key misspelled here type-checks
+   * perfectly and fails at runtime with `Unknown argument`, which is exactly
+   * how the v9 column rename broke every save on this path.
+   */
+  const {
+    grossPpwCents,
+    adderTotalCents,
+    onTopAdderTotalCents,
+    contractPriceCents,
+    monthlyPaymentCents,
+    loanMonthlyPaymentCents,
+    // PROVENANCE, NOT A COLUMN. `dealerFeeSource` says where the fee above came
+    // from so a screen can print it; SolarFinance has no such column. It is
+    // named here for one reason: `rest` below is SPREAD into a Prisma payload,
+    // a spread is exempt from excess-property checking, and leaving this in it
+    // would type-check perfectly and then fail at runtime with
+    // `Unknown argument`. See solar-prisma-payload-spread.test.ts.
+    // Named solely to keep it OUT of `rest`, which is spread into a Prisma
+    // payload. The disable must sit on the line directly above the code.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    dealerFeeSource: _dealerFeeSource,
+    ...rest
+  } = rowData;
+
   return {
-    ...rowData,
+    ...rest,
     /**
      * WHAT ONE BATTERY SELLS FOR ON THIS DEAL — on either kind of deal.
      *
      * Still zeroed on a deal with NO battery at all: a deal switched back to
      * solar-only must not keep a price per battery nothing reads.
      */
-    stickerPricePerBatteryCents: isStorage
+    baseFinalPerBatteryCents: isStorage
       ? storageSticker
       : (design?.batteryQty ?? 0) > 0
         ? (f.stickerPricePerBatteryCents ?? 0)
         : 0,
     // The $/W sticker is meaningless on storage and would be read as one.
-    ...(isStorage ? { grossPpwCents: 0 } : {}),
-    ...(storagePrice ? { contractPriceCents: storagePrice.breakdown.contractPriceCents } : {}),
+    baseFinalPpwCents: isStorage ? 0 : grossPpwCents,
+    addersInsideRuleCents: adderTotalCents,
+    addersOutsideRuleCents: onTopAdderTotalCents,
+    finalPriceCents: storagePrice ? storagePrice.finalPriceCents : contractPriceCents,
+    leasePaymentCents: monthlyPaymentCents,
+    lenderMonthlyPaymentCents: loanMonthlyPaymentCents,
   };
 }
 
@@ -178,13 +250,21 @@ export async function dealMoneyColumns(
  * design edit silently restate an APR or a down payment, which is the opposite
  * of what this is for.
  */
+/**
+ * COLUMN NAMES, both sides of the comparison.
+ *
+ * These are used to read the derivation's answer, to read the stored row, and
+ * as the keys written back — so all three must be the column's own spelling. A
+ * retired name here reads `undefined` off the stored row, making every key look
+ * changed, and then writes a column Prisma does not have.
+ */
 const DERIVED_KEYS = [
-  "grossPpwCents",
-  "stickerPricePerBatteryCents",
+  "baseFinalPpwCents",
+  "baseFinalPerBatteryCents",
   "dealerFeePct",
-  "adderTotalCents",
-  "onTopAdderTotalCents",
-  "contractPriceCents",
+  "addersInsideRuleCents",
+  "addersOutsideRuleCents",
+  "finalPriceCents",
   "itcEstimateCents",
 ] as const;
 
@@ -222,21 +302,21 @@ export async function recomputeDealMoney(
     select: {
       companyId: true,
       product: true,
-      grossPpwCents: true,
-      stickerPricePerBatteryCents: true,
+      baseFinalPpwCents: true,
+      baseFinalPerBatteryCents: true,
       dealerFeePct: true,
-      adderTotalCents: true,
-      onTopAdderTotalCents: true,
-      contractPriceCents: true,
+      addersInsideRuleCents: true,
+      addersOutsideRuleCents: true,
+      finalPriceCents: true,
       itcEstimateCents: true,
       rateMillsPerKwh: true,
-      monthlyPaymentCents: true,
+      leasePaymentCents: true,
       escalatorPct: true,
       termYears: true,
       aprPct: true,
       loanTermMonths: true,
       downPaymentCents: true,
-      loanMonthlyPaymentCents: true,
+      lenderMonthlyPaymentCents: true,
       lenderProductId: true,
     },
   });
@@ -246,17 +326,17 @@ export async function recomputeDealMoney(
     product: current.product,
     // The typed inputs, handed straight back so the derivation returns them
     // unchanged — see the note at the top of this file.
-    grossPpwCents: current.grossPpwCents,
-    stickerPricePerBatteryCents: current.stickerPricePerBatteryCents,
+    grossPpwCents: current.baseFinalPpwCents,
+    stickerPricePerBatteryCents: current.baseFinalPerBatteryCents,
     dealerFeePct: current.dealerFeePct,
     rateMillsPerKwh: current.rateMillsPerKwh,
-    monthlyPaymentCents: current.monthlyPaymentCents,
+    monthlyPaymentCents: current.leasePaymentCents,
     escalatorPct: current.escalatorPct,
     termYears: current.termYears,
     aprPct: current.aprPct,
     loanTermMonths: current.loanTermMonths,
     downPaymentCents: current.downPaymentCents,
-    loanMonthlyPaymentCents: current.loanMonthlyPaymentCents,
+    loanMonthlyPaymentCents: current.lenderMonthlyPaymentCents,
     lenderProductId: current.lenderProductId,
   });
 

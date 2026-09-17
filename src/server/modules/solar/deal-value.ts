@@ -5,7 +5,7 @@ import {
   solarLeadValueCents,
 } from "@/lib/solar-deal-value";
 import { REPORTED_PROPOSAL_ORDER } from "@/lib/solar-system-of-record";
-import type { SolarProposalSnapshot } from "@/lib/solar-proposal";
+import { readProposalSnapshot } from "@/lib/solar-proposal";
 
 /**
  * Put the deal's two denormalised totals back in step with the document it is
@@ -56,7 +56,7 @@ export async function restampLeadValue(companyId: string, leadId: string): Promi
   // working figure into the column every revenue report sums would book a sale
   // that has not happened.
   if (!reported) return;
-  const snapshot = reported.snapshot as unknown as SolarProposalSnapshot | null;
+  const snapshot = readProposalSnapshot(reported.snapshot);
   if (!snapshot?.financing) return;
 
   const price = snapshotPriceSource(snapshot.financing);

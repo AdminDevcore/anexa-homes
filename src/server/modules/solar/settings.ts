@@ -21,7 +21,7 @@ export const SOLAR_ASSUMPTION_DEFAULTS: SolarAssumptions = {
   utilityEscalationPct: 3.5,
   kwhPerKwYear: 1450,
   utilityMeterFeeCents: 1000,
-  defaultGrossPpwCents: 350,
+  companyDefaultBasePpwCents: 350,
   defaultDealerFeePct: 18,
   minOffsetPct: 0,
   // Nobody has decided a minimum until an admin does — warned, never enforced.
@@ -35,7 +35,7 @@ export type SolarSettingsView = SolarAssumptions & {
   /// NOT part of SolarAssumptions: those are the physics-and-pricing inputs
   /// every pure calculation shares, and this one only ever reaches the sticker
   /// price. Null — the default — means derive nothing and leave gross as typed.
-  targetNetPpwCents: number | null;
+  targetBasePpwCents: number | null;
   /// What the company claims an owned system adds to a home's value, %.
   ///
   /// Also not part of SolarAssumptions: it reaches no calculation at all. It is
@@ -131,7 +131,7 @@ export async function getSolarSettings(companyId: string): Promise<SolarSettings
   if (!row) {
     return {
       ...SOLAR_ASSUMPTION_DEFAULTS,
-      targetNetPpwCents: null,
+      targetBasePpwCents: null,
       homeValueUpliftPct: 0,
       defaultBatteryQty: DEFAULT_BATTERY_QTY,
       backupOutageDrawFactor: DEFAULT_OUTAGE_DRAW_FACTOR,
@@ -146,12 +146,12 @@ export async function getSolarSettings(companyId: string): Promise<SolarSettings
     utilityEscalationPct: row.utilityEscalationPct,
     kwhPerKwYear: row.kwhPerKwYear,
     utilityMeterFeeCents: row.utilityMeterFeeCents,
-    defaultGrossPpwCents: row.defaultGrossPpwCents,
+    companyDefaultBasePpwCents: row.companyDefaultBasePpwCents,
     defaultDealerFeePct: row.defaultDealerFeePct,
     minOffsetPct: row.minOffsetPct,
     minOffsetConfigured: row.minOffsetConfigured,
     maxOffsetPct: row.maxOffsetPct,
-    targetNetPpwCents: row.targetNetPpwCents,
+    targetBasePpwCents: row.targetBasePpwCents,
     homeValueUpliftPct: row.homeValueUpliftPct,
     defaultBatteryQty: row.defaultBatteryQty,
     backupOutageDrawFactor: row.backupOutageDrawFactor,

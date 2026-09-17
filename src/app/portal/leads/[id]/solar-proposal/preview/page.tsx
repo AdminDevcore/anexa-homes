@@ -13,7 +13,7 @@ import { adderAmountCents, catalogueBasis } from "@/lib/solar-adders";
 import { brandingForRecord } from "@/server/branding/resolve";
 import { certificateFor } from "@/server/modules/solar/proposal-signature";
 import { readProposalQualifyOffer } from "@/server/modules/solar/proposal-qualify";
-import { withCustomerContact, type SolarProposalSnapshot } from "@/lib/solar-proposal";
+import { withCustomerContact, readProposalSnapshot } from "@/lib/solar-proposal";
 import { mayStartApplication } from "@/lib/solar-proposal-state";
 
 export const dynamic = "force-dynamic";
@@ -76,7 +76,7 @@ export default async function SolarProposalPreviewPage({
   if (!proposal) notFound();
 
   const snapshot = withCustomerContact(
-    proposal.snapshot as unknown as SolarProposalSnapshot,
+    readProposalSnapshot(proposal.snapshot)!,
     proposal.lead,
   );
 
@@ -275,7 +275,7 @@ async function repContext(
     }),
     prisma.solarFinance.findUnique({
       where: { leadId },
-      select: { product: true, grossPpwCents: true, lenderProductId: true },
+      select: { product: true, baseFinalPpwCents: true, lenderProductId: true },
     }),
   ]);
   if (!design || !finance) return null;
@@ -347,7 +347,7 @@ async function repContext(
       ).toLocaleString("en-US", { maximumFractionDigits: 0 })}`,
     })),
     selectedAdderIds: onDeal.map((l) => l.equipmentId!),
-    grossPpwCents: finance.grossPpwCents,
+    grossPpwCents: finance.baseFinalPpwCents,
     lenderProductId: finance.lenderProductId,
     avgMonthlyBillCents: design.avgMonthlyBillCents,
     annualUsageKwh: design.annualUsageKwh,

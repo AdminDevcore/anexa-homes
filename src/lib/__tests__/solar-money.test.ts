@@ -33,7 +33,7 @@ const A: SolarAssumptions = {
   utilityEscalationPct: 3.5,
   kwhPerKwYear: 1450,
   utilityMeterFeeCents: 1000,
-  defaultGrossPpwCents: 350,
+  companyDefaultBasePpwCents: 350,
   defaultDealerFeePct: 18,
   minOffsetPct: 0,
   maxOffsetPct: 150,
@@ -57,7 +57,7 @@ describe("cash vs loan: the dealer fee is the whole difference", () => {
     const p = pricePurchase({ ...base, product: "loan", dealerFeePct: 18 });
     expect(p.contractPriceCents).toBe(3_500_000);
     expect(p.dealerFeeCents).toBe(630_000); // 18%
-    expect(p.basePriceCents).toBe(2_870_000);
+    expect(p.baseKeptCents).toBe(2_870_000);
     expect(p.basePpwCents).toBeCloseTo(287, 0); // $2.87/W is what we really keep
   });
 
@@ -111,7 +111,7 @@ describe("the dealer fee is a percentage of the FINAL price", () => {
       adderTotalCents: 386_100,
     });
     expect(p.grossPriceCents + p.dealerFeeCents).toBe(p.contractPriceCents);
-    expect(p.basePriceCents + p.adderTotalCents).toBe(p.grossPriceCents);
+    expect(p.baseKeptCents + p.adderTotalCents).toBe(p.grossPriceCents);
   });
 });
 
@@ -143,7 +143,7 @@ describe("adders sit INSIDE the dealer fee", () => {
     // The whole point. What is left after the lender takes 18% of everything
     // it advanced is the base plus the adder at exactly what we priced it.
     expect(p.contractPriceCents - p.dealerFeeCents).toBe(p.grossPriceCents);
-    expect(p.grossPriceCents).toBe(p.basePriceCents + 1_450_000);
+    expect(p.grossPriceCents).toBe(p.baseKeptCents + 1_450_000);
   });
 
   it("charges the fee on the WHOLE contract, not just the system", () => {
@@ -181,7 +181,7 @@ describe("the rep's redline reads the BASE, never the gross or the final", () =>
       product: "loan", systemSizeKwDc: 10, stickerPpwCents: 350,
       dealerFeePct: 18, adderTotalCents: 0,
     });
-    expect(laden.basePriceCents).toBe(plain.basePriceCents);
+    expect(laden.baseKeptCents).toBe(plain.baseKeptCents);
     expect(laden.basePpwCents).toBe(plain.basePpwCents);
   });
 
@@ -194,7 +194,7 @@ describe("the rep's redline reads the BASE, never the gross or the final", () =>
       product: "loan", systemSizeKwDc: 10, stickerPpwCents: 350,
       dealerFeePct: 32, adderTotalCents: 0,
     });
-    expect(dear.basePriceCents).toBeLessThan(cheap.basePriceCents);
+    expect(dear.baseKeptCents).toBeLessThan(cheap.baseKeptCents);
   });
 });
 
@@ -626,7 +626,7 @@ describe("a lender's maximum price per watt caps the CONTRACT, not the sticker",
 
     // The company, not the homeowner, paid for the adder.
     expect(ladenP.grossPriceCents).toBeLessThan(bareP.grossPriceCents);
-    expect(ladenP.basePriceCents).toBeLessThan(bareP.basePriceCents);
+    expect(ladenP.baseKeptCents).toBeLessThan(bareP.baseKeptCents);
   });
 
   it("is a ceiling, so a deal already under it is left exactly where it is", () => {
@@ -1187,7 +1187,7 @@ describe("a battery is charged for, at what the catalogue sells one for", () => 
       ...TEN_KW, product: "loan", stickerPpwCents: 350, adderTotalCents: 0,
       batteryPriceCents: POWERWALL,
     });
-    expect(p.basePriceCents).toBe(2_870_000);
+    expect(p.baseKeptCents).toBe(2_870_000);
     expect(p.basePpwCents).toBeCloseTo(287, 0);
   });
 
@@ -1238,7 +1238,7 @@ describe("a battery is charged for, at what the catalogue sells one for", () => 
         adderTotalCents: 233_333, onTopAdderTotalCents: 700_000,
         batteryPriceCents: battery,
       });
-      expect(p.basePriceCents + p.adderTotalCents + p.batteryPriceCents).toBe(p.grossPriceCents);
+      expect(p.baseKeptCents + p.adderTotalCents + p.batteryPriceCents).toBe(p.grossPriceCents);
     }
   });
 
@@ -1334,7 +1334,7 @@ describe("the dealer fee is taken on the battery", () => {
   it("still leaves the company the battery's catalogue price", () => {
     const p = pricePurchase(DEAL);
     expect(p.batteryPriceCents).toBe(7_200_000);
-    expect(p.grossPriceCents - p.basePriceCents - p.adderTotalCents).toBe(7_200_000);
+    expect(p.grossPriceCents - p.baseKeptCents - p.adderTotalCents).toBe(7_200_000);
   });
 
   it("changes nothing on cash, where there is no fee to take", () => {

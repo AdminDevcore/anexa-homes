@@ -111,7 +111,7 @@ describe("a deal sold by the owner", () => {
     await raw.solarFinance.create({
       data: {
         companyId, leadId: lead.id, product: "loan",
-        grossPpwCents: 550, dealerFeePct: 65, contractPriceCents: KW * 1000 * 550,
+        baseFinalPpwCents: 550, dealerFeePct: 65, finalPriceCents: KW * 1000 * 550,
       },
     });
     const project = await raw.project.create({

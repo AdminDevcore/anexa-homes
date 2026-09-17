@@ -6,6 +6,9 @@ import type { SessionUser } from "@/server/auth/session";
 import { resolveVppCredits } from "@/server/modules/solar/vpp-credits";
 import { resolveLayoutAsset } from "./layout-asset";
 import { getSolarSettings } from "./settings";
+import { resolveDealerFee } from "@/lib/solar-dealer-fee";
+import { priceDeal } from "@/lib/solar-price-deal";
+import { dealSignedAt } from "./signed-lock";
 import { readSolarReadiness } from "./readiness";
 import {
   buildProposalSnapshot,
@@ -20,10 +23,6 @@ import { customerProductLabel } from "@/lib/solar-lender-product";
 import { canGenerate, type ValidationIssue } from "@/lib/solar-validation";
 import { adderAmountCents } from "@/lib/solar-adders";
 import {
-  capStickerToFinalPpw,
-  capStickerToFinalUnit,
-  pricePurchase,
-  priceStoragePurchase,
   batteryChargeCents,
 } from "@/lib/solar-money";
 import { monthlyReconciles } from "@/lib/solar-loan";
@@ -372,16 +371,16 @@ export async function generateProposalVersion(
             applyUrl: true,
             logoUpdatedAt: true,
             // The same rule counted in batteries, for a job with no array.
-            maxFinalPricePerBatteryCents: true,
-            finalBatteryPriceMode: true,
+            priceRulePerBatteryCents: true,
+            priceRuleBatteryMode: true,
             // The partner's ceiling, needed HERE and not only on the payment
             // menu below — see the re-cap immediately after this.
-            maxFinalPpwCents: true,
+            priceRulePpwCents: true,
             // …and whether that figure is a ceiling or this partner's flat
             // price. A flat partner overrides the stored sticker in BOTH
             // directions, so a document generated without it would quote a
             // cheap deal under the price list its own lender publishes.
-            finalPpwMode: true,
+            priceRuleMode: true,
             // What this partner hands back for signing today, and how it is
             // arrived at — see `solar-sign-today`.
             signTodayMode: true,
@@ -425,7 +424,7 @@ export async function generateProposalVersion(
   const batteryPriceCents = batteryChargeCents({
     systemType: design.systemType,
     batteryQty: design.batteryQty,
-    dealPerBatteryCents: finance.stickerPricePerBatteryCents,
+    dealPerBatteryCents: finance.baseFinalPerBatteryCents,
     cataloguePerBatteryCents: design.battery?.priceCents ?? null,
   });
 
@@ -458,17 +457,42 @@ export async function generateProposalVersion(
       })
     : null;
 
-  const capped = capStickerToFinalPpw({
-    stickerPpwCents: finance.grossPpwCents,
-    maxFinalPpwCents: dealLender?.maxFinalPpwCents ?? null,
-    mode: dealLender?.finalPpwMode,
-    basis: quotedRow?.ppwBasis,
-    systemSizeKwDc: design.systemSizeKwDc,
-    dealerFeePct: finance.dealerFeePct,
-    // The adders the partner's figure is a price FOR. A roof financed on top
-    // rides above it and is added back by `pricePurchase` below.
-    adderTotalCents: finance.adderTotalCents,
-  });
+  /**
+   * THE ONE FEE RULE (D8) — resolved ONCE, here, and used by every site below.
+   *
+   * `quotedRow` already carried the programme's fee and six sites read
+   * `finance.dealerFeePct` past it, so generation priced, capped, submitted and
+   * FROZE a fee the programme did not publish. On production that is five deals
+   * caching 65% against a programme publishing 0%.
+   *
+   * SIGNED DEALS ARE NOT RE-RESOLVED. The rule is the CURRENT rate on an
+   * UNSIGNED quote; once a household has signed, the copy cached on the deal is
+   * what the sale was made at, and commission is snapshotted against it. So a
+   * signed deal keeps its own figure and this refreshes nothing.
+   */
+  const signedAt = await dealSignedAt(user.companyId, leadId);
+  const dealerFee = signedAt
+    ? { pct: finance.dealerFeePct, source: "deal" as const }
+    : resolveDealerFee({
+        product: finance.product,
+        programmePct: quotedRow?.dealerFeePct,
+        dealPct: finance.dealerFeePct,
+        companyDefaultPct: assumptions.defaultDealerFeePct,
+      });
+
+  /**
+   * The cached copy, refreshed — "frozen at generation" is what makes it a
+   * cache rather than a second source of truth. Written before anything below
+   * reads it so the row, the document and the submission cannot disagree.
+   */
+  if (!signedAt && dealerFee.pct !== finance.dealerFeePct) {
+    finance.dealerFeePct = dealerFee.pct;
+    await prisma.solarFinance.update({
+      where: { leadId },
+      data: { dealerFeePct: dealerFee.pct },
+    });
+  }
+
   /**
    * PRICED UNCONDITIONALLY, WRITTEN BACK WHEN SOMETHING MOVED.
    *
@@ -488,30 +512,43 @@ export async function generateProposalVersion(
     !isStorage &&
     (finance.product === "cash" || finance.product === "loan")
   ) {
-    const stickerPpwCents = capped.capped
-      ? capped.stickerPpwCents
-      : finance.grossPpwCents;
-    const contractPriceCents = pricePurchase({
+    /**
+     * The ceiling and the price, solved together (Stage 4c).
+     *
+     * This was a `capStickerToFinalPpw` above the branch and a `pricePurchase`
+     * inside it, with the sticker picked by hand between them. `priceDeal()`
+     * does both, and hands back the rate it actually priced at —
+     * `stickerPerUnitCents` — which is the figure written to the row below.
+     */
+    const priced = priceDeal({
       product: finance.product,
+      systemType: design.systemType,
       systemSizeKwDc: design.systemSizeKwDc,
-      stickerPpwCents,
-      dealerFeePct: finance.dealerFeePct,
-      adderTotalCents: finance.adderTotalCents,
-      onTopAdderTotalCents: finance.onTopAdderTotalCents,
-      batteryPriceCents,
-    }).contractPriceCents;
+      baseFinalPpwCents: finance.baseFinalPpwCents,
+      dealerFeePct: dealerFee.pct,
+      // The adders the partner's figure is a price FOR. A roof financed on top
+      // rides above it and is added back inside the ladder.
+      addersInsideRuleCents: finance.addersInsideRuleCents,
+      addersOutsideRuleCents: finance.addersOutsideRuleCents,
+      equipmentChargesCents: batteryPriceCents,
+      priceRulePpwCents: dealLender?.priceRulePpwCents ?? null,
+      priceRuleMode: dealLender?.priceRuleMode,
+      ppwBasis: quotedRow?.ppwBasis,
+    });
+    const stickerPpwCents = priced.stickerPerUnitCents;
+    const contractPriceCents = priced.finalPriceCents;
 
     if (
-      stickerPpwCents !== finance.grossPpwCents ||
-      contractPriceCents !== finance.contractPriceCents
+      stickerPpwCents !== finance.baseFinalPpwCents ||
+      contractPriceCents !== finance.finalPriceCents
     ) {
-      finance.grossPpwCents = stickerPpwCents;
-      finance.contractPriceCents = contractPriceCents;
+      finance.baseFinalPpwCents = stickerPpwCents;
+      finance.finalPriceCents = contractPriceCents;
       await prisma.solarFinance.update({
         where: { leadId },
         data: {
-          grossPpwCents: finance.grossPpwCents,
-          contractPriceCents: finance.contractPriceCents,
+          baseFinalPpwCents: finance.baseFinalPpwCents,
+          finalPriceCents: finance.finalPriceCents,
         },
       });
     }
@@ -527,23 +564,21 @@ export async function generateProposalVersion(
    * a storage job has none, so it stands down and changes nothing.
    */
   if (isStorage && (finance.product === "cash" || finance.product === "loan")) {
-    const storageCap = capStickerToFinalUnit({
-      stickerPerUnitCents: finance.stickerPricePerBatteryCents,
-      maxFinalPerUnitCents: dealLender?.maxFinalPricePerBatteryCents ?? null,
-      mode: dealLender?.finalBatteryPriceMode,
-      basis: quotedRow?.batteryPriceBasis,
-      units: design.batteryQty,
-      dealerFeePct: finance.dealerFeePct,
-      adderTotalCents: finance.adderTotalCents,
-    });
-
-    const priced = priceStoragePurchase({
+    // The same ladder, counted in batteries — one call that holds the deal to
+    // the partner's per-battery rule and prices what is left.
+    const priced = priceDeal({
       product: finance.product,
+      systemType: design.systemType,
+      systemSizeKwDc: design.systemSizeKwDc,
+      baseFinalPpwCents: 0,
+      baseFinalPerBatteryCents: finance.baseFinalPerBatteryCents,
       batteryQty: design.batteryQty,
-      stickerPricePerBatteryCents: storageCap.stickerPerUnitCents,
-      dealerFeePct: finance.dealerFeePct,
-      adderTotalCents: finance.adderTotalCents,
-      onTopAdderTotalCents: finance.onTopAdderTotalCents,
+      dealerFeePct: dealerFee.pct,
+      addersInsideRuleCents: finance.addersInsideRuleCents,
+      addersOutsideRuleCents: finance.addersOutsideRuleCents,
+      priceRulePerBatteryCents: dealLender?.priceRulePerBatteryCents ?? null,
+      priceRuleBatteryMode: dealLender?.priceRuleBatteryMode,
+      batteryPriceBasis: quotedRow?.batteryPriceBasis,
     });
 
     // Written back for the same reason the per-watt block writes back: the deal
@@ -551,16 +586,16 @@ export async function generateProposalVersion(
     // something actually moved — an unconditional write would touch every row
     // on every generation for nothing.
     if (
-      storageCap.stickerPerUnitCents !== finance.stickerPricePerBatteryCents ||
-      priced.contractPriceCents !== finance.contractPriceCents
+      priced.stickerPerUnitCents !== finance.baseFinalPerBatteryCents ||
+      priced.finalPriceCents !== finance.finalPriceCents
     ) {
-      finance.stickerPricePerBatteryCents = storageCap.stickerPerUnitCents;
-      finance.contractPriceCents = priced.contractPriceCents;
+      finance.baseFinalPerBatteryCents = priced.stickerPerUnitCents;
+      finance.finalPriceCents = priced.finalPriceCents;
       await prisma.solarFinance.update({
         where: { leadId },
         data: {
-          stickerPricePerBatteryCents: finance.stickerPricePerBatteryCents,
-          contractPriceCents: finance.contractPriceCents,
+          baseFinalPerBatteryCents: finance.baseFinalPerBatteryCents,
+          finalPriceCents: finance.finalPriceCents,
         },
       });
     }
@@ -631,14 +666,14 @@ export async function generateProposalVersion(
           applyUrl: true,
           logoUpdatedAt: true,
           // The partner's rule, counted in batteries.
-          maxFinalPricePerBatteryCents: true,
-          finalBatteryPriceMode: true,
+          priceRulePerBatteryCents: true,
+          priceRuleBatteryMode: true,
           // The partner's price rule for the final price per watt. Selected
           // here because the menu is PRICED at generation and frozen; a rule
           // missing from this select quotes a household a number the lender
           // does not fund, in a document nobody can correct afterwards.
-          maxFinalPpwCents: true,
-          finalPpwMode: true,
+          priceRulePpwCents: true,
+          priceRuleMode: true,
           // …and what it hands back for signing today. Frozen with the rest of
           // the menu for the same reason: each column is an offer from
           // whoever publishes it.
@@ -792,8 +827,8 @@ export async function generateProposalVersion(
       // design and the menu must not suppress that lender's loan underneath a
       // cash quote that never mentioned them.
       lenderId: dealLender?.id ?? null,
-      grossPpwCents: finance.grossPpwCents,
-      dealerFeePct: finance.dealerFeePct,
+      grossPpwCents: finance.baseFinalPpwCents,
+      dealerFeePct: dealerFee.pct,
     },
     // What the rep ticked on the Financing step, and nothing they did not.
     shortlistIds: finance.shortlistIds,
@@ -805,10 +840,10 @@ export async function generateProposalVersion(
         rank: p.lender.rank,
         applyUrl: p.lender.applyUrl,
         logoUrl: lenderLogoUrl(p.lender.id, p.lender.logoUpdatedAt),
-        maxFinalPpwCents: p.lender.maxFinalPpwCents,
-        finalPpwMode: p.lender.finalPpwMode,
-        maxFinalPricePerBatteryCents: p.lender.maxFinalPricePerBatteryCents,
-        finalBatteryPriceMode: p.lender.finalBatteryPriceMode,
+        maxFinalPpwCents: p.lender.priceRulePpwCents,
+        finalPpwMode: p.lender.priceRuleMode,
+        maxFinalPricePerBatteryCents: p.lender.priceRulePerBatteryCents,
+        finalBatteryPriceMode: p.lender.priceRuleBatteryMode,
         signTodayMode: p.lender.signTodayMode,
         signTodayFixedCents: p.lender.signTodayFixedCents,
         signTodayCapPpwCents: p.lender.signTodayCapPpwCents,
@@ -820,7 +855,7 @@ export async function generateProposalVersion(
     storage: isStorage
       ? {
           batteryQty: design.batteryQty,
-          stickerPricePerBatteryCents: finance.stickerPricePerBatteryCents,
+          stickerPricePerBatteryCents: finance.baseFinalPerBatteryCents,
         }
       : null,
     adders: adderLines.map((l) => ({
@@ -831,13 +866,13 @@ export async function generateProposalVersion(
       ),
       description: l.description,
       showOnProposal: l.showOnProposal,
-      financedOnTop: l.financedOnTop,
+      outsidePriceRule: l.outsidePriceRule,
     })),
-    adderTotalCents: finance.adderTotalCents,
-    onTopAdderTotalCents: finance.onTopAdderTotalCents,
+    adderTotalCents: finance.addersInsideRuleCents,
+    onTopAdderTotalCents: finance.addersOutsideRuleCents,
     batteryPriceCents,
     assumptions,
-    targetNetPpwCents: assumptions.targetNetPpwCents,
+    targetNetPpwCents: assumptions.targetBasePpwCents,
   });
 
   // The shape of the customer's year. Cache-only — see monthlyProductionForDesign.
@@ -968,14 +1003,14 @@ export async function generateProposalVersion(
         : null,
     finance: {
       product: finance.product,
-      grossPpwCents: finance.grossPpwCents,
+      grossPpwCents: finance.baseFinalPpwCents,
       // The unit a storage deal is actually priced by. Without it the document
       // prices the whole system at zero installed watts — see the field's note.
-      stickerPricePerBatteryCents: finance.stickerPricePerBatteryCents,
+      stickerPricePerBatteryCents: finance.baseFinalPerBatteryCents,
       batteryPriceCents,
-      dealerFeePct: finance.dealerFeePct,
-      adderTotalCents: finance.adderTotalCents,
-      onTopAdderTotalCents: finance.onTopAdderTotalCents,
+      dealerFeePct: dealerFee.pct,
+      adderTotalCents: finance.addersInsideRuleCents,
+      onTopAdderTotalCents: finance.addersOutsideRuleCents,
       // Named and priced HERE, then frozen into the snapshot. Reading them back
       // through the catalogue at render time would let a later rename retitle a
       // line on a document a homeowner has already been shown.
@@ -987,10 +1022,10 @@ export async function generateProposalVersion(
         ),
         description: l.description,
         showOnProposal: l.showOnProposal,
-        financedOnTop: l.financedOnTop,
+        outsidePriceRule: l.outsidePriceRule,
       })),
       rateMillsPerKwh: finance.rateMillsPerKwh,
-      monthlyPaymentCents: finance.monthlyPaymentCents,
+      monthlyPaymentCents: finance.leasePaymentCents,
       escalatorPct: finance.escalatorPct,
       termYears: finance.termYears,
       aprPct: finance.aprPct,
@@ -1000,7 +1035,7 @@ export async function generateProposalVersion(
       // only once the layout renders it. The proposal now shows a monthly for a
       // loan — the lender's approved figure when one exists, otherwise the
       // product's terms amortised — and these are what it is computed from.
-      loanMonthlyPaymentCents: finance.loanMonthlyPaymentCents,
+      loanMonthlyPaymentCents: finance.lenderMonthlyPaymentCents,
       loanTermMonths: finance.loanTermMonths,
       downPaymentCents: finance.downPaymentCents,
     },
@@ -1015,7 +1050,7 @@ export async function generateProposalVersion(
       : null,
     loanFactors: quotedProduct,
     lenderApplyUrl: dealLender?.applyUrl ?? null,
-    lenderProductLabel: quotedProductLabel,
+    programmeLabel: quotedProductLabel,
     /**
      * The federal credits: the company's percentages and the wording, and the
      * answers this job gave about which of them it earns.
