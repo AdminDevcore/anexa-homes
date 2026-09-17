@@ -76,9 +76,13 @@ function isPlainObject(v: unknown): v is Json {
 /**
  * Stamp `vertical` onto a create/update payload and everything it creates
  * beneath it. Returns a copy; never mutates the caller's object.
+ *
+ * `edit` is true when the top-level payload edits an EXISTING row (update,
+ * updateMany, an upsert's update branch) rather than creating one. Nested
+ * writes beneath it are always creates, so they are stamped as creates.
  */
-function stampData(model: string, data: unknown, vertical: ActiveVertical): unknown {
-  if (Array.isArray(data)) return data.map((d) => stampData(model, d, vertical));
+function stampData(model: string, data: unknown, vertical: ActiveVertical, edit = false): unknown {
+  if (Array.isArray(data)) return data.map((d) => stampData(model, d, vertical, edit));
   if (!isPlainObject(data)) return data;
 
   const out: Json = { ...data };
@@ -97,6 +101,13 @@ function stampData(model: string, data: unknown, vertical: ActiveVertical): unkn
     // must survive. That is why this tests key presence rather than nullishness:
     // `{ vertical: null }` means "company", while an absent key means "wherever
     // I am standing". Writing into someone else's workspace is still refused.
+    //
+    // "Wherever I am standing" is a CREATE rule. An edit that says nothing
+    // about `vertical` leaves it alone: otherwise ticking a Company task done
+    // from Roofing re-files it as a Roofing task and it silently vanishes from
+    // every other workspace — the opposite of what a Company task is for. A
+    // workspace row needs no stamp either: the where filter already confines
+    // the edit to this workspace or to company-level rows.
     if ("vertical" in out) {
       const explicit = out.vertical;
       if (explicit != null && explicit !== vertical) {
@@ -104,7 +115,7 @@ function stampData(model: string, data: unknown, vertical: ActiveVertical): unkn
           `Refusing to write ${model} into vertical "${String(explicit)}" while acting in "${vertical}".`
         );
       }
-    } else {
+    } else if (!edit) {
       out.vertical = vertical;
     }
   } else if (cls === "tagged") {
@@ -247,6 +258,13 @@ function stampWhere(model: string, where: unknown, vertical: ActiveVertical): Js
  * created by me") would otherwise have it silently overwritten, widening the
  * query instead of narrowing it. `AND` composes with whatever is already there.
  *
+ * The caller's keys stay at the TOP level and the filter is appended to the
+ * caller's own `AND`. Wrapping the whole where (`{ AND: [base, filter] }`) is
+ * not an option: Prisma requires a unique field (`id`) at the top level of a
+ * `WhereUniqueInput`, so burying it made every findUnique/update/delete/upsert
+ * by id throw a validation error inside a workspace — ticking a task done and
+ * deleting one both broke in production.
+ *
  * An explicit `vertical` in the caller's where still wins, so a screen can ask
  * for only-company (`null`) or only-this-workspace rows deliberately.
  */
@@ -261,8 +279,11 @@ function stampWhereOptional(model: string, where: unknown, vertical: ActiveVerti
     }
     return { ...base };
   }
+  const { AND, ...rest } = base;
+  const callerAnd = AND === undefined ? [] : Array.isArray(AND) ? AND : [AND];
   return {
-    AND: [base, { OR: [{ vertical }, { vertical: null }] }],
+    ...rest,
+    AND: [...callerAnd, { OR: [{ vertical }, { vertical: null }] }],
   };
 }
 
@@ -363,7 +384,7 @@ export function verticalExtension() {
                 // else: leave `vertical` untouched.
               }
             } else {
-              next.data = stampData(model!, next.data, vertical);
+              next.data = stampData(model!, next.data, vertical, UPDATE_OPS.has(operation));
             }
           }
 
@@ -380,9 +401,10 @@ export function verticalExtension() {
                   : stampData(model!, next.create, vertical);
             }
             // An upsert's `update` branch edits an existing row: same rule as
-            // above — do not re-stamp a tagged row from ambient context.
+            // above — do not re-stamp a tagged row from ambient context, and
+            // leave a SCOPED_OPTIONAL row's vertical alone unless it is named.
             if (next.update !== undefined && cls !== "tagged") {
-              next.update = stampData(model!, next.update, vertical);
+              next.update = stampData(model!, next.update, vertical, true);
             }
           }
 
