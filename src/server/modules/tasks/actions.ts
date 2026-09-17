@@ -137,9 +137,12 @@ export async function setTaskStatusAction(id: string, status: TaskStatus) {
 export async function deleteTaskAction(id: string) {
   const user = await requireUser();
   if (!can(user, "update", "Task")) return fail("Not allowed.");
-  const task = await prisma.task.findFirst({ where: { id, companyId: user.companyId }, select: { id: true } });
-  if (!task) return fail("Task not found.");
-  await prisma.task.delete({ where: { id } });
+  // Same row scope as setTaskStatusAction: a rep may delete only tasks assigned
+  // to or created by them. Checking companyId alone let any rep delete anyone's
+  // task by id. One scoped deleteMany is both the check and the write.
+  const scope = listScope(user, "Task") as Prisma.TaskWhereInput;
+  const { count } = await prisma.task.deleteMany({ where: { AND: [{ id }, scope] } });
+  if (count === 0) return fail("Task not found.");
   revalidatePath("/portal/tasks");
   return { ok: true as const };
 }

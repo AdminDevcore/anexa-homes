@@ -156,6 +156,20 @@ describe("deleteTaskAction inside a workspace", () => {
     expect(left.map((t) => t.id).sort()).toEqual([solarTask, othersTask].sort());
   });
 
+  it("a sales rep cannot delete another user's task, only their own", async () => {
+    asRep();
+    // Same company, same workspace, reachable by id — only the rep's own-tasks
+    // scope can refuse this. It used to check companyId alone.
+    expect(await roofing(() => deleteTaskAction(othersTask))).toEqual({
+      ok: false,
+      error: "Task not found.",
+    });
+    expect(await raw.task.count({ where: { id: othersTask } })).toBe(1);
+
+    expect(await roofing(() => deleteTaskAction(roofTask))).toEqual({ ok: true });
+    expect(await raw.task.count({ where: { id: roofTask } })).toBe(0);
+  });
+
   it("cannot delete the other workspace's task", async () => {
     asAdmin();
     expect(await roofing(() => deleteTaskAction(solarTask))).toEqual({
