@@ -1,0 +1,216 @@
+name: CI
+
+# Until now nothing gated this repository. The only workflow was a NOAA cron,
+# so three months of drift accumulated without failing anything: a stale
+# integration test, 53 eslint errors, and a batch of red e2e specs.
+#
+# READ THIS BEFORE TRUSTING A GREEN TICK: adding this file makes the checks
+# RUN. It does not make them REQUIRED. `main` has no branch protection, so a
+# red run blocks nothing until these checks are marked required under
+# Settings -> Branches -> Add branch ruleset. The job names below are the
+# names to tick there.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  typecheck:
+    name: typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The Prisma client is generated, not committed. Without this, tsc fails
+      # on every model type rather than on anything a person wrote.
+      - run: pnpm exec prisma generate
+      - run: pnpm typecheck
+
+  unit:
+    name: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec prisma generate
+      # Touches no database. Carries the repo's own invariant guards, including
+      # no-raw-sql.test.ts (vertical isolation) and export-route-guard.test.ts.
+      - run: pnpm test
+
+  integration:
+    name: integration
+    runs-on: ubuntu-latest
+    # 81 files run serially (fileParallelism: false), and each pays a
+    # TRUNCATE ... CASCADE across a FK graph ~197 migrations deep. Locally the
+    # full suite is slow but green: 985 tests.
+    timeout-minutes: 60
+    services:
+      postgres:
+        # Must match production (Supabase is 17.x) and docker-compose.yml.
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: anexa
+          POSTGRES_PASSWORD: anexa
+          POSTGRES_DB: anexa
+        ports:
+          - 5544:5432
+        options: >-
+          --health-cmd "pg_isready -U anexa -d anexa"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # global-setup.ts runs `prisma migrate deploy` into this schema itself,
+      # so there is deliberately no migrate step here.
+      VERTICAL_TEST_DATABASE_URL: postgresql://anexa:anexa@127.0.0.1:5544/anexa?schema=vertical_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec prisma generate
+      - run: pnpm test:integration
+
+  drift:
+    name: schema drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: anexa
+          POSTGRES_PASSWORD: anexa
+          POSTGRES_DB: anexa
+        ports:
+          - 5544:5432
+        options: >-
+          --health-cmd "pg_isready -U anexa -d anexa"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Create the shadow database
+        # migrate diff replays every migration into a throwaway DATABASE. A
+        # schema is not enough.
+        run: PGPASSWORD=anexa psql -h 127.0.0.1 -p 5544 -U anexa -d anexa -c 'CREATE DATABASE anexa_ci_shadow'
+      - name: The migrations must equal schema.prisma
+        # Use exactly this form. Passing the shadow URL with a `?schema=`
+        # suffix prints a false ~5000-line diff that looks like catastrophic
+        # drift and is not.
+        run: |
+          pnpm exec prisma migrate diff \
+            --from-migrations prisma/migrations \
+            --to-schema-datamodel prisma/schema.prisma \
+            --shadow-database-url "postgresql://anexa:anexa@127.0.0.1:5544/anexa_ci_shadow" \
+            --exit-code
+
+  build:
+    name: production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Every value here is a dummy. The build provably does not reach the
+      # database: it completes against an unreachable DATABASE_URL. Both
+      # database-touching build steps self-skip off Vercel —
+      # scripts/prod-migrate.mjs and scripts/check-agent-handlers.ts each
+      # return early unless VERCEL_ENV=production.
+      #
+      # KNOWN GAP, stated rather than hidden: because check-agent-handlers.ts
+      # self-skips here, CI cannot catch an agent whose handler is missing from
+      # the registry. Only a real production build catches that.
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:1/unused?schema=public
+      AUTH_SECRET: ci-dummy-value-not-a-real-secret
+      AUTH_TRUST_HOST: "true"
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      NEXT_PUBLIC_DEMO_MODE: "false"
+      CRON_SECRET: ci-dummy-value
+      DEV_AUTH_BYPASS: "false"
+      SOLAR_VERTICAL_ENABLED: "1"
+      STORAGE_DRIVER: local
+      STORAGE_LOCAL_DIR: /tmp/ci-storage
+      ONBOARDING_ENC_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+      PROPERTY_VALUE_PROVIDER: fixture
+      SKIP_TRACE_PROVIDER: fixture
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # `pnpm build` runs prisma generate itself.
+      - run: pnpm build
+
+  lint:
+    name: lint (ratchet)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec prisma generate
+      - name: eslint
+        # Exits non-zero while any error remains, which is the pre-existing
+        # state. The ratchet decides pass/fail, so the report is what matters.
+        run: pnpm exec eslint -f json -o eslint-report.json || true
+      - name: No NEW eslint errors
+        run: node scripts/lint-ratchet.mjs eslint-report.json
+
+# Deliberately NOT here yet — Playwright.
+#
+# playwright.config.ts starts its server with `next dev`, and `next dev`
+# instantiates src/server/vertical/context.ts twice. The isolation extension
+# then reads a different AsyncLocalStorage than runInVertical writes to, so
+# workspace overrides silently no-op and the suite can report false results
+# (the same reason scripts/isolation-probe.ts refuses to run under dev). A
+# trustworthy e2e job needs `next build` + `next start`, a seeded database and
+# browser downloads. That is its own piece of work, not a line in this file.

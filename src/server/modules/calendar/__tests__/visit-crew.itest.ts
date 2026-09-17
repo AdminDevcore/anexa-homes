@@ -144,11 +144,17 @@ describe("a visit lands on the calendar of the people on it", () => {
 
   it("the deal opens for the office and not for the crew", async () => {
     // Being named on Tuesday's install is not admission to the homeowner's
-    // contract. A null href is a hidden button, not a link that 404s.
+    // contract — the crew reach the job, never the deal. This was a null href
+    // and a hidden button until 77237d0: an installer has to submit his own
+    // invoice, sometimes weeks after the visit has scrolled off the calendar,
+    // so /portal/jobs/[id] now carries exactly what being on a visit entitles
+    // him to — where it is, when it is, and the slot to invoice it. No claim,
+    // no documents, no notes, no homeowner phone number.
     const office = await calendarFor(user(owner, "super_admin"));
     expect(office[0].href).toBe(`/portal/leads/${leadId}`);
+    const project = await raw.project.findFirstOrThrow({ where: { leadId } });
     const crew = await calendarFor(user(installerA, "installer"));
-    expect(crew[0].href).toBeNull();
+    expect(crew[0].href).toBe(`/portal/jobs/${project.id}`);
   });
 
   it("un-assigning takes the visit back off that person's calendar", async () => {
