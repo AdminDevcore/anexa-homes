@@ -6,6 +6,7 @@ import { z } from "zod";
 import { prisma } from "@/server/db/client";
 import { leadAdjustColumns } from "@/lib/solar-pay";
 import { requireUser } from "@/server/auth/session";
+import { resetEnrollment } from "@/server/auth/mfa";
 import { can } from "@/server/rbac/guards";
 import { isPayEligible, PAY_ELIGIBLE_ROLES, ROLES } from "@/server/rbac/matrix";
 import { sendEmail } from "@/server/modules/notifications/delivery";
@@ -597,4 +598,57 @@ export async function revokeInvitationAction(invitationId: string) {
   await prisma.invitation.delete({ where: { id: inv.id } });
   revalidatePath("/portal/team");
   return { ok: true as const };
+}
+/**
+ * REMOVE SOMEBODY'S SECOND FACTOR — the lost-phone path.
+ *
+ * Without this, a person who loses both their phone and their recovery codes
+ * has no way back at all: the only remedy would be editing the production
+ * database by hand, which is the thing this whole module exists to avoid.
+ *
+ * The narrow rules are NOT re-stated here. `resetEnrollment` refuses a
+ * self-removal, refuses a non-owner, and scopes its delete to the company, so
+ * they hold for every caller rather than for this one. What this adds is the
+ * part only an action can do: establish who is asking, and resolve the target
+ * through the caller's own company so an id from the browser cannot name a
+ * stranger.
+ *
+ * Audited, because nothing else about a team change is. Removing a second
+ * factor is the one team edit that weakens a money control, so it leaves a row
+ * saying who did it and to whom.
+ */
+export async function resetMemberMfaAction(userId: string) {
+  const me = await requireUser();
+  if (!can(me, "update", "User")) return fail("Not allowed.");
+
+  const target = await prisma.user.findFirst({
+    where: { id: userId, companyId: me.companyId },
+    select: { id: true, firstName: true, lastName: true },
+  });
+  if (!target) return fail("User not found.");
+
+  const res = await resetEnrollment({
+    companyId: me.companyId,
+    userId: target.id,
+    actorUserId: me.userId,
+    actorRole: me.role,
+  });
+  if (!res.ok) return res;
+
+  const who = `${target.firstName} ${target.lastName}`.trim();
+  await prisma.activityLog.create({
+    data: {
+      companyId: me.companyId,
+      type: "system",
+      message: res.removed
+        ? `${me.fullName} removed ${who}'s authenticator`
+        : `${me.fullName} tried to remove ${who}'s authenticator, which was not set up`,
+      actorId: me.userId,
+      metadata: { subjectUserId: target.id, removed: res.removed },
+    },
+  });
+
+  revalidatePath(`/portal/team/${target.id}`);
+  revalidatePath("/portal/books/payments");
+  return { ok: true as const, removed: res.removed };
 }
