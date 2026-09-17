@@ -1104,6 +1104,100 @@ able to read the receivables without being handed the sales pipeline.
 
 Integration after this slice: **100 files, 1310 tests** (from 99/1288).
 
+## The gap that made Phase 5 unreachable (2026-09-17)
+
+Phase 5 shipped maker-checker, a hand-written TOTP implementation, encrypted
+payee details with a cooling-off period, limits, an ACH provider behind an
+interface, and a signed webhook. All of it tested. None of it usable.
+
+**Every caller of `beginEnrollment` and `confirmEnrollment` was a test.** There
+was no action, no page, no route. And since `approvePayment` requires a TOTP
+code, `verifyMfa` requires an enrolled factor, and `sendPayment` requires
+approval, the consequence was not a missing screen — no payment could ever be
+approved or sent in production.
+
+### Why a thorough suite said nothing about it
+
+`payments.itest.ts` covers the controls properly. It also enrols the checker's
+factor by calling `beginEnrollment` and `confirmEnrollment` **directly**. The
+suite supplied the one thing the product could not, so full cover on the module
+proved nothing about whether the feature could be used at all.
+
+The general form, worth remembering because it is invisible from inside the
+suite: **a test that sets up state through a door the product does not have
+proves the module, not the feature.** Reachability has to be tested through the
+same doors a real caller uses, which is why `payments-actions.itest.ts` touches
+nothing but `"use server"` actions.
+
+### The enrolment surface, and what it deliberately does not take
+
+`mfa-actions.ts` exposes begin, confirm and regenerate. **No export takes a
+`userId`** — it comes from the session every time, so the worst an authenticated
+caller can do is re-enrol their own account. These are public RPC endpoints; one
+that accepted a user id would let anyone with a session reset a colleague's
+second factor.
+
+It is deliberately **not resource-gated**. A second factor protects the account
+that owns it, so setting one up is not a permission anyone needs to be granted;
+`requireUser` is the whole check. Removing *someone else's* factor is a
+different act — `resetEnrollment` already refuses self-removal — and belongs
+with team administration. It is still not exposed, and is listed below.
+
+### Where enrolment lives, and why not in Settings
+
+On the payments page. MFA exists in this codebase for exactly one purpose, so
+the people who need a factor are precisely those holding `Payment` verbs. And
+`NavItem.resource` is required, so a resource-free "Security" nav entry is not
+expressible without inventing a resource. Settings is company configuration with
+an inventory of company-level state; a per-user factor would make that inventory
+lie. If MFA ever guards login, it moves.
+
+No QR dependency was added. `beginEnrollment` already returns an `otpauth://`
+URI — which on a phone opens the authenticator directly — and the base32 key is
+shown for manual entry.
+
+### Approval is tested with a recovery code, on purpose
+
+Confirming an enrolment spends the current TOTP step: the replay guard doing its
+job. `approvePaymentAction` exposes **no clock seam**, because a back-dating
+parameter on a fraud control is the exact bug found in Phase 5. So a fresh
+`totp()` in the same 30-second window is correctly refused as a replay, and the
+end-to-end test spends a recovery code instead — a path a real user has, and one
+nothing else covered end to end. The TOTP path stays covered at module level.
+
+### The screen shows the rules it cannot enforce
+
+The amount is **not typeable**: `createPayment` requires it to equal the bill
+exactly, so an editable box would be a field whose only wrong value is refused
+after the form is filled in. The bill list offers only bills that are posted,
+unpaid and free of a live payment, for the same reason.
+
+Maker-checker, the missing factor and a payee's cooling-off period appear as
+disabled controls with the reason attached. None of them *is* the rule — the
+module refuses regardless — but a disabled control with a sentence says why,
+where a button that fails on press just looks broken.
+
+`approvalMfaStep` and the payee's encrypted columns are absent from every
+client-facing type: the first is a BigInt React cannot serialise, and the second
+is never selected at all, which is stronger than selecting and dropping it.
+
+### Two vitest pools at once will lie to you
+
+Running the unit suite beside an integration run produced
+`Test Files 183 passed (183)`, **no** FAIL lines, and exit 1. Nine files had
+failed with `Failed to start forks worker … Timeout waiting for worker to
+respond` — they never started, so 129 tests silently did not run while the
+output read as green. Only the exit code and the `Errors 9 errors` line showed
+it; run alone, the same suite is 192 files and 2807 tests at exit 0.
+
+Two lessons, both already learned the hard way in this build: **read the exit
+code, not a slice of the log**, and do not run two vitest worker pools
+concurrently — the DB-touching suites are serialised for the schema-contention
+reason anyway.
+
+Gates after this slice: tsc 0 errors, eslint 0 on every touched file, unit
+**192 files / 2807 tests**, integration **101 files / 1319 tests**.
+
 ## Not decided yet
 
 These decisions leave some questions open. Settle each one before the phase that
