@@ -1008,6 +1008,102 @@ diff on that file is one `lucide-react` import line plus 68 deletions — no
 statement was added anywhere near it, only line numbers moved. The rule fires
 12 times across the repo in files this branch never touched. Pre-existing.
 
+## Reachability: giving A/R, A/P and funding a door (2026-09-17)
+
+Phase 4 built invoices, bills and lender funding as modules, with tests, and
+never gave them an entry point. Fifteen exported functions existed that no
+screen could call. The feature was finished in the sense that its tests passed
+and unfinished in every sense that matters to someone trying to raise an
+invoice, which is a failure mode worth naming: a green suite says nothing about
+whether the work is reachable.
+
+`ar-ap-actions.ts` adds ten gated actions. A second actions file rather than 350
+more lines in `actions.ts`, following the split payroll already uses
+(`actions.ts` + `ledger-actions.ts`).
+
+### The reads deliberately have no action
+
+`arAging`, `apAging` and `openFundings` are called directly by a server
+component. Wrapping them in `"use server"` would add three public RPC endpoints
+with no caller — a larger attack surface bought for nothing.
+
+### The defect the new test found
+
+`createBill` accepts its expense target as either an account id or a system key
+(`materials`, rather than a uuid only this company's chart knows) and validates
+that one is present — then persisted only `expenseAccountId`. The key was
+validated and discarded. `postBillAccrual` reads that column, so it refused with
+*"This bill has no expense account"* about a bill whose caller had supplied one.
+A non-draft bill failed at creation; a draft **saved and became permanently
+unpostable**, which is the worse case because the row sits in the books looking
+correct.
+
+`posting.ts` had supported `systemKey` on a line all along — it is how the A/P
+credit side of that same entry resolves. Only the debit side ignored it.
+
+The fix resolves the key to an account id before the row is written and stores
+that id, so the bill records the account it actually landed in. Storing the key
+would let a later edit to the chart silently re-point a historical bill.
+
+`invoices.ts` does **not** have this bug, and the contrast is what proved the
+bills case was a defect rather than an unsupported input: `revenueTargetFor`
+resolves to a posting line at both create and accrual time, and the Invoice row
+stores no revenue-account column at all.
+
+### A test that reported green while checking nothing
+
+Two cases in the new file guarded a precondition with a bare
+`if (!entered.ok) return;` and no assertion above it. When the precondition
+failed the case returned early and **passed**. The void-bill case did exactly
+that, in the same run that exposed the bug above: two tests failed loudly and a
+third silently checked nothing. Every such guard now asserts first, with a
+message saying which step was never exercised.
+
+The general rule: an early return used to narrow a union must be preceded by the
+assertion, never stand in for it.
+
+### What the action-surface test actually asserts
+
+Not the ledger behaviour — `invoices.itest.ts`, `bills.itest.ts` and
+`funding.itest.ts` cover that. This tests the door:
+
+- Every write refused for `sales_rep` **and** for `accountant_readonly`. The
+  second matters because the reviewed row-scope exception for
+  `createInvoiceAction` rests on the claim that everyone holding
+  `Bookkeeping:create` sees every job in the company — true only while the
+  outside CPA holds read and export alone. Grant that role `create` and this
+  test is what fails.
+- A completeness check that fails if an action is added without a case, so the
+  table cannot quietly fall behind the module.
+- Dollars converted to cents exactly once, asserted on the **ledger** rather
+  than on a column whose unit is ambiguous, so it cannot pass by reading dollars
+  out of a field that happens to hold them.
+- A typed date landing in the month that was typed, checked by **period** rather
+  than by UTC day number — the latter would pass or fail according to the
+  machine's timezone.
+- Void leaving the row in place and two entries behind, never a delete.
+- Cross-tenant ids refused, which is what proves the tenant comes from the
+  session and not from the caller.
+
+### The two aging schedules on screen
+
+`/portal/books/receivables` and `/portal/books/payables`, gated on
+`Bookkeeping:read`, rendering through the existing `RenderableReportView` rather
+than hand-rolled tables.
+
+The as-of date sits in the URL for the same reason a statement's period does:
+"receivables as they stood at year end" is then a link somebody can send. It is
+parsed at midday, the same rule the write path uses. Every bucket prints
+including the empty ones, because a bucket that vanishes when it holds nothing
+makes two runs of one report look like two different reports.
+
+These do not replace `reports/ar-aging.ts`, and the duplication is deliberate:
+that one is whole dollars gated on `Report` for the sales floor, these are
+cent-exact gated on `Bookkeeping` for the accountant. An outside CPA has to be
+able to read the receivables without being handed the sales pipeline.
+
+Integration after this slice: **100 files, 1310 tests** (from 99/1288).
+
 ## Not decided yet
 
 These decisions leave some questions open. Settle each one before the phase that
