@@ -255,7 +255,17 @@ beforeAll(async () => {
       });
     }
     await raw.solarFinance.create({
-      data: { companyId, leadId: lead.id, vertical: "solar", finalPriceCents: 0, ...finance } as never,
+      data: {
+        companyId,
+        leadId: lead.id,
+        vertical: "solar",
+        finalPriceCents: 0,
+        // Every card ticked, so each menu is the one these snapshots pinned
+        // before the menu followed the ticks: cash plus one programme from each
+        // lender, every lender here publishing exactly one.
+        shortlistIds: ["cash", workedProgramme, partnerProgramme, storageProgramme],
+        ...finance,
+      } as never,
     });
     deals[key] = { leadId: lead.id, projectId: project.id };
   }

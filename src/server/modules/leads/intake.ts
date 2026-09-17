@@ -12,7 +12,7 @@ import { sendEmail, sendSms } from "@/server/modules/notifications/delivery";
 import { emailBrandFor } from "@/server/modules/notifications/brand";
 import { brandedEmailTemplate } from "@/server/modules/notifications/email-templates";
 import { resolveStageForAppointment } from "./staging";
-import { guardedStageId } from "@/server/modules/pipeline/contract-signed";
+import { guardedStageId } from "@/server/modules/pipeline/stage-guard";
 import { zonedWallClockToUtc } from "@/lib/tz";
 import { COMPANY } from "@/lib/site";
 
@@ -146,10 +146,12 @@ async function createWebsiteLead(
     candidateStageId: null,
     hasAppointment: Boolean(appointmentAt),
   });
-  // A web lead never lands at or past Contract Signed, however a pipeline is
-  // ordered — see guardedStageId.
+  // A web lead never lands at or past Contract Signed or M1 Funding, however a
+  // pipeline is ordered — see guardedStageId.
   const guard = await guardedStageId({
     companyId: company.id,
+    // Nobody signed in: a website visitor carries no authority to certify funding.
+    actor: null,
     lead: { id: null, vertical, stageId: null },
     resolvedStageId,
     explicitStageId: null,

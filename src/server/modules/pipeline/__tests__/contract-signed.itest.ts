@@ -40,9 +40,8 @@ const { uploadFileAction, moveFileAction, setSignedLenderContractAction } = awai
 const { updateTemplateAction } = await import("@/server/modules/esign/actions");
 const { moveStageAction } = await import("@/server/modules/automations/actions/move-stage");
 const { acceptSolarProposal } = await import("@/server/modules/solar/proposal-public");
-const { advanceToContractSignedIfReady, guardedStageId } = await import(
-  "@/server/modules/pipeline/contract-signed"
-);
+const { advanceToContractSignedIfReady } = await import("@/server/modules/pipeline/contract-signed");
+const { guardedStageId } = await import("@/server/modules/pipeline/stage-guard");
 const { updatePipelineStageAction, deletePipelineStageAction } = await import(
   "@/server/modules/settings/actions"
 );
@@ -539,6 +538,7 @@ describe("there is no path around it", () => {
     const kept = await solar(() =>
       guardedStageId({
         companyId,
+        actor: null,
         lead: { id: leadId, vertical: "solar", stageId: stages.new_appointment },
         resolvedStageId: stages[CS],
         explicitStageId: null,
@@ -549,6 +549,7 @@ describe("there is no path around it", () => {
     const newDeal = await solar(() =>
       guardedStageId({
         companyId,
+        actor: null,
         lead: { id: null, vertical: "solar", stageId: null },
         resolvedStageId: stages.permitting,
         explicitStageId: null,

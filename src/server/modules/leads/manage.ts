@@ -14,7 +14,7 @@ import { getClaimStatuses } from "@/server/modules/settings/queries";
 import { claimStatusOpensClaim } from "@/lib/claim-status";
 import { VERTICAL_SERVICE_TYPE } from "@/lib/vertical";
 import { resolveStageForAppointment } from "./staging";
-import { guardedStageId } from "@/server/modules/pipeline/contract-signed";
+import { guardedStageId } from "@/server/modules/pipeline/stage-guard";
 import { resolveOwningRepId } from "./owning-rep";
 import { zonedWallClockToUtc } from "@/lib/tz";
 import { addressChanged } from "@/server/modules/geo/resolve";
@@ -121,10 +121,11 @@ export async function createLeadAction(input: LeadInput) {
     candidateStageId: d.stageId || null,
     hasAppointment,
   });
-  // A new deal has no documents on file, so it can never START at or past
-  // Contract Signed — see guardedStageId.
+  // A new deal has no documents and no certified funding, so it can never
+  // START at or past Contract Signed or M1 Funding — see guardedStageId.
   const guard = await guardedStageId({
     companyId: user.companyId,
+    actor: user,
     lead: { id: null, vertical, stageId: null },
     resolvedStageId,
     explicitStageId: d.stageId || null,
@@ -244,9 +245,10 @@ export async function updateLeadAction(id: string, input: LeadInput) {
     hasAppointment,
   });
   // The lead form can move a deal as well as the board can, so it is held to
-  // the same Contract Signed rule.
+  // the same stage rules — M1 Funding and Contract Signed.
   const guard = await guardedStageId({
     companyId: user.companyId,
+    actor: user,
     lead: { id, vertical: existing.vertical, stageId: existing.stageId },
     resolvedStageId,
     explicitStageId: d.stageId || null,
@@ -450,10 +452,12 @@ export async function updateLeadPatchAction(leadId: string, patch: LeadPatch) {
       candidateStageId: existing.stageId,
       hasAppointment: Boolean(d.appointmentAt),
     });
-    // Automatic only, so a re-stage that would cross Contract Signed is simply
-    // not applied rather than failing the save — see guardedStageId.
+    // Automatic only, so a re-stage that would cross Contract Signed or M1
+    // Funding is simply not applied rather than failing the save — see
+    // guardedStageId.
     const guard = await guardedStageId({
       companyId: user.companyId,
+      actor: user,
       lead: { id: existing.id, vertical: existing.vertical, stageId: existing.stageId },
       resolvedStageId,
       explicitStageId: null,

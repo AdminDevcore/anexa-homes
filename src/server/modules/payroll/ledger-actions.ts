@@ -18,13 +18,16 @@ import {
   recordChargebackRecovery,
   REP_CAUSED_REASONS,
 } from "./chargebacks";
+import { PayrollRefusedError } from "./references";
 
 /**
  * The browser's way into the payroll ledger.
  *
  * Every export of a `"use server"` module is a public RPC endpoint, so each one
  * re-derives the company from the session and re-checks permission rather than
- * trusting anything in its arguments. None of them takes a companyId.
+ * trusting anything in its arguments. None of them takes a companyId, and every
+ * id they pass on — payee, deal, job, commission, chargeback, run — is checked
+ * against the session's company before anything is written (references.ts).
  *
  * ── THE TWO AUTHORITIES ────────────────────────────────────────────────────
  * `update Payroll` moves money on a run: adjustments, recoveries, finalisation.
@@ -34,7 +37,9 @@ import {
  * the one that needs a second person.
  *
  * A `PayrollLockedError` is caught and returned as an ordinary error string:
- * hitting a finalised run is a thing a user does, not a crash.
+ * hitting a finalised run is a thing a user does, not a crash. So is a
+ * `PayrollRefusedError` — a record that is not this company's, a reason that is
+ * only padding, an edit the ledger does not allow.
  */
 
 function fail(error: string) {
@@ -48,12 +53,14 @@ async function guard(action: "update" | "approve") {
   return allowed ? user : null;
 }
 
-/** Turn the lock into a message rather than a stack trace. */
+/** Turn the lock, and every other refusal, into a message rather than a stack trace. */
 async function locked<T>(fn: () => Promise<T>) {
   try {
     return { ok: true as const, value: await fn() };
   } catch (err) {
-    if (err instanceof PayrollLockedError) return { ok: false as const, error: err.message };
+    if (err instanceof PayrollLockedError || err instanceof PayrollRefusedError) {
+      return { ok: false as const, error: err.message };
+    }
     throw err;
   }
 }
@@ -129,7 +136,7 @@ export async function deletePayrollAdjustmentAction(adjustmentId: string, payrol
   const user = await guard("update");
   if (!user) return fail("Not allowed.");
   const res = await locked(() =>
-    deletePayrollAdjustment({ companyId: user.companyId, adjustmentId })
+    deletePayrollAdjustment({ companyId: user.companyId, adjustmentId, deletedById: user.userId })
   );
   if (!res.ok) return fail(res.error);
   revalidatePath(`/portal/payroll/${payrollRunId}`);
@@ -145,14 +152,17 @@ export async function deletePayrollAdjustmentAction(adjustmentId: string, payrol
 export async function finalizePayrollRunAction(payrollRunId: string) {
   const user = await guard("update");
   if (!user) return fail("Not allowed.");
-  const res = await finalizePayrollRun({
-    companyId: user.companyId,
-    payrollRunId,
-    actorId: user.userId,
-  });
+  const res = await locked(() =>
+    finalizePayrollRun({
+      companyId: user.companyId,
+      payrollRunId,
+      actorId: user.userId,
+    })
+  );
+  if (!res.ok) return fail(res.error);
   revalidatePath(`/portal/payroll/${payrollRunId}`);
   revalidatePath("/portal/payroll");
-  return res.alreadyFinal
+  return res.value.alreadyFinal
     ? { ok: true as const, message: "This run was already finalised." }
     : { ok: true as const };
 }
@@ -178,19 +188,22 @@ export async function requestChargebackAction(input: z.infer<typeof chargebackSc
   const parsed = chargebackSchema.safeParse(input);
   if (!parsed.success) return fail("Pick a documented rep-caused reason and an amount.");
 
-  const cb = await requestChargeback({
-    companyId: user.companyId,
-    userId: parsed.data.userId,
-    amountCents: parsed.data.amountCents,
-    reason: parsed.data.reason as (typeof REP_CAUSED_REASONS)[number],
-    notes: parsed.data.notes ?? null,
-    requestedById: user.userId,
-    commissionId: parsed.data.commissionId ?? null,
-    projectId: parsed.data.projectId ?? null,
-    leadId: parsed.data.leadId ?? null,
-  });
+  const res = await locked(() =>
+    requestChargeback({
+      companyId: user.companyId,
+      userId: parsed.data.userId,
+      amountCents: parsed.data.amountCents,
+      reason: parsed.data.reason as (typeof REP_CAUSED_REASONS)[number],
+      notes: parsed.data.notes ?? null,
+      requestedById: user.userId,
+      commissionId: parsed.data.commissionId ?? null,
+      projectId: parsed.data.projectId ?? null,
+      leadId: parsed.data.leadId ?? null,
+    })
+  );
+  if (!res.ok) return fail(res.error);
   revalidatePath("/portal/commissions");
-  return { ok: true as const, chargebackId: cb.id };
+  return { ok: true as const, chargebackId: res.value.id };
 }
 
 export async function approveChargebackAction(chargebackId: string) {

@@ -205,6 +205,74 @@ describe("the menu stays a choice rather than a spreadsheet", () => {
   });
 });
 
+describe("the menu is what the rep ticked on the Financing step", () => {
+  const programmes = [
+    loanProgramme({ id: "p-a", lenderId: "L1", lenderName: "GoodLeap" }),
+    loanProgramme({ id: "p-b", lenderId: "L2", lenderName: "Sunergy" }),
+  ];
+
+  it("offers nothing beside the quote when nothing else was ticked", () => {
+    expect(proposalAlternatives({ ...base, programmes, shortlistIds: [] })).toEqual([]);
+  });
+
+  it("offers only the programmes that were ticked", () => {
+    const out = proposalAlternatives({ ...base, programmes, shortlistIds: ["p-b"] });
+    expect(out.map((o) => o.key)).toEqual(["loan:p-b"]);
+  });
+
+  it("offers cash only when the cash card was ticked", () => {
+    const out = proposalAlternatives({ ...base, programmes, shortlistIds: ["cash", "p-a"] });
+    expect(out.map((o) => o.key)).toEqual(["cash", "loan:p-a"]);
+  });
+
+  it("does not repeat the quoted programme when its own card is ticked", () => {
+    const out = proposalAlternatives({
+      ...base,
+      programmes: [...programmes, loanProgramme({ id: "p-quoted", lenderId: "L-quoted", lenderName: "Axess" })],
+      shortlistIds: ["p-quoted", "p-a"],
+    });
+    expect(out.map((o) => o.key)).toEqual(["loan:p-a"]);
+  });
+
+  it("offers two ticked programmes from one lender, and a ticked sibling of the quote", () => {
+    // One-per-lender keeps an automatic menu broad. A rep who ticked both of a
+    // partner's terms asked for both.
+    const out = proposalAlternatives({
+      ...base,
+      quoted: { ...base.quoted, lenderProductId: "p-30", lenderId: "L-amos" },
+      programmes: [
+        loanProgramme({ id: "p-30", lenderId: "L-amos", lenderName: "Amos" }),
+        loanProgramme({ id: "p-25", lenderId: "L-amos", lenderName: "Amos", rank: 1 }),
+        loanProgramme({ id: "p-20", lenderId: "L-amos", lenderName: "Amos", rank: 2 }),
+      ],
+      shortlistIds: ["p-30", "p-25", "p-20"],
+    });
+    expect(out.map((o) => o.key)).toEqual(["loan:p-25", "loan:p-20"]);
+  });
+
+  it("still holds a ticked programme to the approved-vendor list", () => {
+    const out = proposalAlternatives({
+      ...base,
+      programmes,
+      approvedLenderIds: ["L2"],
+      shortlistIds: ["p-a", "p-b"],
+    });
+    expect(out.map((o) => o.key)).toEqual(["loan:p-b"]);
+  });
+
+  it("still stops at the cap when more cards were ticked than it allows", () => {
+    const many = Array.from({ length: 12 }, (_, i) =>
+      loanProgramme({ id: `p-${i}`, lenderId: `L${i}`, lenderName: `Lender ${i}`, lender: lender(`L${i}`, `Lender ${i}`, i) })
+    );
+    const out = proposalAlternatives({
+      ...base,
+      programmes: many,
+      shortlistIds: ["cash", ...many.map((p) => p.id)],
+    });
+    expect(out).toHaveLength(MAX_PAYMENT_OPTIONS - 1);
+  });
+});
+
 describe("the storage line is drawn in both directions", () => {
   it("keeps battery-only paper off a deal that has an array on it", () => {
     const out = proposalAlternatives({

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { LenderMark } from "@/components/ui/lender-mark";
 import { lenderProductLabel } from "@/lib/solar-lender-product";
 import { PRODUCT_LABEL } from "@/lib/solar-lender-product";
+import { MAX_PAYMENT_OPTIONS } from "@/lib/solar-proposal-options";
 import {
   basisGaps,
   CASH_OFFER_ID,
@@ -66,7 +67,8 @@ export type OfferLender = {
 /**
  * One programme on the shelf.
  *
- * Clicking the body shortlists it; that is the "check". Which one the deal is
+ * Clicking the body shortlists it; that is the "check", and a checked card is
+ * offered on the customer's proposal. Which one the deal is
  * actually QUOTED on is decided in the comparison below, deliberately — a card
  * that both shortlists and commits on one click is a card a rep re-prices a
  * deal with by accident.
@@ -246,6 +248,16 @@ const LINES: CompareLine[] = [
     cell: (r) => (r.monthlyCents == null ? null : `${money2(r.monthlyCents)}/mo`),
   },
   {
+    // A PPA's own kind of monthly, in the same slot as everybody else's, so a
+    // column of it can be read straight down. Its label says which kind it is:
+    // this one is an average of a bill that moves, not a payment that is owed.
+    key: "avg-monthly",
+    label: "Monthly (avg)",
+    hint: "A PPA bills what the roof made, so this is year one's twelve bills averaged.",
+    lead: true,
+    cell: (r) => (r.avgMonthlyCents == null ? null : `${money2(r.avgMonthlyCents)}/mo`),
+  },
+  {
     // Directly under the payment it is the other reading of. Only the columns
     // that actually earn credits carry it, and only where it comes out above
     // the figure above — see `withoutCreditsMonthlyCents`.
@@ -254,6 +266,15 @@ const LINES: CompareLine[] = [
     hint: "The whole contract financed, with no tax credit against it.",
     cell: (r) =>
       r.withoutCreditsMonthlyCents == null ? null : `${money2(r.withoutCreditsMonthlyCents)}/mo`,
+  },
+  {
+    // Under whichever monthly this column leads with, for the same reason the
+    // paydown row below sits under a loan's: it is what the headline is not
+    // saying. A third-party deal rises every year and the screen has to say so.
+    key: "final-year",
+    label: "In the final year",
+    hint: "The escalator applied across the whole term.",
+    cell: (r) => (r.finalYearMonthlyCents == null ? null : `${money2(r.finalYearMonthlyCents)}/mo`),
   },
   {
     key: "monthly-without-paydown",
@@ -427,7 +448,15 @@ function CompareColumn({
   const headline =
     row.monthlyCents != null
       ? { key: "monthly", value: `${money2(row.monthlyCents)}/mo`, note: "per month" }
-      : row.contractPriceCents != null
+      : // A PPA leads on the money too, not on its rate. The rate stays on its
+        // own row below; what a homeowner compares columns by is the monthly.
+        row.avgMonthlyCents != null
+        ? {
+            key: "avg-monthly",
+            value: `${money2(row.avgMonthlyCents)}/mo`,
+            note: "average, year one",
+          }
+        : row.contractPriceCents != null
         ? { key: "contract-price", value: money(row.contractPriceCents), note: "contract price" }
         : row.rateMillsPerKwh != null
           ? {
@@ -672,6 +701,9 @@ export function FinanceOffers({
     .map((id) => priced.get(id))
     .filter((r): r is CompareRow => r != null);
 
+  // The proposal's menu stops at the cap; say so rather than drop a tick silently.
+  const offeredBesideQuote = shortlist.filter((id) => id !== quotedId).length;
+
   /**
    * Nothing on this shelf can be priced, and it is the DEAL that is missing.
    *
@@ -704,9 +736,15 @@ export function FinanceOffers({
             : null
           : row.monthlyCents != null
             ? `${money2(row.monthlyCents)}/mo`
-            : row.rateMillsPerKwh != null
-              ? `$${(row.rateMillsPerKwh / 1000).toFixed(3)}/kWh`
-              : null;
+            : // A PPA used to headline its price per kilowatt-hour, which is the
+              // one figure on this shelf a homeowner cannot hold against any
+              // other card. It headlines the money now; the rate goes in the
+              // note underneath, where it explains the money.
+              row.avgMonthlyCents != null
+              ? `${money2(row.avgMonthlyCents)}/mo`
+              : row.rateMillsPerKwh != null
+                ? `$${(row.rateMillsPerKwh / 1000).toFixed(3)}/kWh`
+                : null;
     const note =
       kind === "cash"
         ? "contract price"
@@ -714,9 +752,11 @@ export function FinanceOffers({
           ? "from the rate sheet's factor"
           : row?.monthlyCents != null
             ? "estimated monthly"
-            : row?.rateMillsPerKwh != null
-              ? "escalates each year"
-              : null;
+            : row?.avgMonthlyCents != null && row.rateMillsPerKwh != null
+              ? `average, year one · $${(row.rateMillsPerKwh / 1000).toFixed(3)}/kWh`
+              : row?.rateMillsPerKwh != null
+                ? "escalates each year"
+                : null;
 
     return (
       <OfferCard
@@ -780,8 +820,8 @@ export function FinanceOffers({
             Ways to pay
           </h4>
           <p className="text-[11px] text-muted-foreground">
-            Tick any two to compare them. Cash pays the base price; each lender adds its own dealer
-            fee.
+            Ticked cards are compared below and offered on the proposal beside the quote. Cash pays
+            the base price; each lender adds its own dealer fee.
           </p>
         </header>
 
@@ -794,6 +834,13 @@ export function FinanceOffers({
           <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(15rem,1fr))]">
             {shelf.map((c) => cardFor(c))}
           </div>
+
+          {offeredBesideQuote > MAX_PAYMENT_OPTIONS - 1 && (
+            <p className="text-[11px] text-muted-foreground">
+              The proposal has room for the quote and {MAX_PAYMENT_OPTIONS - 1} more: cash first, then
+              lenders in their ranked order.
+            </p>
+          )}
 
           {lenders.length === 0 && (
             <p className="rounded-lg border border-amber-300/70 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">

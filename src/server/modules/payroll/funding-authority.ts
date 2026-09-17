@@ -78,10 +78,18 @@ export function crossesFundingGate<T extends GateStageShape & { position: number
   return target.position >= gate.position;
 }
 
+/** The sentence shown to somebody whose move would put an unfunded deal past the line. */
+export const FUNDING_GATE_MOVE_ERROR =
+  "This stage is at or past M1 Funding, and this deal has no funding confirmed yet. " +
+  "The funding desk records M1 first — ask an administrator or accounting.";
+
 /**
- * May this user move this deal into this stage, or is it past the funding line?
+ * May this move put the deal at or past the funding line?
  *
- * Returns the sentence to refuse with, or null to allow.
+ * Returns the sentence to refuse with, or null to allow. This is the M1 half of
+ * the stage guard: every writer of a deal's stage reaches it through
+ * `pipeline/stage-guard.ts` rather than calling it on a path of its own, which
+ * is how five of them came to skip it.
  *
  * ── WHY THE STAGE IS GUARDED AT ALL ─────────────────────────────────────────
  * Locking `paidAt` alone already breaks the conjunction that releases
@@ -102,24 +110,34 @@ export function crossesFundingGate<T extends GateStageShape & { position: number
  * carries the job forward normally. What nobody without the authority can do is
  * put a deal past the line ahead of the money.
  *
+ * ── WHO IS MOVING IT ────────────────────────────────────────────────────────
+ * `actor` is the person making the move, or null when nobody is — a website
+ * lead, an automation rule, paperwork arriving. Nobody cannot certify funding:
+ * a rule an admin wrote runs on whatever any rep's action triggered, so it
+ * carries no one's authority. `lead.id` is null for a deal being created, which
+ * has no funding to have certified.
+ *
  * Roofing is untouched: its gate is the depreciation request, which is not a
  * claim about cash received, and it has no funding milestone. The rule applies
  * only where a milestone exists to be certified — see the vertical check.
  */
-export async function fundingGateMoveError(
-  user: AccessUser,
-  leadId: string,
-  target: { id: string; position: number; isLost: boolean; pipelineId: string }
-): Promise<string | null> {
-  if (canCertifyFunding(user)) return null;
+export async function fundingGateError(move: {
+  companyId: string;
+  actor: AccessUser | null;
+  lead: { id: string | null; vertical: string };
+  targetStageId: string;
+}): Promise<string | null> {
+  if (move.actor && canCertifyFunding(move.actor)) return null;
+  // Solar is the only vertical whose gate asserts that money arrived.
+  if (move.lead.vertical !== "solar") return null;
 
   const { prisma } = await import("@/server/db/client");
-  const lead = await prisma.lead.findFirst({
-    where: { id: leadId, companyId: user.companyId },
-    select: { vertical: true },
+  const target = await prisma.pipelineStage.findFirst({
+    where: { id: move.targetStageId, pipeline: { companyId: move.companyId } },
+    select: { id: true, position: true, isLost: true, pipelineId: true },
   });
-  // Solar is the only vertical whose gate asserts that money arrived.
-  if (lead?.vertical !== "solar") return null;
+  // An unknown stage is the caller's to refuse; this rule has nothing to add.
+  if (!target) return null;
 
   const stages = await prisma.pipelineStage.findMany({
     where: { pipelineId: target.pipelineId },
@@ -128,13 +146,12 @@ export async function fundingGateMoveError(
   if (!crossesFundingGate("solar", stages, target)) return null;
 
   // Already funded by somebody who may say so — the job can move on.
-  const funded = await prisma.solarMilestone.count({
-    where: { leadId, payee: "rep", sequence: 1, paidAt: { not: null } },
-  });
-  if (funded > 0) return null;
+  if (move.lead.id) {
+    const funded = await prisma.solarMilestone.count({
+      where: { leadId: move.lead.id, payee: "rep", sequence: 1, paidAt: { not: null } },
+    });
+    if (funded > 0) return null;
+  }
 
-  return (
-    "This stage is at or past M1 Funding, and this deal has no funding confirmed yet. " +
-    "The funding desk records M1 first — ask an administrator or accounting."
-  );
+  return FUNDING_GATE_MOVE_ERROR;
 }

@@ -34,6 +34,11 @@ const RETIRED_FIELDS: Record<string, string> = {
   basePriceCents: "baseKeptCents",
   financedOnTop: "outsidePriceRule",
   contractPriceCents: "finalPriceCents",
+  // Inside a Prisma call this is always wrong: the field is `baseFinalPpwCents`
+  // behind @map("grossPpwCents"). Elsewhere it is still FinanceRow's STICKER,
+  // which is why it is positional here rather than banned outright. A merge
+  // brought in a Prisma call spelling it the old way and only tsc objected.
+  grossPpwCents: "baseFinalPpwCents",
 };
 
 /** Spellings with no remaining meaning in `src/` at all. */

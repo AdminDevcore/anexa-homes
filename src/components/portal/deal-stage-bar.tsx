@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2, Check, ChevronDown, ArrowRight, Ban } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { stageProgress } from "@/lib/stage-progress";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -31,6 +32,8 @@ export type StageLite = {
   position: number;
   color: string;
   isLost?: boolean;
+  /** A side-state a deal waits in (NTP Action Required). Never offered as the next step. */
+  isActionRequired?: boolean;
 };
 
 /**
@@ -53,27 +56,16 @@ export type StageLite = {
  * `moveLeadStage` validates the target against the company, not a vertical.
  */
 
-/** What the two surfaces need to agree on, derived once from the stage list. */
+/**
+ * What the two surfaces need to agree on, derived once from the stage list.
+ *
+ * The maths lives in lib/stage-progress.ts so the deal page's summary card
+ * counts steps the same way. Forward motion skips Cancelled (a deal one stage
+ * short of the end must not advance itself into it) and every action-required
+ * side-state (Advance from Adjuster Meeting Complete must not offer Claim Denied).
+ */
 function useStageModel(stages: StageLite[], currentStageId: string | null) {
-  return React.useMemo(() => {
-    const currentIndex = stages.findIndex((s) => s.id === currentStageId);
-    const current = currentIndex >= 0 ? stages[currentIndex] : null;
-    // Progress counts the stages a deal moves THROUGH. Cancelled sits in the
-    // pipeline but is a dead end, not a step towards anything.
-    const liveCount = stages.filter((s) => !s.isLost).length;
-    return {
-      currentIndex,
-      current,
-      liveCount,
-      step: currentIndex + 1,
-      // Forward motion never runs into a dead end: a deal one stage short of the
-      // end must not advance itself into Cancelled just because Cancelled
-      // happens to be last in the list.
-      nextStage: stages.slice(currentIndex + 1).find((s) => !s.isLost) ?? null,
-      lostStage: stages.find((s) => s.isLost) ?? null,
-      isCancelled: !!current?.isLost,
-    };
-  }, [stages, currentStageId]);
+  return React.useMemo(() => stageProgress(stages, currentStageId), [stages, currentStageId]);
 }
 
 /** Moving a deal, shared by the header dropdown and the bar's advance button. */

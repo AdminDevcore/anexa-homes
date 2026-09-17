@@ -303,6 +303,7 @@ function movedByLabel(row: TimelineRow): string | null {
   // Advanced by the paperwork itself: the contract landed and the signed
   // proposal was already there (or the other way round). See contract-signed.ts.
   if (row.via === "document") return "contract on file";
+  if (row.via === "agent") return "by an agent";
   return null;
 }
 

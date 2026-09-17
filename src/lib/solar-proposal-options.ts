@@ -124,6 +124,21 @@ export type AlternativesInput = {
   /** Every active rate-sheet row, already scoped to this company. */
   programmes: CatalogueProgramme[];
   /**
+   * THE CARDS THE REP TICKED on the Financing step — `"cash"` or rate-sheet
+   * row ids, as saved on `SolarFinance.shortlistIds`.
+   *
+   * When given, the menu is exactly these and nothing else: no cash unless
+   * cash was ticked, and no one-programme-per-lender rule, because a rep who
+   * ticked two of a partner's terms asked for both. The rules about what a
+   * household MAY be offered — the approved-vendor list, the storage line, the
+   * cap — still apply to what was ticked.
+   *
+   * Absent means the older automatic menu (cash plus one programme from every
+   * lender), which generation no longer uses. It put Amos and "Pay in full" on
+   * a PPA proposal whose rep had ticked neither.
+   */
+  shortlistIds?: string[];
+  /**
    * The lenders whose approved-vendor list covers the equipment on this design,
    * or NULL when nothing is constrained — a company that has not populated any
    * AVL constrains nothing, exactly as the equipment selectors already behave.
@@ -185,6 +200,9 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
 
   const out: ProposalAlternative[] = [];
 
+  /** Null on the automatic menu; the ticked cards otherwise. */
+  const ticked = input.shortlistIds ? new Set(input.shortlistIds) : null;
+
   /**
    * Which unit this menu counts, decided once.
    *
@@ -243,7 +261,7 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
   // carries a lender's fee for money nobody is borrowing. Quoting cash at the
   // financed price is how a customer who offered to write a cheque ends up
   // paying the bank's cut anyway.
-  if (input.quoted.product !== "cash") {
+  if (input.quoted.product !== "cash" && (ticked == null || ticked.has("cash"))) {
     out.push({
       key: "cash",
       label: "Pay in full",
@@ -266,6 +284,7 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
   // ── The rate sheet ────────────────────────────────────────────────────────
   const eligible = input.programmes
     .filter((p) => p.id !== input.quoted.lenderProductId)
+    .filter((p) => ticked == null || ticked.has(p.id))
     .filter((p) => lenderIsApproved(p.lender.id, input.approvedLenderIds))
     /**
      * THE STORAGE LINE, DRAWN IN BOTH DIRECTIONS.
@@ -312,8 +331,11 @@ export function proposalAlternatives(input: AlternativesInput): ProposalAlternat
 
   for (const p of eligible) {
     if (out.length >= room) break;
-    if (usedLenders.has(p.lender.id)) continue;
-    usedLenders.add(p.lender.id);
+    // Breadth is the automatic menu's rule. A ticked card is the rep's.
+    if (ticked == null) {
+      if (usedLenders.has(p.lender.id)) continue;
+      usedLenders.add(p.lender.id);
+    }
 
     const row = financeRowForProduct(
       {

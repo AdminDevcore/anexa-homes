@@ -13,6 +13,7 @@ import {
   crossesContractSigned,
   type ContractSignedEvidence,
 } from "@/lib/contract-signed";
+import { fundingGateError } from "@/server/modules/payroll/funding-authority";
 import { recordStageEntry } from "./stage-history";
 
 /**
@@ -25,11 +26,12 @@ import { recordStageEntry } from "./stage-history";
  * pass the id they resolved from the session (or, on the public signing paths,
  * from the row the token unlocked).
  *
- * ENFORCED AT EVERY WRITE THAT CAN MOVE A DEAL: the board and the deal page
- * (`moveLeadStage`), the lead form and its quick edits (`manage.ts`), the
- * website intake, and automations (`move_stage`). There is no override. A deal
- * whose paperwork is real gets there by filing the paperwork, which advances it
- * on its own — see `advanceToContractSignedIfReady`.
+ * ENFORCED AT EVERY WRITE THAT CAN MOVE A DEAL, through the one stage guard
+ * that also holds M1 Funding (`pipeline/stage-guard.ts`): the board and the
+ * deal page, the lead form and its quick edits, the website intake, the
+ * canvassing map, and automations. There is no override. A deal whose paperwork
+ * is real gets there by filing the paperwork, which advances it on its own —
+ * see `advanceToContractSignedIfReady`.
  */
 
 /** What is on file for this deal, read fresh. */
@@ -116,50 +118,6 @@ export async function contractSignedMoveError(args: {
 }
 
 /**
- * The stage a lead form should actually write, given the Contract Signed rule.
- *
- * The lead forms re-derive the stage from the appointment date
- * (`resolveStageForAppointment`) as well as taking one the user picked, so two
- * different things can propose a move:
- *
- *  - a stage the USER CHOSE that crosses the line is refused with the reason —
- *    they asked for it and need to know why not;
- *  - an AUTOMATIC re-stage that would cross it is simply not applied, and the
- *    deal stays where it was. Booking an appointment must never fail a save,
- *    and must never carry a deal over Contract Signed either.
- *
- * `fallbackStageId` is where a NEW deal goes when its automatic stage is not
- * allowed — the pipeline's first stage — since it has nowhere to "stay".
- */
-export async function guardedStageId(args: {
-  companyId: string;
-  lead: { id: string | null; vertical: string; stageId: string | null };
-  resolvedStageId: string | null;
-  explicitStageId: string | null;
-  fallbackStageId?: string | null;
-}): Promise<{ ok: true; stageId: string | null } | { ok: false; error: string }> {
-  const { resolvedStageId, explicitStageId, lead } = args;
-  if (!resolvedStageId || resolvedStageId === lead.stageId) return { ok: true, stageId: resolvedStageId };
-
-  const check = (targetStageId: string) =>
-    contractSignedMoveError({ companyId: args.companyId, lead, targetStageId });
-
-  const err = await check(resolvedStageId);
-  if (!err) return { ok: true, stageId: resolvedStageId };
-  if (explicitStageId && resolvedStageId === explicitStageId) return { ok: false, error: err };
-
-  // The automatic re-stage is refused; honour what the user picked, if anything.
-  if (explicitStageId && explicitStageId !== lead.stageId) {
-    const explicitErr = await check(explicitStageId);
-    return explicitErr ? { ok: false, error: explicitErr } : { ok: true, stageId: explicitStageId };
-  }
-  return {
-    ok: true,
-    stageId: args.fallbackStageId !== undefined ? args.fallbackStageId : lead.stageId,
-  };
-}
-
-/**
  * RE-EVALUATE, AND ADVANCE WHEN BOTH DOCUMENTS ARE ON FILE.
  *
  * Called whenever one of the two documents arrives — the customer signing the
@@ -209,6 +167,18 @@ export async function advanceToContractSignedIfReady(args: {
     if (!contractSignedMet(await readContractSignedEvidence(companyId, leadId))) {
       return { advanced: false };
     }
+
+    // The paperwork proves the sale, not the money. On a pipeline whose
+    // Contract Signed stage sits at or past M1 Funding, arriving paperwork must
+    // not carry an unfunded deal over that line either — and nobody is moving
+    // it, so nobody's authority applies. See pipeline/stage-guard.ts.
+    const fundingError = await fundingGateError({
+      companyId,
+      actor: null,
+      lead: { id: leadId, vertical: lead.vertical },
+      targetStageId: stage.id,
+    });
+    if (fundingError) return { advanced: false };
 
     const now = new Date();
     const moved = await prisma.lead.updateMany({

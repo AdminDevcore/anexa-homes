@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Plus, Trash2, Lock, Undo2 } from "lucide-react";
+import { Loader2, Plus, Trash2, Lock, Undo2, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,6 +21,7 @@ import {
   deletePayrollAdjustmentAction,
   finalizePayrollRunAction,
   recordChargebackRecoveryAction,
+  updatePayrollAdjustmentAction,
 } from "@/server/modules/payroll/ledger-actions";
 
 /**
@@ -52,6 +53,8 @@ export type LedgerAdjustment = {
   payeeName: string;
   createdByName: string;
   createdAt: string;
+  /** Who last edited the line, or null when nobody has. */
+  editedByName: string | null;
 };
 
 export type OpenChargeback = {
@@ -110,7 +113,8 @@ export function PayrollLedger({
               <div className="min-w-0">
                 <div className="font-medium">{a.payeeName}</div>
                 <div className="text-[11px] text-muted-foreground">
-                  {a.reason} · {a.createdByName} · {new Date(a.createdAt).toLocaleDateString()}
+                  {`${a.reason} · ${a.createdByName} · ${new Date(a.createdAt).toLocaleDateString()}`}
+                  {a.editedByName && ` · edited by ${a.editedByName}`}
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-2">
@@ -120,9 +124,14 @@ export function PayrollLedger({
                   {a.amountCents > 0 ? "+" : ""}
                   {money(a.amountCents)}
                 </span>
-                {/* A recovery is deleted by removing it here, which leaves the
-                    chargeback balance untouched — the balance is the debt, this
-                    was only an instalment against it. */}
+                {/* Removing a recovery line takes the instalment back: the
+                    amount is owed on the chargeback again — see
+                    deletePayrollAdjustment. */}
+                {/* A recovery's amount is drawn from its chargeback's balance,
+                    so it has no Edit — see updatePayrollAdjustment. */}
+                {editable && a.kind !== "chargeback_recovery" && (
+                  <EditAdjustment adjustment={a} runId={runId} />
+                )}
                 {editable && <RemoveAdjustment id={a.id} runId={runId} />}
               </div>
             </li>
@@ -248,6 +257,107 @@ function AddAdjustment({ runId, payees }: { runId: string; payees: LedgerPayee[]
   );
 }
 
+/**
+ * Correct a bonus or deduction in place: its amount and its reason.
+ *
+ * The payee and the kind stay fixed. A line paid to the wrong person, or entered
+ * as a bonus when it was a deduction, is a different line — remove it and add
+ * the right one, so the ledger shows both acts. The amount is typed as a
+ * positive figure, exactly as on Add; the server keeps the sign the kind gives
+ * it and logs the old values beside who changed them.
+ */
+function EditAdjustment({ adjustment, runId }: { adjustment: LedgerAdjustment; runId: string }) {
+  const router = useRouter();
+  const savedAmount = (Math.abs(adjustment.amountCents) / 100).toString();
+  const [open, setOpen] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  const [amount, setAmount] = React.useState(savedAmount);
+  const [reason, setReason] = React.useState(adjustment.reason);
+  const amountId = `edit-adjustment-amount-${adjustment.id}`;
+  const reasonId = `edit-adjustment-reason-${adjustment.id}`;
+
+  function onOpenChange(next: boolean) {
+    // Opening again starts from what is saved, not from an abandoned edit.
+    if (next) {
+      setAmount(savedAmount);
+      setReason(adjustment.reason);
+    }
+    setOpen(next);
+  }
+
+  async function save() {
+    const n = Number(amount);
+    if (!(n > 0)) return toast.error("Enter an amount above 0.");
+    if (reason.trim().length < 3) return toast.error("Give a reason — it prints on the pay stub.");
+    const amountCents = Math.round(n * 100);
+    const amountChanged = amountCents !== Math.abs(adjustment.amountCents);
+    const reasonChanged = reason.trim() !== adjustment.reason;
+    if (!amountChanged && !reasonChanged) return setOpen(false);
+
+    setBusy(true);
+    try {
+      const res = await updatePayrollAdjustmentAction({
+        adjustmentId: adjustment.id,
+        payrollRunId: runId,
+        ...(amountChanged ? { amountCents } : {}),
+        ...(reasonChanged ? { reason: reason.trim() } : {}),
+      });
+      if (!res.ok) return toast.error(res.error);
+      toast.success("Adjustment updated");
+      setOpen(false);
+      router.refresh();
+    } catch {
+      toast.error("The change could not be saved. Refresh the page and try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogTrigger asChild>
+        <button aria-label="Edit adjustment" className="text-muted-foreground hover:text-foreground">
+          <Pencil className="size-4" />
+        </button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Edit adjustment</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <p className="text-sm">
+            <span className="font-medium">{adjustment.payeeName}</span>
+            <span className="text-muted-foreground">
+              {` · ${adjustment.kind === "bonus" ? "Bonus (+)" : "Deduction (−)"}`}
+            </span>
+          </p>
+          <div className="space-y-1.5">
+            <Label htmlFor={amountId} className="text-xs">Amount (USD)</Label>
+            <Input
+              id={amountId}
+              type="number"
+              inputMode="decimal"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={reasonId} className="text-xs">Reason</Label>
+            <Input id={reasonId} value={reason} onChange={(e) => setReason(e.target.value)} />
+            <p className="text-[11px] text-muted-foreground">Prints on the pay stub beside the amount.</p>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => setOpen(false)} disabled={busy}>Cancel</Button>
+          <Button onClick={save} disabled={busy} className="bg-gold text-gold-foreground hover:bg-gold/90">
+            {busy && <Loader2 className="size-4 animate-spin" />} Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function RemoveAdjustment({ id, runId }: { id: string; runId: string }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState(false);
@@ -257,10 +367,15 @@ function RemoveAdjustment({ id, runId }: { id: string; runId: string }) {
       disabled={busy}
       onClick={async () => {
         setBusy(true);
-        const res = await deletePayrollAdjustmentAction(id, runId);
-        setBusy(false);
-        if (!res.ok) return toast.error(res.error);
-        router.refresh();
+        try {
+          const res = await deletePayrollAdjustmentAction(id, runId);
+          if (!res.ok) return toast.error(res.error);
+          router.refresh();
+        } catch {
+          toast.error("The line could not be removed. Refresh the page and try again.");
+        } finally {
+          setBusy(false);
+        }
       }}
       className="text-muted-foreground hover:text-destructive"
     >

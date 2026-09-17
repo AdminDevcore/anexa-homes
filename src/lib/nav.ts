@@ -16,6 +16,8 @@ import {
   GraduationCap,
   Hammer,
   ReceiptText,
+  Bot,
+  ListChecks,
   type LucideIcon,
 } from "lucide-react";
 import type { Role } from "@prisma/client";
@@ -92,6 +94,15 @@ export const PAY_TABS: NavTab[] = [
   { label: "Contractor Pay", href: "/portal/contractor-pay", icon: ReceiptText, resource: "ContractorInvoice" },
 ];
 
+/**
+ * Agents and their run log. One sidebar row; Runs is where the needs-a-human
+ * queue lives, so it is a tab beside the list rather than a second row.
+ */
+export const AGENT_TABS: NavTab[] = [
+  { label: "Agents", href: "/portal/agents", icon: Bot, resource: "Agent" },
+  { label: "Runs", href: "/portal/agents/runs", icon: ListChecks, resource: "Agent" },
+];
+
 /** Every route an item owns — its own plus its tabs'. Used for highlighting. */
 export function navRoutes(item: NavItem): string[] {
   return [item.href, ...(item.tabs ?? []).map((t) => t.href)];
@@ -116,6 +127,18 @@ export const PORTAL_NAV: NavItem[] = [
   { label: "Payroll", href: "/portal/payroll", icon: Wallet, resource: "Payroll", group: "money" },
   { label: "Bookkeeping", href: "/portal/bookkeeping", icon: Calculator, resource: "Bookkeeping", group: "money" },
   { label: "Reports", href: "/portal/reports", icon: BarChart3, resource: "Report", group: "money" },
+  // Read by role for owner, admin and accounting; a manager only with the Agents
+  // access switch, which is an override `can()` honours. `roles` stops a stale
+  // override on any other role from drawing the item — the pages refuse it too.
+  {
+    label: "Agents",
+    href: "/portal/agents",
+    icon: Bot,
+    resource: "Agent",
+    roles: ["super_admin", "admin", "accounting", "manager"],
+    tabs: AGENT_TABS,
+    group: "admin",
+  },
   { label: "Team", href: "/portal/team", icon: UserCog, resource: "User", group: "admin" },
   { label: "Settings", href: "/portal/settings", icon: Settings, resource: "Settings", group: "admin" },
 ];

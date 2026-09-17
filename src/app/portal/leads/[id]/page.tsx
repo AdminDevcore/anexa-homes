@@ -120,6 +120,7 @@ import { currentFormatters } from "@/lib/format-server";
 import { serviceTypeLabel, serviceTypeOptions } from "@/lib/service-types";
 import { utcToZonedWallClock } from "@/lib/tz";
 import { daysInStage } from "@/lib/stage-status";
+import { stageProgress } from "@/lib/stage-progress";
 
 /** Ground metres to the centimetre. See `propertyArray`. */
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -1335,28 +1336,27 @@ export default async function LeadDetailPage({
     position: st.position,
     color: st.color,
     isLost: st.isLost,
+    isActionRequired: st.isActionRequired,
   }));
 
   const summaryCards: SummaryCard[] = [];
   {
-    const stageIndex = lead.pipeline
-      ? lead.pipeline.stages.findIndex((s) => s.id === lead.stage?.id)
-      : -1;
     // The shared helper, not an inline Date.now(): the purity lint rule bans
     // calling an impure function during render, and this is the same figure the
     // pipeline board and the SLA alert job already compute.
     const inStage = daysInStage(lead.stageChangedAt, lead.createdAt);
-    // Progress counts the stages a deal moves THROUGH. Cancelled lives in the
-    // pipeline but is a dead end, and counting it made a 21-stage roofing job
-    // read "step 4 of 22". A cancelled deal gets no step at all.
-    const liveStages = (lead.pipeline?.stages ?? []).filter((s) => !s.isLost);
-    const showStep = stageIndex >= 0 && !lead.stage?.isLost;
+    // Progress counts the stages a deal moves THROUGH, with the progress bar's
+    // own maths (lib/stage-progress.ts). Cancelled is a dead end and an
+    // action-required stage is a side-state, so neither is a step: a deal parked
+    // in QC Failed keeps the step it had reached. A cancelled deal gets no step.
+    const progress = stageProgress(lead.pipeline?.stages ?? [], lead.stage?.id ?? null);
+    const showStep = progress.currentIndex >= 0 && !progress.isCancelled;
     if (lead.stage) {
       summaryCards.push({
         label: "Current stage",
         value: lead.stage.name,
         hint: [
-          showStep ? `Step ${stageIndex + 1} of ${liveStages.length}` : null,
+          showStep ? `Step ${progress.step} of ${progress.liveCount}` : null,
           `${inStage}d in stage`,
         ]
           .filter(Boolean)

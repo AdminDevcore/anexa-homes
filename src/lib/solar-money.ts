@@ -1162,6 +1162,17 @@ export type ThirdPartyBreakdown = {
   /** Real installed watts. There is no system price, but there is a system. */
   systemWatts: number;
   year1CostCents: number;
+  /**
+   * What the LAST year of the term bills.
+   *
+   * Because the first year is not the deal. A 3.99% escalator over thirty years
+   * ends up charging half as much again as it started, and a screen that quotes
+   * only year one has told a homeowner the smallest number in the agreement and
+   * nothing else. Equal to `year1CostCents` when the escalator is nought and
+   * the panels never degrade, which is the only case where one figure is the
+   * whole story.
+   */
+  finalYearCostCents: number;
   /** Total the customer pays across the term, with the escalator applied. */
   lifetimeCostCents: number;
   /** Blended effective rate over the term, in mills. */
@@ -1174,6 +1185,7 @@ export function priceThirdParty(input: ThirdPartyInput, a: SolarAssumptions): Th
   let lifetimeCostCents = 0;
   let lifetimeKwh = 0;
   let year1CostCents = 0;
+  let finalYearCostCents = 0;
 
   for (let year = 1; year <= years; year++) {
     const escalation = Math.pow(1 + input.escalatorPct / 100, year - 1);
@@ -1188,12 +1200,14 @@ export function priceThirdParty(input: ThirdPartyInput, a: SolarAssumptions): Th
           (input.monthlyPaymentCents ?? 0) * 12 * escalation;
 
     if (year === 1) year1CostCents = Math.round(yearCost);
+    if (year === years) finalYearCostCents = Math.round(yearCost);
     lifetimeCostCents += yearCost;
   }
 
   return {
     systemWatts: Math.round(input.systemSizeKwDc * 1000),
     year1CostCents,
+    finalYearCostCents,
     lifetimeCostCents: Math.round(lifetimeCostCents),
     effectiveRateMills: lifetimeKwh > 0 ? (lifetimeCostCents * 10) / lifetimeKwh : 0,
   };

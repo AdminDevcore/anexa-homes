@@ -15,6 +15,7 @@ import { resolvePropertyValue } from "@/server/modules/property";
 import { importOwnerRecords, type OwnerRowMapping, type OwnerImportResult } from "@/server/modules/property/owner-records";
 import { getSkipTraceProvider, type OwnerResult } from "@/server/modules/skiptrace/provider";
 import { resolveStageForAppointment } from "@/server/modules/leads/staging";
+import { guardedStageId } from "@/server/modules/pipeline/stage-guard";
 import { resolveOwningRepId } from "@/server/modules/leads/owning-rep";
 import { recordStageEntry } from "@/server/modules/pipeline/stage-history";
 import {
@@ -413,6 +414,19 @@ export async function convertKnockToLeadAction(
     }
   }
 
+  // A door-knock deal starts at the front of the pipeline — asked like every
+  // other placement, so a pipeline reordered in Settings cannot start it past
+  // M1 Funding or Contract Signed. See pipeline/stage-guard.ts.
+  const startPlacement = await guardedStageId({
+    companyId: me.companyId,
+    actor: me,
+    lead: { id: null, vertical: await getActiveVertical(me), stageId: null },
+    resolvedStageId: pipeline?.stages[0]?.id ?? null,
+    explicitStageId: null,
+    fallbackStageId: null,
+  });
+  const startStageId = startPlacement.ok ? startPlacement.stageId : null;
+
   // Prefill from captured homeowner contact when the dialog didn't supply names.
   const contactParts = (knock.contactName ?? "").trim().split(/\s+/).filter(Boolean);
   // The lead is owned by the knocker's sales rep (canvasser → rep funnel).
@@ -437,7 +451,7 @@ export async function convertKnockToLeadAction(
       lng: knock.lng,
       geocodedAt: new Date(),
       pipelineId: pipeline?.id ?? null,
-      stageId: pipeline?.stages[0]?.id ?? null,
+      stageId: startStageId,
       sourceId: source.id,
       assignedRepId: ownerRepId,
       createdById: me.userId,
@@ -449,7 +463,7 @@ export async function convertKnockToLeadAction(
     select: { id: true },
   });
 
-  await recordStageEntry({ leadId: lead.id, stageId: pipeline?.stages[0]?.id ?? null, movedById: me.userId });
+  await recordStageEntry({ leadId: lead.id, stageId: startStageId, movedById: me.userId });
 
   await prisma.knock.update({ where: { id: knock.id }, data: { leadId: lead.id } });
   await prisma.knockEvent.create({
@@ -555,11 +569,21 @@ export async function convertKnockToAppointmentAction(
       },
     });
     if (lead) {
-      const stageId = await resolveStageForAppointment({
+      const resolvedStageId = await resolveStageForAppointment({
         pipelineId: lead.pipelineId,
         candidateStageId: lead.stageId,
         hasAppointment: true,
       });
+      // Automatic, as on the lead form: a re-stage that would cross M1 Funding or
+      // Contract Signed is not applied, and the booking still saves.
+      const placement = await guardedStageId({
+        companyId: me.companyId,
+        actor: me,
+        lead: { id: lead.id, vertical: lead.vertical, stageId: lead.stageId },
+        resolvedStageId,
+        explicitStageId: null,
+      });
+      const stageId = placement.ok ? placement.stageId : lead.stageId;
       // Booking again from the map on a deal that already had a time moves it.
       const move = await planLeadAppointmentMove(me.companyId, lead, when);
       await prisma.lead.update({

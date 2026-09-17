@@ -16,6 +16,8 @@ import { TeamMemberActions } from "@/components/portal/team-member-actions";
 import { MemberTeamCard } from "@/components/portal/member-team-card";
 import { MemberPayStructure } from "@/components/portal/member-pay-structure";
 import { RepVendorLink } from "@/components/portal/rep-vendor-link";
+import { AgentsAccessCard } from "@/components/portal/agents/agents-access-card";
+import { AGENT_ACCESS_ROLE } from "@/server/modules/agents/access";
 import { prisma } from "@/server/db/client";
 import { allowedVerticals, isActiveVertical, DEFAULT_VERTICAL } from "@/lib/vertical";
 import { companyVerticals, userVerticals } from "@/server/auth/vertical";
@@ -108,6 +110,13 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
         prisma.bookkeepingVendor.findFirst({ where: { companyId: user.companyId, userId: detail.id }, select: { id: true } }),
       ])
     : [[], null];
+
+  // The Agents access switch: the owner's decision, offered only on a manager
+  // (modules/agents/access.ts says why it is a person and not a role).
+  // `detail.agentsAccess` is the derived switch off the override column, read
+  // by getUserDetail. Note it is NOT `detail.permissions`, which is the role's
+  // display summary rendered further down this same page.
+  const showAgentsAccess = user.role === "super_admin" && detail.role === AGENT_ACCESS_ROLE;
 
   const links = [
     { label: "Assigned appointments", value: detail.activity.assignedLeads, href: "/portal/leads" },
@@ -331,6 +340,8 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
             verticals={liveVerticals}
             showOverrides={showOverrides}
           />
+
+          {showAgentsAccess && <AgentsAccessCard userId={detail.id} name={detail.name} on={detail.agentsAccess} />}
 
           {showFull && (
             <div className="rounded-xl border border-border bg-card p-5">

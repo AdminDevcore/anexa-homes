@@ -1,5 +1,5 @@
 import { prisma } from "@/server/db/client";
-import { buildTimeline, type StageEventRow, type Timeline } from "@/lib/stage-history";
+import { buildTimeline, isStageMoveVia, type StageEventRow, type Timeline } from "@/lib/stage-history";
 
 /**
  * The cycle-time timeline for one deal, ready to render.
@@ -65,7 +65,7 @@ export async function leadStageTimeline(lead: {
     enteredAt: e.enteredAt.toISOString(),
     exitedAt: e.exitedAt ? e.exitedAt.toISOString() : null,
     movedBy: e.movedBy ? `${e.movedBy.firstName} ${e.movedBy.lastName}`.trim() : null,
-    via: e.via === "automation" || e.via === "signature" || e.via === "document" ? e.via : null,
+    via: isStageMoveVia(e.via) ? e.via : null,
   }));
 
   return buildTimeline(rows, {

@@ -8,10 +8,12 @@ import { QualifyAction, QualifyNote, hasQualifyAction } from "./qualify-button";
 import type { QualifyOffer } from "@/lib/proposal-qualify";
 import {
   optionMonthlyCents,
+  optionSavings,
   quotedTotalCents,
   type ProposalPaymentOption,
 } from "@/lib/solar-proposal";
 import { usd } from "./format";
+import { withoutDealerFee } from "@/lib/solar-lender-product";
 
 /**
  * The close: one system, and every way this household can pay for it.
@@ -71,6 +73,28 @@ export function PaymentMenu({
   const monthly = optionMonthlyCents(selected, creditsApplied);
 
   /**
+   * WHERE A PPA'S MONTHLY COMES FROM, in the household's own numbers.
+   *
+   * Every other option on this menu quotes a figure somebody agreed to: a loan
+   * payment, a lease payment, a price. A PPA's is arithmetic — the roof's
+   * output at a rate per kilowatt-hour — and printing the answer without the
+   * sum leaves the one number on the page that cannot be checked, sitting under
+   * a heading that says "on average" without saying an average of what.
+   *
+   * Read off the frozen year-one row rather than recomputed, like everything
+   * else here: the sentence has to divide into the figure beside it.
+   */
+  const ppaBasis =
+    f.product === "ppa" && f.rateMillsPerKwh != null
+      ? (() => {
+          const year1 = optionSavings(selected, creditsApplied).years[0];
+          return year1 && year1.productionKwh > 0
+            ? { productionKwh: year1.productionKwh, rateMillsPerKwh: f.rateMillsPerKwh }
+            : null;
+        })()
+      : null;
+
+  /**
    * THE OFFER BELONGS TO THE QUOTED OPTION AND TO NOTHING ELSE.
    *
    * The application carries this deal's price, term and lender — the ones on
@@ -119,7 +143,7 @@ export function PaymentMenu({
                 How you pay
               </p>
               <p className="mt-1.5 font-display text-xl font-semibold leading-snug">
-                {selected.label}
+                {withoutDealerFee(selected.label)}
               </p>
             </>
           )}
@@ -147,6 +171,19 @@ export function PaymentMenu({
             />
           ) : (
             <Line k="Due at completion" v={usd(quotedTotalCents(f) ?? 0)} strong />
+          )}
+
+          {/* One template literal, not a row of {expr} fragments: JSX drops the
+              whitespace between an expression and the text after it, and this
+              sentence is read by a homeowner checking our arithmetic. */}
+          {ppaBasis && (
+            <p className="-mt-1 text-[11px] leading-relaxed text-neutral-500">
+              {`${ppaBasis.productionKwh.toLocaleString()} kWh a year × $${(
+                ppaBasis.rateMillsPerKwh / 1000
+              ).toFixed(3)} per kWh ÷ 12 months. You pay for the power the roof makes, so no two months are the same${
+                f.escalatorPct ? `, and the rate rises ${f.escalatorPct}% a year` : ""
+              }.`}
+            </p>
           )}
 
           {/* THE PRICE, not the paper. On a deal carrying a programme
@@ -240,7 +277,7 @@ function OptionPicker({
         >
           {options.map((o) => (
             <option key={o.key} value={o.key}>
-              {o.label}
+              {withoutDealerFee(o.label)}
               {optionMonthlyCents(o, creditsApplied) != null
                 ? ` — ${usd(optionMonthlyCents(o, creditsApplied)!, 0)}/mo`
                 : ""}
