@@ -99,6 +99,19 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     if (!inVertical) return new NextResponse("Not found", { status: 404 });
   }
 
+  /* ── A FILE ON A LEDGER TRANSACTION IS BOOKKEEPING DATA ────────────────
+   * Receipts (bookkeeping/actions.ts) and pay stubs (payroll/post-bookkeeping.ts)
+   * hang off a Transaction with no deal, project or conversation. They are read
+   * by the Bookkeeping permission alone (super_admin and accounting) and never
+   * by role: the admin branch below would hand them to every admin, and the
+   * staff branch would refuse accounting, who owns the books, for not having a
+   * deal. So the permission decides, and a file that passes is served without
+   * falling into either branch.
+   */
+  if (file.transactionId && !can(user, "read", "Bookkeeping")) {
+    return new NextResponse("Forbidden", { status: 403 });
+  }
+
   // There is no customer branch here any more. Homeowners have no accounts in
   // this product, so every authenticated reader is staff and goes through the
   // scope check below.
@@ -108,7 +121,9 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     !file.conversationId &&
     // A private file has already passed its own owner/admin check above; falling
     // into the staff branch would then reject the owner for not having a deal.
-    file.scope !== "private"
+    file.scope !== "private" &&
+    // A transaction file has already passed its Bookkeeping check above.
+    !file.transactionId
   ) {
     // Staff must own the file's deal: verify its lead/project is within their scope
     // (a rep can't fetch another rep's file, an installer only their crew's jobs).

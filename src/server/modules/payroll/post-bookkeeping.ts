@@ -192,8 +192,9 @@ export async function postRunToBookkeeping(companyId: string, runId: string, act
           mimeType: "application/pdf",
           size: stub.size,
           // Payroll is a company module and the stub hangs off a GL transaction,
-          // so it follows the ledger rather than a workspace. Access is still
-          // gated by who can open that transaction, which is accounting only.
+          // so it follows the ledger rather than a workspace. Opening it is
+          // gated by Bookkeeping read (super_admin and accounting), which the
+          // file route checks for any file carrying a transactionId.
           scope: "company",
           transactionId: txn.id,
           uploadedById: actorId,
