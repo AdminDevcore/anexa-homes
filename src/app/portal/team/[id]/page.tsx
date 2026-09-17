@@ -17,6 +17,8 @@ import { MemberTeamCard } from "@/components/portal/member-team-card";
 import { MemberPayStructure } from "@/components/portal/member-pay-structure";
 import { RepVendorLink } from "@/components/portal/rep-vendor-link";
 import { AgentsAccessCard } from "@/components/portal/agents/agents-access-card";
+import { MemberMfaCard } from "@/components/portal/member-mfa-card";
+import { mfaStatus } from "@/server/auth/mfa";
 import { AGENT_ACCESS_ROLE } from "@/server/modules/agents/access";
 import { prisma } from "@/server/db/client";
 import { allowedVerticals, isActiveVertical, DEFAULT_VERTICAL } from "@/lib/vertical";
@@ -117,6 +119,13 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
   // by getUserDetail. Note it is NOT `detail.permissions`, which is the role's
   // display summary rendered further down this same page.
   const showAgentsAccess = user.role === "super_admin" && detail.role === AGENT_ACCESS_ROLE;
+
+  // The second factor, and the lost-phone path. Not queried at all for a viewer
+  // who would not be shown it. Removing one is OWNER-ONLY and never your own —
+  // a factor you can strip yourself protects nothing — and both rules are
+  // enforced in resetEnrollment rather than by this flag, which only draws.
+  const mfa = showFull ? await mfaStatus(detail.id) : null;
+  const canResetMfa = user.role === "super_admin" && !isSelf;
 
   const links = [
     { label: "Assigned appointments", value: detail.activity.assignedLeads, href: "/portal/leads" },
@@ -342,6 +351,17 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ id:
           />
 
           {showAgentsAccess && <AgentsAccessCard userId={detail.id} name={detail.name} on={detail.agentsAccess} />}
+
+          {mfa && (
+            <MemberMfaCard
+              userId={detail.id}
+              name={detail.name}
+              enrolled={mfa.enrolled}
+              pending={mfa.pending}
+              recoveryCodesRemaining={mfa.recoveryCodesRemaining}
+              canReset={canResetMfa}
+            />
+          )}
 
           {showFull && (
             <div className="rounded-xl border border-border bg-card p-5">

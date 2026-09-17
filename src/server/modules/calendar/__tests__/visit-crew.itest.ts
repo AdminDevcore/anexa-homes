@@ -33,6 +33,7 @@ const INSPECT_AT = new Date("2026-09-24T15:00:00Z");
 
 let companyId: string;
 let leadId: string;
+let projectId: string;
 let installerA: string; // on the install
 let installerB: string; // on the inspection
 let installerC: string; // on neither
@@ -96,6 +97,7 @@ async function resetFixtures() {
       inspectionAt: INSPECT_AT,
     },
   });
+  projectId = project.id;
 
   await raw.projectAssignee.createMany({
     data: [
@@ -142,13 +144,23 @@ describe("a visit lands on the calendar of the people on it", () => {
     expect(events[0].subtitle).toBe("9 Ray Rd, Dallas");
   });
 
-  it("the deal opens for the office and not for the crew", async () => {
-    // Being named on Tuesday's install is not admission to the homeowner's
-    // contract. A null href is a hidden button, not a link that 404s.
+  it("the deal opens for the office, and the crew gets the job instead", async () => {
+    /**
+     * Being named on Tuesday's install is still not admission to the
+     * homeowner's contract — but the crew is no longer sent nowhere.
+     *
+     * This asserted `null` until `77237d0`, which gave the installer the JOB
+     * page: where the visit is, when it is, and the slot to drop an invoice on
+     * it. That is the whole of what being on a visit entitles someone to, and
+     * it is a different page from the deal, which is the point. The customer
+     * record stays closed; only the destination changed.
+     */
     const office = await calendarFor(user(owner, "super_admin"));
     expect(office[0].href).toBe(`/portal/leads/${leadId}`);
     const crew = await calendarFor(user(installerA, "installer"));
-    expect(crew[0].href).toBeNull();
+    expect(crew[0].href).toBe(`/portal/jobs/${projectId}`);
+    // …and emphatically NOT the deal.
+    expect(crew[0].href).not.toBe(`/portal/leads/${leadId}`);
   });
 
   it("un-assigning takes the visit back off that person's calendar", async () => {

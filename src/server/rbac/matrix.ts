@@ -21,6 +21,11 @@ export const ROLES = [
   "marketing",
   "installer",
   "accounting",
+  // Listed here, and not only in GRANTS, because this list is what the ratchet
+  // tests iterate. A role missing from it holds whatever it holds while
+  // `export-grants.test.ts` passes vacuously — which is the opposite of what
+  // that file is for.
+  "accountant_readonly",
 ] as const;
 
 /**
@@ -58,6 +63,12 @@ export const RESOURCES = [
   "Canvassing", // door-to-door knocking + territories
   "StormIntelligence", // NOAA/SPC storm data targeting (canvassing companion)
   "Bookkeeping", // lightweight ledger / P&L (accounting + owner only)
+  // MOVING MONEY OUT, deliberately NOT folded into Bookkeeping. `accounting`
+  // holds Bookkeeping: ALL, so gating payments there would have granted "can
+  // send money" to everyone who already had `manage` on the ledger — privilege
+  // granted by inheritance rather than by decision. Reading the books and
+  // paying a vendor are different powers and are named separately.
+  "Payment",
   "Knowledge", // training library / knowledge base (role-gated)
   "Scope", // scope-of-work job cost calculator (costs management-only)
   "Proposal", // customer-facing roofing presentation / proposal builder
@@ -99,6 +110,11 @@ export const STAFF_ROLES: Role[] = [
   "marketing",
   "installer",
   "accounting",
+  // The outside CPA is staff for the purpose of reaching the portal at all —
+  // they log in, so `isStaff` must be true or nothing renders. What they may
+  // actually DO is decided entirely by GRANTS below, which is read/export on
+  // two resources and silence everywhere else.
+  "accountant_readonly",
 ];
 
 export const ADMIN_ROLES: Role[] = ["super_admin", "admin"];
@@ -135,6 +151,7 @@ export function isAdmin(role: Role): boolean {
 // and `roleCan` reads a missing entry as "no grants" — deny by default.
 const GRANTS: Partial<Record<Role, Grant>> = {
   super_admin: {
+    Payment: ALL,
     Chat: ALL,
     Canvassing: ALL,
     StormIntelligence: ALL,
@@ -290,12 +307,65 @@ const GRANTS: Partial<Record<Role, Grant>> = {
     ContractorInvoice: ["read", "export", "update", "approve"],
     Report: ["read", "export"],
     Bookkeeping: ALL,
+    // Raise a payment, and approve one — but NOT `delete`: a payment that moved
+    // is reversed, never erased. Holding both `create` and `approve` does not
+    // let one person do both on the SAME payment; maker-checker is enforced in
+    // code, because a role cannot express "somebody other than you".
+    Payment: ["create", "read", "update", "approve"],
     Knowledge: ["read"],
     Scope: ["read"],
     Proposal: ["read"],
     // Reads agents and their runs. Running and resolving belong to owners
     // and admins by role, and to managers with the Agents access switch.
     Agent: ["read"],
+  },
+
+  /**
+   * THE OUTSIDE CPA. ONE resource, two verbs, and nothing else.
+   *
+   * Everything an accountant actually needs — P&L, balance sheet, trial
+   * balance, general ledger, 1099 totals, reconciliation history — is a
+   * BOOKKEEPING artifact, and lives under `Bookkeeping`.
+   *
+   * `Report` WAS granted here and has been deliberately taken away. It reads
+   * like the financial-reports permission and is not: it is the gate on the
+   * reports hub, which is mostly the sales floor — Funnel, Lead Sources,
+   * Canvassing, Rep Scorecard, Delinquency, Claims, A/R Aging, Production.
+   * Granting it handed an outside party customer names, addresses and per-rep
+   * performance, which is the very thing refusing `Project: ["read"]` was meant
+   * to prevent. It also does not stop at the hub: each of those pages gates
+   * itself on `can(user, "read", "Report")` independently, so hiding the cards
+   * would still have left every URL openable — ten pages and twenty export/PDF
+   * routes. Withholding the resource denies all of them at once, including the
+   * ones nobody has written yet. `cpa-report-visibility.test.ts` pins it.
+   *
+   * `Project: ["read"]` was considered and deliberately refused: it would hand
+   * an outside party the entire deal pipeline, with customer names and
+   * addresses, to answer questions the statements already answer. Every extra
+   * resource here is a real widening of what leaves the building.
+   *
+   * `create` IS DELIBERATELY ABSENT, and not only because this role is
+   * read-only. `row-scope-boundary.test.ts` allows
+   * `books/actions.ts#postManualEntryAction` to take a projectId without a
+   * per-viewer scope check, on the stated grounds that everyone holding
+   * `Bookkeeping:create` sees every job in the company. Granting create here
+   * would silently make that entry false.
+   */
+  accountant_readonly: {
+    Bookkeeping: ["read", "export"],
+    /**
+     * Payments are readable, and this is a narrower grant than it looks.
+     *
+     * `Report` was refused this role because it gates some thirty sales-floor
+     * routes carrying customer and rep-by-name data. `Payment` gates exactly
+     * one surface, and it is squarely accounting's: every payment is ALREADY
+     * visible to this role as a journal entry in the ledger they can read, so
+     * withholding it would hide nothing and merely break the page an outside
+     * accountant needs to reconcile accounts payable.
+     *
+     * Read and export only. Nothing here can raise or approve a payment.
+     */
+    Payment: ["read", "export"],
   },
 };
 

@@ -23,6 +23,14 @@ enum Role {
   marketing
   installer
   accounting
+  /// The outside CPA. Reads and exports the books and the reports, and can do
+  /// NOTHING else — see the grants in rbac/matrix.ts, which are the definition.
+  ///
+  /// A separate role rather than a flag on `accounting`, because the difference
+  /// is not a preference that could be toggled off by accident: this person is
+  /// outside the company, and every write verb they do not hold is one they can
+  /// never be granted by a settings screen.
+  accountant_readonly
   customer
 }
 
@@ -376,6 +384,12 @@ model Company {
   transactions             Transaction[]
   bookkeepingCategories    BookkeepingCategory[]
   bookkeepingVendors       BookkeepingVendor[]
+  ledgerAccounts           LedgerAccount[]
+  journalEntries           JournalEntry[]
+  bankAccounts             BankAccount[]
+  bankReconciliations      BankReconciliation[]
+  accountingPeriodLock     AccountingPeriodLock?
+  financeAuditEvents       FinanceAuditEvent[]
   knowledgeCategories      KnowledgeCategory[]
   scopeOfWorks             ScopeOfWork[]
   scopeLines               ScopeLine[]
@@ -405,6 +419,19 @@ model Company {
   solarDealComps     SolarDealComp[]
   chargebacks        Chargeback[]
   payrollAdjustments PayrollAdjustment[]
+
+  bankConnections      BankConnection[]
+  bankFeedTransactions BankFeedTransaction[]
+  webhookEvents        WebhookEvent[]
+  bankRules            BankRule[]
+
+  bills          Bill[]
+  lenderFundings LenderFunding[]
+
+  payees        Payee[]
+  payments      Payment[]
+  paymentEvents PaymentEvent[]
+  userMfa       UserMfa[]
 
   @@map("companies")
   solarContractUnlocks SolarContractUnlock[]
@@ -446,9 +473,11 @@ model CompanySettings {
   // falls back to DEFAULT_CLAIM_STATUSES in code. The key is frozen on create so
   // renaming a status never breaks the code that keys off it (scope gating).
   claimStatuses              Json     @default("[]")
-  // Bookkeeping integration (bank / QuickBooks). Key stored for the connector.
-  bookkeepingProvider        String? // "quickbooks" | "plaid" | "manual"
-  bookkeepingApiKey          String?
+  // `bookkeepingProvider` / `bookkeepingApiKey` were here: a picker between
+  // "quickbooks", "plaid" and "manual", plus a key. Nothing ever read either to
+  // do anything — no sync ran and no transaction was ever fetched — while the
+  // bookkeeping page told the owner "Connected · plaid". A real bank connection
+  // is a BankConnection row with an encrypted token and a live status.
   // Weekly open-task reminder digest (cron). On by default; toggled in Settings.
   weeklyTaskRemindersEnabled Boolean  @default(true)
   // Weekly "overdue jobs" digest to managers/admins (cron). On by default; toggled in Settings.
@@ -650,6 +679,10 @@ model User {
   chargebacks             Chargeback[]         @relation("ChargebackUser")
   payrollAdjustments      PayrollAdjustment[]  @relation("PayrollAdjustmentUser")
   pipelineFilterViews     PipelineFilterView[] @relation("PipelineFilterViewCreator")
+
+  /// Second factor. Optional on the model and REQUIRED in code for the finance
+  /// roles, because a column cannot express "required only to move money".
+  mfa UserMfa?
 
   @@unique([companyId, email])
   @@unique([companyId, employeeNo])
@@ -1162,6 +1195,8 @@ model Lead {
   @@index([setterId])
   @@index([companyId, status])
   @@index([companyId, vertical], map: "leads_companyId_industry_idx")
+  lenderFundings LenderFunding[]
+
   @@map("leads")
   solarContractUnlocks SolarContractUnlock[]
 
@@ -1244,11 +1279,14 @@ model Project {
   contractorPays   ContractorPay[]
   activityLogs     ActivityLog[]
   costs            ProjectCost[]
+  journalLines     JournalLine[]
 
   @@unique([companyId, projectNumber])
   @@index([companyId, status])
   @@index([companyId, managerId])
   @@index([companyId, vertical])
+  bills Bill[]
+
   @@map("projects")
 }
 
@@ -1615,6 +1653,11 @@ model FileAsset {
   // Bookkeeping: a receipt / invoice attached to a transaction.
   transactionId       String?
   transaction         Transaction?       @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  // Substantiation for a ledger entry: the pay stub behind a payroll posting,
+  // the receipt behind an expense. `transactionId` above is the single-entry
+  // ledger's version of the same idea and stays until that table is retired.
+  journalEntryId      String?
+  journalEntry        JournalEntry?      @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
   uploadedById        String?
   uploadedBy          User?              @relation(fields: [uploadedById], references: [id])
   createdAt           DateTime           @default(now())
@@ -2282,11 +2325,21 @@ model Invoice {
   invoiceNumber String
   status        InvoiceStatus @default(draft)
   amount        Int           @default(0) // cents
+  /// The date the invoice was ISSUED, which is the date its A/R entry is
+  /// dated. Deliberately not `createdAt`: an invoice for January entered in
+  /// February is January revenue, and dating it by when somebody typed it in
+  /// would move income into the wrong period and shift the trial balance.
+  issuedAt      DateTime      @default(now())
   dueAt         DateTime?
   paidAt        DateTime?
   notes         String?
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
+
+  /// The A/R entry this invoice posted as. Null means it has not been
+  /// posted to the journal — a draft, or a row that predates the ledger.
+  journalEntryId String?       @unique
+  journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
 
   @@unique([companyId, invoiceNumber])
   @@index([companyId, projectId])
@@ -2699,6 +2752,12 @@ model BookkeepingVendor {
   notes         String?
   createdAt     DateTime @default(now())
 
+  journalLines JournalLine[]
+  bankRules    BankRule[]
+
+  bills  Bill[]
+  payees Payee[]
+
   @@index([companyId])
   @@map("bookkeeping_vendors")
 }
@@ -2761,6 +2820,632 @@ model Reconciliation {
 
   @@index([companyId, account])
   @@map("reconciliations")
+}
+
+// ---------------------------------------------------------------------------
+// DOUBLE-ENTRY LEDGER — the QuickBooks replacement.
+// docs/architecture/books-build.md is the source of truth for every decision
+// here. One legal entity, ONE set of books, split by the `vertical` tag that
+// sits on the LINE, so a single entry can carry lines for both departments.
+// ---------------------------------------------------------------------------
+
+/// The leading digit of an account number decides its class, and the class
+/// decides the normal balance and which statement the account lands on.
+/// 1000 asset · 2000 liability · 3000 equity · 4000 income · 5000 job costs ·
+/// 6000 operating · 7000 other income · 8000 other expense.
+enum LedgerAccountType {
+  asset // debit normal
+  liability // credit normal
+  equity // credit normal
+  income // credit normal
+  cogs // debit normal — job costs
+  expense // debit normal — operating
+  other_income // credit normal
+  other_expense // debit normal
+}
+
+/// What KIND of account this is within its class. The balance sheet groups by
+/// subtype, and only `bank` / `credit_card` accounts can carry a bank feed or
+/// be reconciled. Adding an account is adding a ROW; nothing branches on a
+/// specific number anywhere in the code.
+enum LedgerAccountSubtype {
+  bank
+  undeposited_funds
+  accounts_receivable
+  other_current_asset
+  fixed_asset
+  accounts_payable
+  credit_card
+  other_current_liability
+  long_term_liability
+  equity
+  income
+  cogs
+  expense
+  other_income
+  other_expense
+}
+
+model LedgerAccount {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  /// 4-digit, unique per company. A STRING, not an Int: it is an identifier
+  /// that happens to be digits, and sub-accounts want "6110" next to "6110.1".
+  number  String
+  name    String
+  type    LedgerAccountType
+  subtype LedgerAccountSubtype
+
+  parentId String?
+  parent   LedgerAccount?  @relation("LedgerAccountTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children LedgerAccount[] @relation("LedgerAccountTree")
+
+  description String?
+  /// Where this account lands on the tax return ("Schedule C: Advertising").
+  /// Free text, mapped per company — the CPA decides, not the code.
+  taxLine     String?
+
+  active Boolean @default(true)
+
+  /// A stable handle for the accounts the CODE must be able to find —
+  /// "accounts_receivable", "opening_balance_equity", "commissions_payable".
+  /// Non-null means SYSTEM-PROTECTED: it cannot be deleted or re-typed, because
+  /// a posting routine resolves it by this key rather than by name or number.
+  systemKey String?
+
+  lines       JournalLine[]
+  bankAccount BankAccount?
+  /// Rules that post here. Cascading with the account is deliberate: a rule
+  /// whose destination is gone is not a rule, and leaving it would silently
+  /// stop categorising the rows it used to catch.
+  bankRules   BankRule[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, number])
+  @@unique([companyId, systemKey])
+  @@index([companyId, type])
+  @@index([companyId, active])
+  /// Bills that expense to this account.
+  billExpenses Bill[]
+
+  @@map("ledger_accounts")
+}
+
+/// `void` is a STATE, never a deletion. Voiding writes a reversing entry and
+/// leaves both in the books, because a ledger nobody can delete from is the
+/// only kind an auditor can trust.
+enum JournalEntryStatus {
+  posted
+  void
+}
+
+model JournalEntry {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  date DateTime
+  memo String?
+
+  /// What produced this entry — "manual", "payroll", "bank_feed", "invoice",
+  /// "bill", "payment", "opening_balance", "funding", "transfer".
+  sourceType String
+  /// The producer's own key for it. For payroll this is the EXISTING per-line
+  /// key (`payroll:<runId>:item:<id>`), kept verbatim so a run that already
+  /// posted is recognised rather than posted twice.
+  sourceId   String?
+
+  status JournalEntryStatus @default(posted)
+
+  /// The void relationship, both ways. A reversing entry points at what it
+  /// reverses; the original points back at the reversal that killed it.
+  reversesId  String?       @unique
+  reverses    JournalEntry? @relation("JournalReversal", fields: [reversesId], references: [id], onDelete: SetNull)
+  reversedBy  JournalEntry? @relation("JournalReversal")
+  voidReason  String?
+  voidedAt    DateTime?
+  voidedById  String?
+
+  /// Set only when the entry was posted INTO a locked period, which is
+  /// super-admin-only and must say why.
+  lockOverrideReason String?
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  lines       JournalLine[]
+  attachments FileAsset[]
+  /// The feed rows this entry was made from, kept as the evidence for it.
+  feedTransactions BankFeedTransaction[]
+
+  /// The duplicate guard. Postgres treats NULLs as distinct, so any number of
+  /// hand-written entries (sourceId NULL) coexist while a keyed source can
+  /// never post the same thing twice.
+  @@unique([companyId, sourceType, sourceId])
+  @@index([companyId, date])
+  @@index([companyId, status])
+  /// What this entry recorded, where the record is a document of its own.
+  /// Each is a distinct model, so none of these relations needs a name.
+  invoices       Invoice[]
+  bills          Bill[]
+  lenderFundings LenderFunding[]
+
+  /// Payment is the exception to the note above: it points here TWICE — once
+  /// for the entry that sent the money and once for the entry that reverses it
+  /// when the bank returns it — so both relations must be named.
+  paymentEntry    Payment? @relation("PaymentEntry")
+  paymentReversal Payment? @relation("PaymentReversal")
+
+  @@map("journal_entries")
+}
+
+model JournalLine {
+  id        String       @id @default(uuid())
+  companyId String
+  entryId   String
+  entry     JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  accountId String
+  /**
+   * Cascade, deliberately, and it is NOT a licence to delete accounts.
+   *
+   * Without it the FK defaults to Restrict, and deleting a COMPANY fails:
+   * the cascade from company reaches ledger_accounts while journal_lines still
+   * reference them, so Postgres refuses the whole delete. That surfaced as a
+   * test teardown failing on `journal_lines_accountId_fkey`, but it would have
+   * been a company-deletion failure in production just the same.
+   *
+   * An account with postings is still never deleted — `systemKey` marks the
+   * protected ones and the rest are DEACTIVATED, which the posting service
+   * refuses to post to. That rule lives in code, where it can explain itself,
+   * rather than in an FK that can only say "restrict".
+   */
+  account   LedgerAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  /// Exactly one of these is non-zero, enforced by the posting service — which
+  /// is the ONLY thing allowed to write this table. Integer cents, never a
+  /// float and never a signed amount: a debit and a credit are different facts,
+  /// not opposite signs of one.
+  debitCents  Int @default(0)
+  creditCents Int @default(0)
+
+  /// Shared-but-segmented: reads are never filtered by vertical so the books
+  /// stay consolidated, but every line is tagged so the P&L breaks out by
+  /// department. The tag is on the LINE so one entry can carry both. Null =
+  /// genuinely company-level (office rent).
+  vertical Vertical?
+
+  /// REAL foreign keys, both of them. Job profitability and the 1099 report are
+  /// only as good as their joins, and a free-text vendor name was exactly how
+  /// the old single-entry ledger made "Expenses by vendor" unanswerable.
+  projectId String?
+  project   Project?           @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  vendorId  String?
+  vendor    BookkeepingVendor? @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+
+  memo     String?
+  position Int     @default(0)
+
+  /// Cleared against a bank statement. A reconciled line is LOCKED: it cannot
+  /// be voided or re-dated without first undoing the reconciliation it settled
+  /// in, because a closed reconciliation is the evidence that the books and the
+  /// bank agreed on a date.
+  reconciledAt         DateTime?
+  bankReconciliationId String?
+  bankReconciliation   BankReconciliation? @relation(fields: [bankReconciliationId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, accountId])
+  @@index([companyId, projectId])
+  @@index([companyId, vendorId])
+  @@index([entryId])
+  @@index([bankReconciliationId])
+  @@map("journal_lines")
+}
+
+/// A completed bank reconciliation: one statement (account + date + ending
+/// balance) matched against the lines it cleared.
+///
+/// UNDO IS LOGGED, NEVER DELETED. Undoing sets `status = "undone"` with who and
+/// why, and releases its lines — the row stays, because "this month was
+/// reconciled and then un-reconciled" is exactly the fact an auditor asks about.
+model BankReconciliation {
+  id            String      @id @default(uuid())
+  companyId     String
+  company       Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  bankAccountId String
+  bankAccount   BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+
+  statementDate         DateTime
+  /// What the bank said the account held on that date.
+  statementBalanceCents Int
+  /// Everything already reconciled before this one — the authoritative start.
+  beginningBalanceCents Int
+  clearedCount          Int    @default(0)
+
+  /// "completed" | "undone"
+  status       String    @default("completed")
+  undoneAt     DateTime?
+  undoneById   String?
+  undoneReason String?
+
+  createdById String?
+  createdAt   DateTime      @default(now())
+  lines       JournalLine[]
+
+  @@index([companyId, bankAccountId, statementDate])
+  @@map("bank_reconciliations")
+}
+
+enum BankAccountKind {
+  checking
+  savings
+  credit_card
+}
+
+/// A real-world account, sitting on top of exactly one LedgerAccount. More
+/// banks, savings accounts and cards are added as ROWS — there is no enum
+/// branch and no code change. A credit card is a LIABILITY.
+model BankAccount {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  ledgerAccountId String        @unique
+  ledgerAccount   LedgerAccount @relation(fields: [ledgerAccountId], references: [id], onDelete: Cascade)
+
+  name        String
+  institution String?
+  /// Last 4 only. The full number is never stored.
+  mask        String?
+  kind        BankAccountKind @default(checking)
+
+  /// A line from this account is tagged with this unless someone changes it.
+  defaultVertical Vertical?
+
+  /// Posted as a real entry against Opening Balance Equity the moment it is
+  /// set, so the account's book balance is right from its first day.
+  openingBalanceCents Int       @default(0)
+  openingBalanceDate  DateTime?
+
+  active Boolean @default(true)
+
+  /// The feed this account arrives on, when it is connected to one. NULL is a
+  /// perfectly ordinary account somebody keys by hand or imports from a file —
+  /// a bank connection is an optional convenience, never the source of truth.
+  bankConnectionId String?
+  bankConnection   BankConnection? @relation(fields: [bankConnectionId], references: [id], onDelete: SetNull)
+  /// The provider's id for this account, so a feed row can find its home.
+  providerAccountId String?
+
+  reconciliations  BankReconciliation[]
+  feedTransactions BankFeedTransaction[]
+  bankRules        BankRule[]
+  payments         Payment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, providerAccountId])
+  @@index([companyId, active])
+  @@index([bankConnectionId])
+  @@map("bank_accounts")
+}
+
+/// A live connection to a financial institution.
+///
+/// SHARED, not tagged: a bank login belongs to the legal entity, exactly like
+/// the BankAccount and the chart of accounts it feeds. There is no sense in
+/// which a set of credentials is "solar" or "roofing" — the department shows up
+/// on the JournalLine that the feed eventually produces, which is where the
+/// TAGGED class already puts it.
+model BankConnection {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  /// Which implementation of the provider interface produced this.
+  provider String @default("plaid")
+  /// The provider's id for the connection ("item" at Plaid).
+  providerItemId String
+  institutionId   String?
+  institutionName String?
+
+  /// THE CREDENTIAL, encrypted at rest with FINANCE_ENC_KEY (`v1.fin:iv:tag:ct`).
+  /// Never logged, never returned to a client, never sent to the browser. Read
+  /// only by the sync and only on the server.
+  accessTokenEnc String
+
+  /// The provider's opaque sync cursor. Persisted after EVERY page, so a sync
+  /// that dies half way resumes instead of re-ingesting two years of history.
+  cursor String?
+
+  status       BankConnectionStatus @default(active)
+  /// Set when the institution needs the user to re-authenticate. The feed keeps
+  /// its history and its cursor; only the credential is refreshed.
+  needsReconnectAt DateTime?
+  lastSyncedAt DateTime?
+  /// The last failure, for the operator. Never contains the access token.
+  lastError    String?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  accounts     BankAccount[]
+  transactions BankFeedTransaction[]
+
+  /// One row per connection per company. Reconnecting REUSES this row rather
+  /// than creating a second one — a fresh connection would start its own cursor
+  /// and re-ingest everything as if it were new.
+  @@unique([companyId, provider, providerItemId])
+  @@index([companyId, status])
+  @@map("bank_connections")
+}
+
+/// A transaction as the BANK reported it — raw, unposted, and not yet accounting.
+///
+/// SHARED for the same reason as the connection: this row arrives from outside
+/// and has no department until a human or a rule decides one. Stamping it with
+/// whichever workspace happened to be active when the cron ran would record a
+/// provenance that means nothing. The vertical lands on the JournalLine.
+///
+/// The row is kept forever, including after it posts, because it is the evidence
+/// for the entry: "why is this in the books?" is answered by the bank's own
+/// description, amount and date, not by our summary of them.
+model BankFeedTransaction {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  bankConnectionId String?
+  bankConnection   BankConnection? @relation(fields: [bankConnectionId], references: [id], onDelete: SetNull)
+
+  /// Resolved from `providerAccountId` at ingest. Null means the feed reported
+  /// an account nobody has mapped yet, which is visible rather than dropped.
+  bankAccountId String?
+  bankAccount   BankAccount? @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+
+  /// The provider's own id. THE dedupe key — an at-least-once feed will deliver
+  /// the same transaction more than once.
+  providerTransactionId String
+  providerAccountId     String
+
+  /// The date the BANK posted it, which is what a statement shows and what
+  /// reconciliation matches on.
+  postedAt DateTime
+  /// SIGNED cents, account holder's view: negative left the account. The
+  /// provider adapter normalises this; see bank-feeds/types.ts.
+  amountCents Int
+  description String
+  merchantName String?
+  /// A pending row is shown but never posted: posting an authorisation books
+  /// money that may never move.
+  pending     Boolean @default(false)
+  /// The provider's category guess. Advisory — it never selects an account on
+  /// its own.
+  category    String[]
+  checkNumber String?
+  currency    String   @default("USD")
+
+  status BankFeedTransactionStatus @default(review)
+
+  /// The entry this became, once someone accepted it.
+  journalEntryId String?
+  journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
+
+  /// Set when the bank RETRACTS a transaction it already reported. The row stays
+  /// and any entry made from it is reversed, never deleted.
+  removedAt DateTime?
+
+  decidedById String?
+  decidedAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([companyId, providerTransactionId])
+  @@index([companyId, status, postedAt])
+  @@index([bankAccountId, postedAt])
+  @@index([journalEntryId])
+  /// The lender deposit this row turned out to be, if it was one.
+  lenderFunding LenderFunding?
+
+  @@map("bank_feed_transactions")
+}
+
+/// An inbound webhook delivery, recorded before it is acted on.
+///
+/// SHARED: infrastructure, with no department and often no company until the
+/// payload has been read. Exists so that an at-least-once delivery becomes
+/// exactly-once processing — the unique `eventId` is the whole mechanism.
+model WebhookEvent {
+  id       String @id @default(uuid())
+  provider String
+
+  /// The provider's event id, or a key DERIVED from the verified body when the
+  /// provider does not send one (Plaid does not). Unique per provider, which is
+  /// what makes a replayed delivery a no-op.
+  eventId String
+
+  /// Resolved from the payload where possible; a delivery for an unknown
+  /// connection is still recorded rather than discarded.
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  code    String
+  payload Json
+
+  status      WebhookEventStatus @default(received)
+  receivedAt  DateTime           @default(now())
+  processedAt DateTime?
+  error       String?
+
+  @@unique([provider, eventId])
+  @@index([status, receivedAt])
+  @@map("webhook_events")
+}
+
+/// A user's standing instruction for categorising feed rows.
+///
+/// SHARED, like everything else in the feed: the rule belongs to the company's
+/// bookkeeping, and the department lands on the JournalLine it produces.
+///
+/// A rule SUGGESTS by default. `autoPost` exists because a bookkeeper with two
+/// hundred identical fuel receipts a month genuinely wants them booked without
+/// touching each one — but it is off unless asked for, because a wrong rule that
+/// posts is a wrong rule that has already written to the books, and undoing it
+/// means a reversing entry for every row it touched.
+model BankRule {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  name    String
+  enabled Boolean @default(true)
+  /// Lower runs first. Ties break on createdAt, so ordering is total and a rule
+  /// cannot silently depend on insertion order.
+  priority Int    @default(100)
+
+  /// Which account this rule watches. NULL means every account.
+  bankAccountId String?
+  bankAccount   BankAccount? @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+
+  /// money_in / money_out / any — matched against the SIGN of the row, so a
+  /// rule for "Shell" cannot accidentally catch a refund from Shell.
+  direction BankRuleDirection @default(any)
+
+  /// Case-insensitive match against description and merchant name.
+  matchText String?
+  matchType BankRuleMatch @default(contains)
+
+  /// Optional bounds, in cents, on the ABSOLUTE amount.
+  minAmountCents Int?
+  maxAmountCents Int?
+
+  /// What the rule does: the account to post to, and how to tag it.
+  accountId String
+  account   LedgerAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  vertical  Vertical?
+  vendorId  String?
+  vendor    BookkeepingVendor? @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+  memo      String?
+
+  /// Post without asking. Off unless explicitly enabled — see the note above.
+  autoPost Boolean @default(false)
+
+  /// Bookkeeping, not accounting: how often this rule has fired, so a rule that
+  /// matches nothing (or everything) is visible rather than merely suspected.
+  timesApplied Int       @default(0)
+  lastAppliedAt DateTime?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([companyId, enabled, priority])
+  @@index([bankAccountId])
+  @@index([accountId])
+  @@map("bank_rules")
+}
+
+enum BankRuleDirection {
+  money_in
+  money_out
+  any
+}
+
+enum BankRuleMatch {
+  contains
+  equals
+  starts_with
+}
+
+enum BankConnectionStatus {
+  active
+  /// The institution wants the user to re-authenticate. History and cursor are
+  /// intact; only the credential is stale.
+  needs_reconnect
+  /// Deliberately disconnected by a user. Rows are kept; the feed stops.
+  disconnected
+  /// Repeated failures that are not an auth problem.
+  error
+}
+
+enum BankFeedTransactionStatus {
+  /// In the "for review" queue, awaiting a decision.
+  review
+  /// Accepted and posted to the journal.
+  posted
+  /// Matched to an entry that already existed, rather than creating a new one.
+  matched
+  /// Deliberately not accounting — a transfer already booked from the other
+  /// side, or a personal charge on a mixed account.
+  excluded
+  /// Retracted by the bank.
+  removed
+}
+
+enum WebhookEventStatus {
+  received
+  processed
+  /// Verified and recorded, but we do not act on this code.
+  ignored
+  failed
+}
+
+/// One lock date per company: everything dated on or before `lockedThrough` is
+/// closed. Only a super_admin may post into it, and only with a reason, which
+/// lands on the entry AND in the finance audit.
+model AccountingPeriodLock {
+  id        String  @id @default(uuid())
+  companyId String  @unique
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  lockedThrough DateTime
+  note          String?
+  updatedById   String?
+  updatedAt     DateTime @updatedAt
+  createdAt     DateTime @default(now())
+
+  @@map("accounting_period_locks")
+}
+
+/// Who changed what money, when, and what it was before.
+///
+/// Separate from ActivityLog on purpose: this is the auditor's table. It is
+/// queried as a report, it keeps before/after images, and it must not be
+/// diluted by the ~18 call sites a minute that write ordinary activity.
+model FinanceAuditEvent {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  /// Null when the actor is the SYSTEM (an auto-matched lender deposit). The
+  /// label then says which routine acted, so "nobody" is never the answer.
+  actorId    String?
+  actorLabel String?
+
+  /// "journal.post" | "journal.void" | "period.lock" | "account.update" | …
+  action     String
+  entityType String
+  entityId   String?
+
+  before Json?
+  after  Json?
+  reason String?
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, createdAt])
+  @@index([companyId, entityType, entityId])
+  @@map("finance_audit_events")
 }
 
 // ---------------------------------------------------------------------------
@@ -3951,6 +4636,25 @@ model SolarLender {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  /// ── HOW THIS LENDER PAYS US ────────────────────────────────────────────
+  /// A lender does not wire the contract price. It wires the contract MINUS
+  /// its dealer fee, usually in stages, and the stages differ by lender. These
+  /// describe the expectation so a deposit can be recognised when it lands.
+  ///
+  /// Null everywhere = no expectation is formed, and deposits are decided by
+  /// hand. That is the honest default: guessing a funding schedule would
+  /// produce confident "short by $X" figures for a lender nobody configured.
+  fundsNetOfDealerFee Boolean @default(true)
+  /// Share of the net released at each stage, 0–1. They should sum to 1.
+  fundingM1Pct Float?
+  fundingM2Pct Float?
+  /// How far a deposit may sit from the expectation and still auto-match.
+  /// Lenders round, withhold small holdbacks and net off adders; an exact-cents
+  /// rule would send every real deposit to manual review.
+  fundingToleranceCents Int @default(0)
+
+  fundings LenderFunding[]
 
   @@index([companyId, isActive])
   @@map("solar_lenders")
@@ -5597,6 +6301,361 @@ model NovaPendingAction {
 
   @@index([companyId, actorId, status])
   @@map("nova_pending_actions")
+}
+
+// ---------------------------------------------------------------------------
+// Payables and lender funding (Phase 4)
+// ---------------------------------------------------------------------------
+
+/// What a bill is doing right now.
+///
+/// `open` is the working state: accrued into Accounts Payable and owed. `paid`
+/// means a payment entry settled it. `void` is reached by reversal, never by
+/// deleting the row — a bill that was entered and cancelled is part of the
+/// record of what happened.
+enum BillStatus {
+  draft
+  open
+  paid
+  void
+}
+
+/// When a lender releases money. Solar lenders pay in stages, not in one wire.
+enum FundingMilestone {
+  /// Usually on install.
+  m1
+  /// Usually on permission to operate.
+  m2
+  /// A single-stage lender, or the last release on a multi-stage one.
+  final
+  /// Anything else — a holdback release, a correction.
+  other
+}
+
+/// Where a funding stands against what was expected.
+///
+/// `short` and `over` are recorded rather than corrected. A deposit that does
+/// not match the expectation is a fact about the lender, and the difference is
+/// posted to Dealer Fees or Funding Variance so it appears on the P&L instead
+/// of being absorbed into revenue where nobody would ever see it.
+enum FundingStatus {
+  expected
+  received
+  short
+  over
+  void
+}
+
+/// A VENDOR BILL — what we owe, and since when.
+///
+/// TAGGED, exactly as `Invoice` is: stamped with the department on write and
+/// never filtered on read, so the consolidated books still roll up while the
+/// P&L can break out by vertical. A bill with no vertical is genuinely
+/// company-level — office rent, a software subscription.
+///
+/// The bill links only its ACCRUAL entry. Paying it posts a separate journal
+/// entry keyed `bill:<id>:payment`, so the two events stay two events: a bill
+/// entered in March and paid in May is an expense in March and a movement of
+/// cash in May, which is the whole reason accrual accounting exists.
+model Bill {
+  id        String    @id @default(uuid())
+  companyId String
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  vertical  Vertical?
+
+  vendorId String
+  /// Restrict, not Cascade: deleting a vendor must not silently delete the
+  /// record of money owed to them. The bill is evidence.
+  vendor   BookkeepingVendor @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+
+  billNumber  String
+  status      BillStatus @default(open)
+  amountCents Int        @default(0)
+
+  /// The date the VENDOR billed, which is the date the expense belongs to.
+  billedAt DateTime
+  dueAt    DateTime?
+  paidAt   DateTime?
+
+  /// The job this is a cost of, when it is one.
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  /// Which expense or COGS account it lands in.
+  expenseAccountId String?
+  expenseAccount   LedgerAccount? @relation(fields: [expenseAccountId], references: [id], onDelete: SetNull)
+
+  /// The A/P accrual this bill posted as.
+  journalEntryId String?       @unique
+  journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
+
+  memo        String?
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  payments Payment[]
+
+  @@unique([companyId, billNumber])
+  @@index([companyId, status, dueAt])
+  @@index([vendorId])
+  @@map("bills")
+}
+
+// ── Phase 5: money movement ──────────────────────────────────────────────────
+// All five models below are SHARED (absent from models.ts), deliberately.
+// Paying a vendor is a company act, not a departmental one: the DEPARTMENT was
+// already decided when the bill was accrued, and the ledger lines carry it.
+// Tagging the payment too would invite a payment whose vertical disagrees with
+// the expense it settles.
+
+enum PaymentStatus {
+  draft
+  submitted
+  approved
+  sent
+  settled
+  returned
+  failed
+  cancelled
+}
+
+enum PaymentMethod {
+  ach
+  check
+  card
+  other
+}
+
+enum PayeeAccountType {
+  checking
+  savings
+}
+
+/// WHERE money goes, kept separate from WHO we owe.
+///
+/// A vendor is a party we owe; a payee is a set of bank details. Keeping them
+/// apart means correcting bank details never rewrites bill history, and one
+/// vendor can be paid different ways over time without any bill changing.
+model Payee {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  vendorId String?
+  vendor   BookkeepingVendor? @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+
+  name  String
+  email String?
+
+  /// Encrypted at rest with FINANCE_ENC_KEY (server/lib/crypto.ts). Never
+  /// selected into a list query, never logged, never returned to a browser.
+  routingNumberEnc String?
+  accountNumberEnc String?
+
+  /// The only part ever displayed: enough to confirm the right account,
+  /// useless to whoever reads it over a shoulder.
+  accountLast4 String?
+  accountType  PayeeAccountType?
+
+  /// COOLING-OFF. Changing bank details starts a clock, and payments are
+  /// refused until it expires. Invoice-redirection fraud works by changing the
+  /// account and paying immediately, before anyone reads the email again.
+  bankDetailsUpdatedAt   DateTime?
+  bankDetailsUpdatedById String?
+
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payments Payment[]
+
+  @@unique([companyId, name])
+  @@index([companyId, active])
+  @@map("payees")
+}
+
+/// One payment, and everything an auditor would ask about it.
+model Payment {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  payeeId String
+  /// Restrict, not Cascade: a payee with payment history is deactivated, never
+  /// deleted. Money that moved must stay answerable to who received it.
+  payee   Payee  @relation(fields: [payeeId], references: [id], onDelete: Restrict)
+
+  billId String?
+  bill   Bill?   @relation(fields: [billId], references: [id], onDelete: SetNull)
+
+  amountCents Int
+  method      PaymentMethod @default(ach)
+  status      PaymentStatus @default(draft)
+  memo        String?
+
+  bankAccountId String?
+  bankAccount   BankAccount? @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+
+  /// MAKER AND CHECKER ARE DIFFERENT PEOPLE. Enforced in code and recorded
+  /// here, so an audit reads both off the row instead of reconstructing them.
+  createdById  String?
+  submittedAt  DateTime?
+  approvedById String?
+  approvedAt   DateTime?
+
+  /// The TOTP step consumed by the approval, so one code cannot approve two
+  /// payments inside its 30-second window.
+  approvalMfaStep BigInt?
+
+  providerId         String?
+  providerTransferId String?
+  sentAt             DateTime?
+  settledAt          DateTime?
+  returnedAt         DateTime?
+  returnCode         String?
+  returnReason       String?
+
+  journalEntryId String?       @unique
+  journalEntry   JournalEntry? @relation("PaymentEntry", fields: [journalEntryId], references: [id], onDelete: SetNull)
+
+  /// A returned payment is REVERSED, never unposted. The money genuinely left
+  /// and genuinely came back, and both facts belong in the ledger.
+  reversalEntryId String?       @unique
+  reversalEntry   JournalEntry? @relation("PaymentReversal", fields: [reversalEntryId], references: [id], onDelete: SetNull)
+
+  events PaymentEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// NULLs are distinct in Postgres, so every unsent payment coexists while a
+  /// provider's transfer id can only ever be recorded once.
+  @@unique([companyId, providerTransferId])
+  @@index([companyId, status, createdAt])
+  @@index([payeeId])
+  @@map("payments")
+}
+
+/// Every webhook the provider sent, recorded once.
+model PaymentEvent {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  paymentId String?
+  payment   Payment? @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  /// The provider's own event id, UNIQUE per provider. This is what makes
+  /// redelivery safe: a webhook that arrives three times is applied once.
+  providerId      String
+  providerEventId String
+  kind            String
+  payload         Json
+  receivedAt      DateTime @default(now())
+
+  @@unique([providerId, providerEventId])
+  @@index([companyId, receivedAt])
+  @@map("payment_events")
+}
+
+/// A user's second factor.
+model UserMfa {
+  id        String  @id @default(uuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId    String  @unique
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Encrypted with FINANCE_ENC_KEY. A plaintext TOTP secret is a second
+  /// password file that also silently defeats the factor it is meant to be.
+  secretEnc String
+
+  /// Null until a correct code proves the phone really holds the secret, so an
+  /// abandoned enrolment never counts as protection.
+  enrolledAt DateTime?
+
+  /// The last TOTP step accepted. A code is valid for its whole 30-second
+  /// window; without this it can simply be used again inside that window.
+  lastStep BigInt?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  recoveryCodes MfaRecoveryCode[]
+
+  @@map("user_mfa")
+}
+
+/// What gets someone back in when the phone is gone. Stored as SHA-256 of the
+/// normalised code — never the code, which is written on paper and must be
+/// assumed to leak from the user's side.
+model MfaRecoveryCode {
+  id       String    @id @default(uuid())
+  mfaId    String
+  mfa      UserMfa   @relation(fields: [mfaId], references: [id], onDelete: Cascade)
+  codeHash String
+  usedAt   DateTime?
+
+  @@unique([mfaId, codeHash])
+  @@index([mfaId])
+  @@map("mfa_recovery_codes")
+}
+
+/// MONEY A LENDER OWES US ON A DEAL, AND WHAT ACTUALLY ARRIVED.
+///
+/// A financed solar deal is not paid by the customer; it is paid by the lender,
+/// net of the lender's dealer fee, usually in stages. This row is the
+/// expectation and its settlement side by side, so "we are owed $18,400 on this
+/// job" is a figure the books can state rather than something a person
+/// reconstructs from a bank statement.
+///
+/// TAGGED: a funding belongs to a department (solar today), stamped on write.
+///
+/// One row per deal per milestone — `@@unique([companyId, leadId, milestone])`
+/// — so a lender that wires M1 twice cannot create two open expectations, and
+/// re-running the expectation builder updates rather than duplicates.
+model LenderFunding {
+  id        String   @id @default(uuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  vertical  Vertical @default(solar)
+
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  lenderId String?
+  lender   SolarLender? @relation(fields: [lenderId], references: [id], onDelete: SetNull)
+
+  milestone     FundingMilestone @default(m1)
+  /// What the lender should send: contract less the dealer fee, times this
+  /// milestone's share. Zero when no expectation could be formed.
+  expectedCents Int              @default(0)
+  /// What actually arrived.
+  receivedCents Int              @default(0)
+  status        FundingStatus    @default(expected)
+
+  expectedAt DateTime?
+  receivedAt DateTime?
+
+  /// The bank row this was recognised from, kept as the evidence for it.
+  bankFeedTransactionId String?              @unique
+  bankFeedTransaction   BankFeedTransaction? @relation(fields: [bankFeedTransactionId], references: [id], onDelete: SetNull)
+
+  /// The entry that booked the deposit and its variance.
+  journalEntryId String?       @unique
+  journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
+
+  memo        String?
+  decidedById String?
+  decidedAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([companyId, leadId, milestone])
+  @@index([companyId, status])
+  @@index([leadId])
+  @@map("lender_fundings")
 }
 
 // ---------------------------------------------------------------------------

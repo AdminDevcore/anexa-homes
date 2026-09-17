@@ -18,6 +18,8 @@ import { generateOutcomeMessage } from "./gate";
 import { getPayStubData, getRunStubList, buildPayStubPdf } from "./paystub";
 import { postRunToBookkeeping } from "./post-bookkeeping";
 import { collectPayables } from "./payables";
+import { accruePayrollRun, payPayrollRun } from "@/server/modules/books/payroll-posting";
+import { listBankAccounts } from "@/server/modules/books/bank-accounts";
 
 function fail(error: string) {
   return { ok: false as const, error };
@@ -313,8 +315,26 @@ export async function approvePayrollRunAction(id: string) {
   if (!run) return fail("Run not found.");
   await prisma.payrollRun.update({ where: { id }, data: { status: "approved", approvedAt: new Date() } });
   await fireEvent({ companyId: user.companyId, event: "payroll_approved", actorId: user.userId });
+
+  // Approving is the moment the company OWES the money, so it is the moment the
+  // books have to say so: expense against a payable, per line. Waiting for the
+  // payment is what left an approved-but-unpaid run existing nowhere in the
+  // books at all. Best-effort, like the payment leg below — a booking fault must
+  // not leave a run stuck un-approved, and the accrual is idempotent per line,
+  // so re-approving posts only what is missing.
+  try {
+    await accruePayrollRun(user.companyId, id, {
+      kind: "user",
+      userId: user.userId,
+      role: user.role,
+    });
+  } catch (err) {
+    console.error("[payroll] accruePayrollRun failed", id, err);
+  }
+
   revalidatePath(`/portal/payroll/${id}`);
   revalidatePath("/portal/payroll");
+  revalidatePath("/portal/books");
   return ok();
 }
 
@@ -356,10 +376,59 @@ export async function markPayrollRunPaidAction(id: string) {
     console.error("[payroll] postRunToBookkeeping failed", id, err);
   }
 
+  /**
+   * And the same event in the JOURNAL: clear the payables, reduce the bank.
+   *
+   * `payPayrollRun` needs the account the money actually left, and a payroll run
+   * does not carry one — nothing in this flow ever asked. So it is resolved to
+   * the company's single active non-card account, and when that is ambiguous or
+   * missing the run is left ACCRUED BUT UNSETTLED for someone to settle from the
+   * Books screen.
+   *
+   * Guessing would be worse than leaving it: picking the wrong account
+   * understates one real balance and overstates another, and both read as
+   * perfectly ordinary until a reconciliation fails months later. A payable
+   * still sitting open is visible and self-explanatory.
+   *
+   * A card is excluded outright — payroll is not paid on a credit card, and if
+   * one were the only account left, "the only candidate" would be the wrong one.
+   */
+  try {
+    const accrual = await accruePayrollRun(user.companyId, id, {
+      kind: "user",
+      userId: user.userId,
+      role: user.role,
+    });
+    if (accrual.errors.length > 0) {
+      console.error("[payroll] accruePayrollRun incomplete at payment", id, accrual.errors);
+    }
+
+    const candidates = (await listBankAccounts(user.companyId)).filter(
+      (b) => b.active && b.kind !== "credit_card"
+    );
+    if (candidates.length === 1) {
+      const res = await payPayrollRun({
+        companyId: user.companyId,
+        runId: id,
+        bankAccountId: candidates[0].id,
+        date: new Date(),
+        actor: { kind: "user", userId: user.userId, role: user.role },
+      });
+      if (!res.ok) console.error("[payroll] payPayrollRun failed", id, res.error);
+    } else {
+      console.warn(
+        `[payroll] run ${id} accrued but not settled: ${candidates.length} candidate bank accounts, need exactly 1`
+      );
+    }
+  } catch (err) {
+    console.error("[payroll] journal payroll posting failed", id, err);
+  }
+
   revalidatePath(`/portal/payroll/${id}`);
   revalidatePath("/portal/payroll");
   revalidatePath("/portal/contractor-pay");
   revalidatePath("/portal/bookkeeping");
+  revalidatePath("/portal/books");
   return ok();
 }
 

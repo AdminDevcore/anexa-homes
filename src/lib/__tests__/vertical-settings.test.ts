@@ -25,7 +25,7 @@ const base = {
   weeklyTaskRemindersEnabled: true,
   businessHours: { mon: "8-5" },
   currencyCode: "USD",
-  bookkeepingApiKey: "secret",
+  rolePermissions: { accounting: ["Bookkeeping:read"] },
   verticalOverrides: {},
 };
 
@@ -83,11 +83,14 @@ describe("the overrides column is user-writable, so it is not trusted", () => {
   it("ignores shared-only fields smuggled into the JSON", () => {
     const s = {
       ...base,
-      verticalOverrides: { solar: { currencyCode: "EUR", bookkeepingApiKey: "stolen" } },
+      // `rolePermissions` replaces `bookkeepingApiKey` here: that column is gone
+      // with the fake bank-connection dialog, so it can no longer stand for
+      // "a shared-only field somebody smuggled into the JSON".
+      verticalOverrides: { solar: { currencyCode: "EUR", rolePermissions: { accounting: ["Payroll:manage"] } } },
     };
     const solar = applyVerticalOverrides(s, "solar")!;
     expect(solar.currencyCode).toBe("USD");
-    expect(solar.bookkeepingApiKey).toBe("secret");
+    expect(solar.rolePermissions).toEqual({ accounting: ["Bookkeeping:read"] });
   });
 
   it("ignores unknown keys entirely", () => {
@@ -134,7 +137,7 @@ describe("writing an override", () => {
   });
 
   it("refuses to write a shared-only field", () => {
-    const next = writeVerticalOverrides({}, "solar", { bookkeepingApiKey: "nope" });
+    const next = writeVerticalOverrides({}, "solar", { rolePermissions: { accounting: [] } });
     expect(next).toEqual({});
   });
 });

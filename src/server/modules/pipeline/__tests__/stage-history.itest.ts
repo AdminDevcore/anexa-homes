@@ -132,8 +132,25 @@ describe("recordStageEntry", () => {
     // A backdated write — a clock skew, a replayed job.
     await recordStageEntry({ leadId, stageId: stages["Contract Signed"], at: day(2) }, db);
 
+    /**
+     * Asserted over EVERY closed span rather than `rows[0]`.
+     *
+     * The clamp this test exists to verify is what makes `rows[0]` ambiguous:
+     * backdating to day(2) against a span opened at day(10) clamps the write
+     * forward, so the closed span's `exitedAt` and the new span's `enteredAt`
+     * are both day(10). `events()` orders by `enteredAt` alone, the two rows
+     * tie, and Postgres may return either first. When the still-open span won
+     * the tie, `rows[0].exitedAt` was null and this failed with a TypeError —
+     * intermittently, and only under the timing of a full suite run.
+     *
+     * The property was never about the first row. It is about all of them.
+     */
     const rows = await events();
-    expect(rows[0].exitedAt!.getTime()).toBeGreaterThanOrEqual(rows[0].enteredAt.getTime());
+    const closed = rows.filter((r) => r.exitedAt !== null);
+    expect(closed).toHaveLength(1);
+    for (const span of closed) {
+      expect(span.exitedAt!.getTime()).toBeGreaterThanOrEqual(span.enteredAt.getTime());
+    }
   });
 
   it("records who made each move, and what did when nobody did", async () => {

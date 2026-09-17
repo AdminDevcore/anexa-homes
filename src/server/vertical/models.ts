@@ -99,6 +99,16 @@ export const TAGGED_MODELS = [
   "ContractorPay",
   "Invoice",
   "ProjectCost",
+  // The double-entry ledger's line. Tagged, never scoped, for the reason this
+  // whole class exists: the departmental P&L must break a solar install's
+  // revenue out from a roofing one while the consolidated books stay whole.
+  //
+  // The tag is on the LINE and not on JournalEntry deliberately — one entry may
+  // carry lines for both departments (a single cheque paying a roofing sub and
+  // a solar sub), and an entry-level tag could not express that. JournalEntry,
+  // LedgerAccount, BankAccount and the audit tables are SHARED: one company,
+  // one chart of accounts, one set of books.
+  "JournalLine",
   // Deliberately NOT given a TAGGED_PROVENANCE entry: activity rows are written
   // on nearly every action, so a per-write lookup of the parent job would be a
   // real cost for no gain. Every call site already runs inside the action that
@@ -108,6 +118,23 @@ export const TAGGED_MODELS = [
   // records which workspace the assistant acted in, and an auditor granted both
   // workspaces reads it without toggling.
   "NovaAuditEvent",
+  // A vendor bill is departmental spend, tagged for the same reason Invoice is:
+  // the departmental P&L must tell a solar install's materials from a roofing
+  // one, while the consolidated books stay whole. A bill with no job — office
+  // rent, a software subscription — is genuinely company-level and keeps a null
+  // vertical, which is visible in both workspaces.
+  "Bill",
+  // Money a lender owes on a deal. Tagged rather than shared because a deposit
+  // belongs to the department that sold the work.
+  //
+  // Deliberately NOT given a TAGGED_PROVENANCE entry, and the reason is
+  // specific: provenance resolves a row's department by looking up a PROJECT,
+  // and this model hangs off a LEAD. Registering `leadId` there would hand a
+  // lead id to the project lookup, resolve nothing, and fall through to the
+  // ambient workspace while looking configured — worse than not registering it.
+  // The column is non-null with a solar default, and the model exists only for
+  // SolarLender deals, so the default is the honest answer.
+  "LenderFunding",
 ] as const;
 
 export type ScopedModel = (typeof SCOPED_MODELS)[number];

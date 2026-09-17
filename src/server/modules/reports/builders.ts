@@ -44,8 +44,23 @@ export const REPORT_TYPE_LABELS: Record<ReportType, string> = {
 
 const FINANCE_ROLES: Role[] = ["super_admin", "admin", "accounting"];
 
-/** Report types this role may view. */
+/**
+ * Report types this role may view.
+ *
+ * `operations` seeds the list for EVERY role. That was harmless while every
+ * role reaching the hub belonged to the sales floor — a role without a `Report`
+ * grant never got past the gate, so the seed was never read. It is an
+ * assumption, not a guarantee, and `accountant_readonly` is the role that broke
+ * it: an outside party with a finance grant and no business seeing
+ * appointments, closing rates or production by rep.
+ *
+ * The role now holds no `Report` grant at all (see matrix.ts), so this is the
+ * second of two independent reasons it sees nothing. It is written out rather
+ * than left to the resource gate because a seed that hands every future role
+ * the sales floor should say who it excludes.
+ */
 export function allowedReportTypes(role: Role): ReportType[] {
+  if (role === "accountant_readonly") return [];
   const types: ReportType[] = ["operations"];
   if (["super_admin", "admin", "accounting", "manager"].includes(role)) types.push("financial");
   if (FINANCE_ROLES.includes(role)) types.push("payroll");
@@ -100,6 +115,13 @@ export async function getScopeOptions(user: ReportUser): Promise<ScopeOption[]> 
       ...team.map((u) => ({ value: `rep:${u.id}`, label: `${u.firstName} ${u.lastName}`.trim() })),
     ];
   }
+  // The outside CPA is NOT leadership. The fallthrough below lists every rep and
+  // every manager BY NAME, which is a staff roster — an outside accountant has
+  // no reason to hold one, and the books do not need it.
+  if (user.role === "accountant_readonly") {
+    return [{ value: "company", label: "Whole company" }];
+  }
+
   // Finance / leadership: company + every rep + every manager's team.
   const [reps, managers] = await Promise.all([
     prisma.user.findMany({ where: { companyId: user.companyId, role: { in: ["sales_rep", "canvasser"] }, status: "active" }, orderBy: { firstName: "asc" }, select: { id: true, firstName: true, lastName: true } }),
@@ -154,6 +176,13 @@ export async function resolveScope(user: ReportUser, value?: string): Promise<Re
       userIds: ids,
       isCompany: false,
     };
+  }
+
+  // The outside CPA: company totals only, never one named employee. Without
+  // this the rep:/team: branches below would honour a hand-typed query string,
+  // and scope is taken from the URL.
+  if (user.role === "accountant_readonly") {
+    return { value: "company", label: "Whole company", leadWhere: base, userIds: null, isCompany: true };
   }
 
   // Finance / leadership.

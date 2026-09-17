@@ -13,6 +13,8 @@ import {
   MapPinned,
   CalendarDays,
   Calculator,
+  BookOpen,
+  Landmark,
   GraduationCap,
   Hammer,
   ReceiptText,
@@ -126,6 +128,8 @@ export const PORTAL_NAV: NavItem[] = [
   { label: "Commissions", href: "/portal/commissions", icon: DollarSign, resource: "Commission", tabs: PAY_TABS, group: "money" },
   { label: "Payroll", href: "/portal/payroll", icon: Wallet, resource: "Payroll", group: "money" },
   { label: "Bookkeeping", href: "/portal/bookkeeping", icon: Calculator, resource: "Bookkeeping", group: "money" },
+  { label: "Books", href: "/portal/books", icon: BookOpen, resource: "Bookkeeping", group: "money" },
+  { label: "Banking", href: "/portal/banking", icon: Landmark, resource: "Bookkeeping", group: "money" },
   { label: "Reports", href: "/portal/reports", icon: BarChart3, resource: "Report", group: "money" },
   // Read by role for owner, admin and accounting; a manager only with the Agents
   // access switch, which is an override `can()` honours. `roles` stops a stale

@@ -87,8 +87,6 @@ export type BookkeepingData = {
   invoices: BkInvoice[];
   jobFiles: BkFile[];
   reconciliations: BkReconciliation[];
-  connected: boolean;
-  provider: string | null;
   /**
    * Whether `transactions` above is the WHOLE ledger or just its newest page.
    *
@@ -126,7 +124,7 @@ export type BookkeepingData = {
 export const TRANSACTION_PAGE = 1000;
 
 export async function getBookkeepingData(companyId: string, period?: ReportPeriod): Promise<BookkeepingData> {
-  const [txns, categories, vendors, projects, settings, recons] = await Promise.all([
+  const [txns, categories, vendors, projects, recons] = await Promise.all([
     prisma.transaction.findMany({
       where: { companyId },
       orderBy: { date: "desc" },
@@ -153,7 +151,6 @@ export async function getBookkeepingData(companyId: string, period?: ReportPerio
       take: 300,
       select: { id: true, leadId: true, projectNumber: true, lead: { select: { id: true, firstName: true, lastName: true } } },
     }),
-    prisma.companySettings.findUnique({ where: { companyId }, select: { bookkeepingProvider: true, bookkeepingApiKey: true } }),
     prisma.reconciliation.findMany({ where: { companyId }, orderBy: { statementDate: "desc" }, take: 100 }),
   ]);
 
@@ -313,8 +310,6 @@ export async function getBookkeepingData(companyId: string, period?: ReportPerio
       clearedCount: r.clearedCount,
       createdAt: r.createdAt.toISOString(),
     })),
-    connected: !!settings?.bookkeepingApiKey,
-    provider: settings?.bookkeepingProvider ?? null,
     ledgerComplete: txns.length < TRANSACTION_PAGE,
     summary: {
       moneyIn,
