@@ -18,6 +18,10 @@ const eslintConfig = defineConfig([
     // all the same generated output — linting it reports tens of thousands of
     // problems in compiled chunks and buries the real ones.
     ".next-*/**",
+    // Generated vendor output: `postinstall` copies this verbatim out of
+    // pdfjs-dist, and it is tracked only so the worker ships without a build
+    // step. Linting a minified bundle yields 6 errors nobody can act on.
+    "public/pdf.worker.min.mjs",
   ]),
   // ---------------------------------------------------------------------
   // Vertical isolation guard: raw SQL bypasses the Prisma client extension

@@ -38,7 +38,23 @@ export default defineConfig({
     // same isolated schema. Tests that exercise real server modules pull it in
     // transitively; without this a helper deep in the call graph would quietly
     // read and write the dev database.
-    env: { DATABASE_URL: TEST_DATABASE_URL },
+    env: {
+      DATABASE_URL: TEST_DATABASE_URL,
+      /**
+       * `src/server/storage` captures `const DRIVER = process.env.STORAGE_DRIVER
+       * ?? "local"` at MODULE LOAD, so a test that sets it in its own body has
+       * already lost the race to its own hoisted imports. It must be set before
+       * any module evaluates, which is here.
+       *
+       * "db" is what production runs and what these suites assert on: putObject
+       * writes a `stored_files` row the retention sweep reads back. Under
+       * "local" the bytes go to disk, no row is written, and every such read
+       * fails P2025. Locally this arrived ambiently from .env, which is why
+       * retention.itest.ts passed for three months and failed the first time CI
+       * ran it — CI has no .env.
+       */
+      STORAGE_DRIVER: "db",
+    },
     // next-auth must be transformed by vite rather than loaded straight by
     // Node, so the "next/server" alias above actually applies to it.
     server: { deps: { inline: [/next-auth/] } },
