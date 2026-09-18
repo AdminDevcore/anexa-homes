@@ -66,8 +66,22 @@ function name(u: { firstName: string; lastName: string } | null): string | null 
   return u ? `${u.firstName} ${u.lastName}`.trim() : null;
 }
 
-/** What knocks a user may see: managers see all; reps see their own knocks
- *  plus blank pins in territories assigned to them. */
+/**
+ * What knocks a user may see.
+ *
+ * - `super_admin` / `admin`: the whole company.
+ * - `manager`: their TEAM only — their own knocks, their reps', the canvassers
+ *   under those reps, plus blank pins in territories assigned to them.
+ * - everyone else (rep): their own knocks, those logged by canvassers assigned
+ *   to them, and blank pins in any territory they are on (primary or multi-rep).
+ *
+ * This comment previously read "managers see all", which the code below has
+ * never done — only admins get the unscoped `{ companyId }` branch.
+ *
+ * Consequence worth knowing when a seeded manager seems to be missing pins: a
+ * manager with no territory of their own sees NO `not_knocked` dots at all, so
+ * they can legitimately see far fewer pins than one of their reps.
+ */
 export function knockScope(companyId: string, userId: string, role: Role): Prisma.KnockWhereInput {
   // Admins see the whole company.
   if (role === "super_admin" || role === "admin") return { companyId };
